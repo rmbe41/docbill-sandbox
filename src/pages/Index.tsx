@@ -205,7 +205,7 @@ const Index = () => {
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-        <div className="max-w-3xl mx-auto w-full px-4 pb-6 pointer-events-auto">
+        <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
           <ChatInput onSend={sendMessage} isLoading={isLoading} />
         </div>
       </div>
