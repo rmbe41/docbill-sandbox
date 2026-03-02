@@ -60,19 +60,20 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
 
   return (
     <div className="relative group">
-      {/* Soft glow on focus-within */}
-      <div className="absolute -inset-2 rounded-[28px] bg-foreground/5 blur-2xl opacity-0 group-focus-within:opacity-60 transition-opacity duration-500" />
+      {/* Purple glow */}
+      <div className="absolute -inset-3 rounded-full bg-purple-500/20 blur-2xl animate-pulse" />
+      <div className="absolute -inset-1.5 rounded-full bg-purple-400/10 blur-md" />
       <div
-        className="relative bg-white/15 dark:bg-card/10 backdrop-blur-2xl backdrop-saturate-200 border border-white/30 dark:border-white/10 rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.08),inset_0_0_0_1px_rgba(255,255,255,0.12)] px-3 py-3 sm:px-4 sm:py-4 lg:px-5 lg:py-5"
+        className="relative bg-white/15 dark:bg-card/10 backdrop-blur-2xl backdrop-saturate-200 border border-purple-300/30 dark:border-purple-400/20 rounded-full shadow-[0_0_20px_rgba(168,85,247,0.15),0_0_40px_rgba(168,85,247,0.08),inset_0_0_0_1px_rgba(255,255,255,0.12)] px-4 py-3 sm:px-5 sm:py-4"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleFileDrop}
       >
       {files.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-2">
+        <div className="flex flex-wrap gap-2 mb-2 px-2">
           {files.map((file, i) => (
             <div
               key={i}
-              className="flex items-center gap-1.5 bg-muted text-xs sm:text-sm px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md"
+              className="flex items-center gap-1.5 bg-muted text-xs sm:text-sm px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full"
             >
               <span className="truncate max-w-[150px]">{file.name}</span>
               <button onClick={() => removeFile(i)} className="text-muted-foreground hover:text-foreground">
@@ -83,13 +84,13 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
         </div>
       )}
 
-      <div className="flex items-end gap-2 sm:gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="flex-shrink-0 p-1.5 sm:p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mb-0.5"
+          className="flex-shrink-0 p-1.5 sm:p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
           title="Datei hochladen (PDF, JPEG, PNG, HEIC)"
         >
-          <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
+          <Paperclip className="w-5 h-5" />
         </button>
         <input
           ref={fileInputRef}
@@ -108,9 +109,9 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           placeholder="Beschreiben Sie die erbrachten Leistungen oder stellen Sie eine Frage zur GOÄ…"
           rows={1}
           className={cn(
-            "flex-1 resize-none bg-transparent rounded-xl px-3 py-2 text-sm",
-            "placeholder:text-muted-foreground focus:outline-none",
-            "min-h-[40px] sm:min-h-[44px] lg:min-h-[48px] max-h-[200px]"
+            "flex-1 resize-none bg-transparent px-2 py-2 text-base sm:text-lg",
+            "placeholder:text-muted-foreground/70 focus:outline-none",
+            "min-h-[44px] max-h-[200px]"
           )}
         />
 
@@ -118,15 +119,11 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           onClick={handleSubmit}
           disabled={isLoading || (!input.trim() && files.length === 0)}
           size="icon"
-          className="flex-shrink-0 rounded-xl h-9 w-9 sm:h-10 sm:w-10 lg:h-11 lg:w-11 mb-0.5"
+          className="flex-shrink-0 rounded-full h-10 w-10 sm:h-11 sm:w-11"
         >
           <Send className="w-4 h-4 sm:w-5 sm:h-5" />
         </Button>
       </div>
-
-      <p className="text-[10px] sm:text-xs text-muted-foreground mt-2 text-center">
-        PDF, JPEG, PNG oder HEIC per Drag & Drop oder Klammer-Symbol hochladen
-      </p>
     </div>
     </div>
   );
