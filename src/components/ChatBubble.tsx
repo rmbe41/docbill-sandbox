@@ -56,7 +56,7 @@ const ChatBubble = ({ message }: { message: ChatMessage }) => {
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
-          <div className="prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-chat-assistant-foreground prose-strong:text-foreground prose-code:text-accent prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs">
+          <div className="prose prose-sm max-w-none prose-headings:text-foreground prose-headings:mt-4 prose-headings:mb-2 prose-p:text-chat-assistant-foreground prose-strong:text-foreground prose-code:text-accent prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-table:text-xs prose-th:bg-muted prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:font-semibold prose-td:px-2 prose-td:py-1.5 prose-td:border-t prose-td:border-border prose-hr:my-3 prose-hr:border-border prose-li:my-0.5 prose-ul:my-1">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {message.content}
             </ReactMarkdown>
