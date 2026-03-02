@@ -61,9 +61,9 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
   return (
     <div className="relative">
       {/* Halo glow effect */}
-      <div className="absolute -inset-1.5 rounded-[28px] bg-gradient-to-r from-blue-400/25 via-purple-300/20 to-orange-300/25 blur-2xl opacity-60" />
+      <div className="absolute -inset-1 rounded-[24px] bg-gradient-to-r from-blue-400/25 via-purple-300/20 to-orange-300/25 blur-xl opacity-60" />
       <div
-        className="relative bg-white/50 dark:bg-card/40 backdrop-blur-xl backdrop-saturate-150 border border-white/40 dark:border-white/10 rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.1),0_0_0_1px_rgba(255,255,255,0.3)_inset] px-4 py-3"
+        className="relative bg-white/50 dark:bg-card/40 backdrop-blur-xl backdrop-saturate-150 border border-white/40 dark:border-white/10 rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.1),0_0_0_1px_rgba(255,255,255,0.3)_inset] px-3 py-2"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleFileDrop}
       >
@@ -72,7 +72,7 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           {files.map((file, i) => (
             <div
               key={i}
-              className="flex items-center gap-1.5 bg-muted text-sm px-2.5 py-1 rounded-md"
+              className="flex items-center gap-1.5 bg-muted text-xs px-2 py-0.5 rounded-md"
             >
               <span className="truncate max-w-[150px]">{file.name}</span>
               <button onClick={() => removeFile(i)} className="text-muted-foreground hover:text-foreground">
@@ -86,10 +86,10 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
       <div className="flex items-end gap-2">
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="flex-shrink-0 p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mb-0.5"
+          className="flex-shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mb-0.5"
           title="Datei hochladen (PDF, JPEG, PNG, HEIC)"
         >
-          <Paperclip className="w-5 h-5" />
+          <Paperclip className="w-4 h-4" />
         </button>
         <input
           ref={fileInputRef}
@@ -108,9 +108,9 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           placeholder="Beschreiben Sie die erbrachten Leistungen oder stellen Sie eine Frage zur GOÄ…"
           rows={1}
           className={cn(
-            "flex-1 resize-none bg-transparent rounded-xl px-4 py-2.5 text-sm",
+            "flex-1 resize-none bg-transparent rounded-xl px-3 py-2 text-xs",
             "placeholder:text-muted-foreground focus:outline-none",
-            "min-h-[40px] max-h-[160px]"
+            "min-h-[32px] max-h-[160px]"
           )}
         />
 
@@ -118,13 +118,13 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           onClick={handleSubmit}
           disabled={isLoading || (!input.trim() && files.length === 0)}
           size="icon"
-          className="flex-shrink-0 rounded-xl h-10 w-10 mb-0.5"
+          className="flex-shrink-0 rounded-xl h-8 w-8 mb-0.5"
         >
-          <Send className="w-4 h-4" />
+          <Send className="w-3.5 h-3.5" />
         </Button>
       </div>
 
-      <p className="text-[11px] text-muted-foreground mt-2 text-center">
+      <p className="text-[9px] text-muted-foreground mt-1.5 text-center">
         PDF, JPEG, PNG oder HEIC per Drag & Drop oder Klammer-Symbol hochladen
       </p>
     </div>
