@@ -1,1 +1,4 @@
 project_id = "bwnbntnyoxxcybelecxl"
+
+[functions.goae-chat]
+verify_jwt = false
