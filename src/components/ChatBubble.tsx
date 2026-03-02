@@ -7,7 +7,7 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  attachments?: { name: string; type: string }[];
+  attachments?: { name: string; type: string; previewUrl?: string }[];
 };
 
 const ChatBubble = ({ message }: { message: ChatMessage }) => {
@@ -38,12 +38,18 @@ const ChatBubble = ({ message }: { message: ChatMessage }) => {
           <div
             key={att.name}
             className={cn(
-              "flex items-center gap-2 mb-2 text-xs px-2.5 py-1.5 rounded-md",
+              "mb-2 rounded-md overflow-hidden",
               isUser ? "bg-primary-foreground/10" : "bg-muted"
             )}
           >
-            <FileText className="w-3.5 h-3.5" />
-            <span className="truncate">{att.name}</span>
+            {att.previewUrl ? (
+              <img src={att.previewUrl} alt={att.name} className="max-w-[200px] max-h-[200px] object-contain rounded-md" />
+            ) : (
+              <div className="flex items-center gap-2 text-xs px-2.5 py-1.5">
+                <FileText className="w-3.5 h-3.5" />
+                <span className="truncate">{att.name}</span>
+              </div>
+            )}
           </div>
         ))}
 

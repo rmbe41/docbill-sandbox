@@ -229,10 +229,34 @@ serve(async (req) => {
   }
 
   try {
-    const { messages } = await req.json();
+    const { messages, files } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
+    }
+
+    // Build multimodal messages if files are attached
+    const apiMessages: any[] = [{ role: "system", content: SYSTEM_PROMPT }];
+
+    for (const msg of messages) {
+      apiMessages.push({ role: msg.role, content: msg.content });
+    }
+
+    // If files are present, append them as image_url parts to the last user message
+    if (files && files.length > 0) {
+      const lastUserIdx = apiMessages.length - 1;
+      const lastMsg = apiMessages[lastUserIdx];
+      const contentParts: any[] = [{ type: "text", text: lastMsg.content || "Bitte analysiere die angehängten Dokumente und schlage passende GOÄ-Ziffern vor." }];
+
+      for (const file of files) {
+        const mimeType = file.type || "application/octet-stream";
+        contentParts.push({
+          type: "image_url",
+          image_url: { url: `data:${mimeType};base64,${file.data}` },
+        });
+      }
+
+      apiMessages[lastUserIdx] = { role: lastMsg.role, content: contentParts };
     }
 
     const response = await fetch(
@@ -245,10 +269,7 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: "google/gemini-2.5-flash",
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            ...messages,
-          ],
+          messages: apiMessages,
           stream: true,
         }),
       }
