@@ -248,6 +248,15 @@
   color: hsl(210 20% 80%);
 }
 
+/* ─── Table Scroll Wrapper ─── */
+
+.table-scroll-wrapper {
+  overflow-x: auto;
+  margin: 0.75rem -0.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+}
+
 /* ─── Tables ─── */
 
 .markdown-output table {
@@ -255,10 +264,10 @@
   font-size: 0.75rem;
   border-collapse: separate;
   border-spacing: 0;
-  border: 1px solid hsl(var(--border));
-  border-radius: 0.5rem;
-  overflow: hidden;
-  margin: 0.75rem 0;
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  min-width: 600px;
 }
 
 .markdown-output thead {
@@ -274,6 +283,7 @@
   letter-spacing: 0.04em;
   color: hsl(var(--foreground));
   border-bottom: 1px solid hsl(var(--border));
+  white-space: nowrap;
 }
 
 .markdown-output td {
@@ -291,20 +301,54 @@
   transition: background 0.15s;
 }
 
-.markdown-output thead th:first-child {
-  border-top-left-radius: 0.5rem;
+/* ─── Sticky first 3 columns ─── */
+
+.markdown-output th:nth-child(1),
+.markdown-output td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 2.5rem;
+  white-space: nowrap;
 }
 
-.markdown-output thead th:last-child {
-  border-top-right-radius: 0.5rem;
+.markdown-output th:nth-child(2),
+.markdown-output td:nth-child(2) {
+  position: sticky;
+  left: 2.5rem;
+  z-index: 2;
+  min-width: 3.5rem;
+  white-space: nowrap;
 }
 
-.markdown-output tbody tr:last-child td:first-child {
-  border-bottom-left-radius: 0.5rem;
+.markdown-output th:nth-child(3),
+.markdown-output td:nth-child(3) {
+  position: sticky;
+  left: 6rem;
+  z-index: 2;
+  min-width: 8rem;
+  box-shadow: 2px 0 4px hsl(var(--foreground) / 0.06);
 }
 
-.markdown-output tbody tr:last-child td:last-child {
-  border-bottom-right-radius: 0.5rem;
+/* Sticky column backgrounds */
+.markdown-output thead th:nth-child(-n+3) {
+  background: hsl(var(--muted));
+}
+
+.markdown-output tbody tr:nth-child(odd) td:nth-child(-n+3) {
+  background: hsl(var(--chat-assistant));
+}
+
+.markdown-output tbody tr:nth-child(even) td:nth-child(-n+3) {
+  background: hsl(var(--muted) / 0.3);
+}
+
+.dark .markdown-output tbody tr:nth-child(odd) td:nth-child(-n+3) {
+  background: hsl(var(--chat-assistant));
+}
+
+.dark .markdown-output tbody tr:nth-child(even) td:nth-child(-n+3) {
+  background: hsl(215 20% 14%);
 }
 
 /* ─── Lists ─── */
