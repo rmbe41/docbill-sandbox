@@ -41,8 +41,9 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
 
   const handleFileDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    const ALLOWED = ["application/pdf", "image/jpeg", "image/png", "image/heic"];
     const dropped = Array.from(e.dataTransfer.files).filter(
-      (f) => f.type === "application/pdf"
+      (f) => ALLOWED.includes(f.type) || /\.(jpe?g|png|heic|pdf)$/i.test(f.name)
     );
     if (dropped.length > 0) setFiles((prev) => [...prev, ...dropped]);
   }, []);
@@ -83,14 +84,14 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
         <button
           onClick={() => fileInputRef.current?.click()}
           className="flex-shrink-0 p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mb-0.5"
-          title="PDF hochladen"
+          title="Datei hochladen (PDF, JPEG, PNG, HEIC)"
         >
           <Paperclip className="w-5 h-5" />
         </button>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf"
+          accept=".pdf,.jpg,.jpeg,.png,.heic"
           multiple
           className="hidden"
           onChange={handleFileSelect}
@@ -121,7 +122,7 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
       </div>
 
       <p className="text-[11px] text-muted-foreground mt-2 text-center">
-        PDF-Dateien per Drag & Drop oder über das Klammer-Symbol hochladen
+        PDF, JPEG, PNG oder HEIC per Drag & Drop oder Klammer-Symbol hochladen
       </p>
     </div>
   );

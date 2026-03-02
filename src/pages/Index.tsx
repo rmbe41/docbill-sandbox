@@ -20,9 +20,22 @@ const Index = () => {
     }
   }, [messages, isLoading]);
 
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
   const sendMessage = useCallback(
     async (content: string, files?: File[]) => {
-      const attachments = files?.map((f) => ({ name: f.name, type: f.type }));
+      // Build preview URLs for images
+      const attachments = files?.map((f) => ({
+        name: f.name,
+        type: f.type,
+        previewUrl: f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined,
+      }));
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "user",
@@ -32,6 +45,18 @@ const Index = () => {
 
       setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
+
+      // Convert files to base64 for the API
+      let filePayloads: { name: string; type: string; data: string }[] = [];
+      if (files && files.length > 0) {
+        filePayloads = await Promise.all(
+          files.map(async (f) => ({
+            name: f.name,
+            type: f.type,
+            data: await fileToBase64(f),
+          }))
+        );
+      }
 
       // Build API messages
       const apiMessages = [...messages, userMsg].map((m) => ({
@@ -88,7 +113,7 @@ const Index = () => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${supabaseKey}`,
           },
-          body: JSON.stringify({ messages: apiMessages }),
+          body: JSON.stringify({ messages: apiMessages, files: filePayloads.length > 0 ? filePayloads : undefined }),
         });
 
         if (resp.status === 429) {
