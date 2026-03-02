@@ -59,13 +59,11 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
   };
 
   return (
-    <div className="relative floating-island-wrapper">
-      {/* Sparkle border */}
-      <div className="floating-island-sparkle rounded-2xl" />
-      {/* Blue glow */}
-      <div className="absolute -inset-1 rounded-[24px] bg-blue-500/15 blur-xl opacity-70" />
+    <div className="relative group">
+      {/* Soft glow on focus-within */}
+      <div className="absolute -inset-2 rounded-[28px] bg-foreground/5 blur-2xl opacity-0 group-focus-within:opacity-60 transition-opacity duration-500" />
       <div
-        className="relative bg-white/20 dark:bg-card/15 backdrop-blur-2xl backdrop-saturate-200 rounded-2xl px-3 py-2 floating-island-inner"
+        className="relative bg-white/15 dark:bg-card/10 backdrop-blur-2xl backdrop-saturate-200 border border-white/30 dark:border-white/10 rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.08),inset_0_0_0_1px_rgba(255,255,255,0.12)] px-3 py-3"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleFileDrop}
       >
