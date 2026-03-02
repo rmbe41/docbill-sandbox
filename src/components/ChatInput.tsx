@@ -60,7 +60,7 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
 
   return (
     <div
-      className="border-t bg-card px-4 py-3"
+      className="bg-card/80 backdrop-blur-xl border border-border/50 rounded-2xl shadow-[0_8px_40px_-12px_hsl(var(--foreground)/0.15)] px-4 py-3"
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleFileDrop}
     >
@@ -105,8 +105,8 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           placeholder="Beschreiben Sie die erbrachten Leistungen oder stellen Sie eine Frage zur GOÄ…"
           rows={1}
           className={cn(
-            "flex-1 resize-none bg-muted rounded-xl px-4 py-2.5 text-sm",
-            "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+            "flex-1 resize-none bg-transparent rounded-xl px-4 py-2.5 text-sm",
+            "placeholder:text-muted-foreground focus:outline-none",
             "min-h-[40px] max-h-[160px]"
           )}
         />
