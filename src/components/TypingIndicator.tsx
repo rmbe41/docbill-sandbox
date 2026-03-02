@@ -1,0 +1,18 @@
+const TypingIndicator = () => {
+  return (
+    <div className="flex gap-3 animate-fade-in">
+      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent flex items-center justify-center">
+        <div className="w-4 h-4 rounded-full bg-accent-foreground/80" />
+      </div>
+      <div className="chat-bubble-assistant rounded-2xl rounded-bl-md px-4 py-3">
+        <div className="flex gap-1.5 items-center h-5">
+          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot" style={{ animationDelay: "0ms" }} />
+          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot" style={{ animationDelay: "200ms" }} />
+          <span className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot" style={{ animationDelay: "400ms" }} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default TypingIndicator;

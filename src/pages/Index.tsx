@@ -1,11 +1,165 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState, useRef, useEffect, useCallback } from "react";
+import AppHeader from "@/components/AppHeader";
+import ChatBubble, { type ChatMessage } from "@/components/ChatBubble";
+import ChatInput from "@/components/ChatInput";
+import TypingIndicator from "@/components/TypingIndicator";
+import WelcomeScreen from "@/components/WelcomeScreen";
+import { useToast } from "@/hooks/use-toast";
+
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 
 const Index = () => {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isLoading]);
+
+  const sendMessage = useCallback(
+    async (content: string, files?: File[]) => {
+      const attachments = files?.map((f) => ({ name: f.name, type: f.type }));
+      const userMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content,
+        attachments,
+      };
+
+      setMessages((prev) => [...prev, userMsg]);
+      setIsLoading(true);
+
+      // Build API messages
+      const apiMessages = [...messages, userMsg].map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      let assistantContent = "";
+
+      const upsertAssistant = (chunk: string) => {
+        assistantContent += chunk;
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant") {
+            return prev.map((m, i) =>
+              i === prev.length - 1
+                ? { ...m, content: assistantContent }
+                : m
+            );
+          }
+          return [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "assistant" as const,
+              content: assistantContent,
+            },
+          ];
+        });
+      };
+
+      try {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+        if (!supabaseUrl || !supabaseKey) {
+          // Fallback demo response when no backend
+          setTimeout(() => {
+            upsertAssistant(
+              "⚠️ **Backend nicht verbunden.** Bitte aktivieren Sie Lovable Cloud, damit der KI-Assistent funktioniert.\n\nIn der Zwischenzeit sehen Sie hier eine Demo-Antwort:\n\n" +
+              "Für die beschriebenen Leistungen empfehle ich folgende GOÄ-Ziffern:\n\n" +
+              "| Ziffer | Bezeichnung | Punkte |\n|--------|-------------|--------|\n" +
+              "| 1 | Beratung | 80 |\n| 5 | Symptombezogene Untersuchung | 80 |\n\n" +
+              "💡 **Tipp:** Verbinden Sie das Backend für echte KI-basierte Abrechnungsberatung."
+            );
+            setIsLoading(false);
+          }, 1500);
+          return;
+        }
+
+        const resp = await fetch(CHAT_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+          body: JSON.stringify({ messages: apiMessages }),
+        });
+
+        if (resp.status === 429) {
+          toast({ title: "Rate Limit", description: "Zu viele Anfragen. Bitte warten Sie einen Moment.", variant: "destructive" });
+          setIsLoading(false);
+          return;
+        }
+        if (resp.status === 402) {
+          toast({ title: "Credits erschöpft", description: "Bitte laden Sie Ihre Credits auf.", variant: "destructive" });
+          setIsLoading(false);
+          return;
+        }
+        if (!resp.ok || !resp.body) throw new Error("Stream failed");
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let textBuffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          textBuffer += decoder.decode(value, { stream: true });
+
+          let newlineIndex: number;
+          while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+            let line = textBuffer.slice(0, newlineIndex);
+            textBuffer = textBuffer.slice(newlineIndex + 1);
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            if (line.startsWith(":") || line.trim() === "") continue;
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === "[DONE]") break;
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const c = parsed.choices?.[0]?.delta?.content as string | undefined;
+              if (c) upsertAssistant(c);
+            } catch {
+              textBuffer = line + "\n" + textBuffer;
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        toast({ title: "Fehler", description: "Die Anfrage konnte nicht verarbeitet werden.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [messages, toast]
+  );
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
+    <div className="flex flex-col h-screen bg-background">
+      <AppHeader />
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        {messages.length === 0 ? (
+          <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
+        ) : (
+          <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+            {messages.map((msg) => (
+              <ChatBubble key={msg.id} message={msg} />
+            ))}
+            {isLoading && <TypingIndicator />}
+          </div>
+        )}
+      </div>
+
+      <div className="max-w-3xl mx-auto w-full">
+        <ChatInput onSend={sendMessage} isLoading={isLoading} />
       </div>
     </div>
   );
