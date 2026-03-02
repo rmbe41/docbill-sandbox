@@ -191,7 +191,7 @@ const Index = () => {
     <div className="flex flex-col h-screen bg-background">
       <AppHeader />
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto pb-32">
         {messages.length === 0 ? (
           <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
         ) : (
@@ -204,8 +204,10 @@ const Index = () => {
         )}
       </div>
 
-      <div className="max-w-5xl mx-auto w-full">
-        <ChatInput onSend={sendMessage} isLoading={isLoading} />
+      <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
+        <div className="max-w-3xl mx-auto w-full px-4 pb-5 pointer-events-auto">
+          <ChatInput onSend={sendMessage} isLoading={isLoading} />
+        </div>
       </div>
     </div>
   );
