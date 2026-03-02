@@ -61,9 +61,9 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
   return (
     <div className="relative">
       {/* Halo glow effect */}
-      <div className="absolute -inset-1 rounded-[28px] bg-gradient-to-r from-blue-400/20 via-purple-300/15 to-orange-300/20 blur-xl opacity-70" />
+      <div className="absolute -inset-1.5 rounded-[28px] bg-gradient-to-r from-blue-400/25 via-purple-300/20 to-orange-300/25 blur-2xl opacity-60" />
       <div
-        className="relative bg-white/90 dark:bg-card/90 backdrop-blur-2xl border border-white/60 dark:border-border/40 rounded-2xl shadow-[0_4px_24px_-4px_rgba(0,0,0,0.08),0_0_0_1px_rgba(255,255,255,0.5)_inset] px-4 py-3"
+        className="relative bg-white/50 dark:bg-card/40 backdrop-blur-xl backdrop-saturate-150 border border-white/40 dark:border-white/10 rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.1),0_0_0_1px_rgba(255,255,255,0.3)_inset] px-4 py-3"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleFileDrop}
       >
