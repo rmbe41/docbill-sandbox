@@ -44,6 +44,11 @@ const markdownComponents = {
     return <h2 {...props}>{children}</h2>;
   },
   hr: (props: any) => <hr className="section-divider" {...props} />,
+  table: ({ children, ...props }: any) => (
+    <div className="table-scroll-wrapper">
+      <table {...props}>{children}</table>
+    </div>
+  ),
 };
 
 const ChatBubble = ({ message }: { message: ChatMessage }) => {
@@ -64,10 +69,10 @@ const ChatBubble = ({ message }: { message: ChatMessage }) => {
 
       <div
         className={cn(
-          "max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+          "rounded-2xl px-4 py-3 text-sm leading-relaxed",
           isUser
-            ? "bg-chat-user text-chat-user-foreground rounded-br-md"
-            : "chat-bubble-assistant rounded-bl-md"
+            ? "max-w-[75%] bg-chat-user text-chat-user-foreground rounded-br-md"
+            : "max-w-[90%] chat-bubble-assistant rounded-bl-md"
         )}
       >
         {message.attachments?.map((att) => (
