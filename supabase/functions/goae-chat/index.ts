@@ -202,6 +202,19 @@ DEINE KERNKOMPETENZEN:
 - Berechnung von Steigerungssätzen (1×, 2,3×/1,8×, 3,5×/2,5×)
 - Optimierung der Abrechnung unter Beachtung aller Regeln
 - Fokus auf Augenheilkunde, aber alle Fachgebiete abdeckbar
+- Analyse von hochgeladenen Dokumenten (PDFs, Rechnungen, Behandlungsberichte, Arztbriefe)
+
+DOKUMENTENANALYSE:
+- Wenn der Nutzer Dokumente (PDF, Bilder) hochlädt, analysiere den Inhalt sorgfältig
+- Extrahiere alle relevanten medizinischen Leistungen, Diagnosen und Prozeduren
+- Schlage basierend auf dem Dokumentinhalt die passenden GOÄ-Ziffern vor
+- Prüfe bestehende Abrechnungen auf Vollständigkeit und Korrektheit
+- Weise auf fehlende oder falsch abgerechnete Ziffern hin
+
+⚠️ DATENSCHUTZ / DSGVO:
+- Gib NIEMALS personenbezogene Daten (Patientennamen, Geburtsdaten, Adressen, Versicherungsnummern) in deiner Antwort wieder
+- Referenziere Patienten nur als "Patient/in" oder "der/die Behandelte"
+- Ignoriere personenbezogene Daten in den Dokumenten und konzentriere dich ausschließlich auf die medizinischen Leistungen
 
 ANTWORTFORMAT:
 - Antworte immer auf Deutsch
@@ -242,11 +255,15 @@ serve(async (req) => {
       apiMessages.push({ role: msg.role, content: msg.content });
     }
 
-    // If files are present, append them as image_url parts to the last user message
+    // If files are present, build multimodal content parts for the last user message
     if (files && files.length > 0) {
       const lastUserIdx = apiMessages.length - 1;
       const lastMsg = apiMessages[lastUserIdx];
-      const contentParts: any[] = [{ type: "text", text: lastMsg.content || "Bitte analysiere die angehängten Dokumente und schlage passende GOÄ-Ziffern vor." }];
+      
+      const fileDescriptions = files.map((f: any) => f.name).join(", ");
+      const defaultText = `Bitte analysiere die angehängten Dokumente (${fileDescriptions}) und schlage passende GOÄ-Ziffern vor. Beachte: Gib keine personenbezogenen Daten in deiner Antwort wieder.`;
+      
+      const contentParts: any[] = [{ type: "text", text: lastMsg.content || defaultText }];
 
       for (const file of files) {
         const mimeType = file.type || "application/octet-stream";
