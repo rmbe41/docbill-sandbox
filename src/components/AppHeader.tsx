@@ -1,14 +1,23 @@
-import { Eye, Settings, LogOut } from "lucide-react";
+import { Eye, Settings, LogOut, History } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 
-const AppHeader = () => {
+type Props = {
+  onToggleHistory?: () => void;
+};
+
+const AppHeader = ({ onToggleHistory }: Props) => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
 
   return (
     <header className="flex items-center gap-3 px-5 py-3 border-b bg-card">
+      {user && onToggleHistory && (
+        <Button variant="ghost" size="icon" onClick={onToggleHistory} title="Verlauf">
+          <History className="w-4 h-4" />
+        </Button>
+      )}
       <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary">
         <Eye className="w-5 h-5 text-primary-foreground" />
       </div>

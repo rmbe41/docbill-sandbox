@@ -4,8 +4,10 @@ import ChatBubble, { type ChatMessage } from "@/components/ChatBubble";
 import ChatInput from "@/components/ChatInput";
 import TypingIndicator from "@/components/TypingIndicator";
 import WelcomeScreen from "@/components/WelcomeScreen";
+import ConversationSidebar from "@/components/ConversationSidebar";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useConversations } from "@/hooks/useConversations";
 import { supabase } from "@/integrations/supabase/client";
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
@@ -13,11 +15,23 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 const Index = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null }>({ selected_model: null, custom_rules: null });
   const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string }>({ default_model: "google/gemini-2.5-flash", default_rules: "" });
+
+  const {
+    conversations,
+    activeConversationId,
+    setActiveConversationId,
+    createConversation,
+    loadMessages,
+    saveMessage,
+    deleteConversation,
+    fetchConversations,
+  } = useConversations();
 
   useEffect(() => {
     if (!user) return;
@@ -36,6 +50,39 @@ const Index = () => {
     }
   }, [messages, isLoading]);
 
+  // Load messages when selecting a conversation
+  const handleSelectConversation = useCallback(
+    async (id: string) => {
+      setActiveConversationId(id);
+      setSidebarOpen(false);
+      const dbMessages = await loadMessages(id);
+      setMessages(
+        dbMessages.map((m) => ({
+          id: m.id,
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }))
+      );
+    },
+    [loadMessages, setActiveConversationId]
+  );
+
+  const handleNewConversation = useCallback(() => {
+    setActiveConversationId(null);
+    setMessages([]);
+    setSidebarOpen(false);
+  }, [setActiveConversationId]);
+
+  const handleDeleteConversation = useCallback(
+    async (id: string) => {
+      await deleteConversation(id);
+      if (activeConversationId === id) {
+        setMessages([]);
+      }
+    },
+    [deleteConversation, activeConversationId]
+  );
+
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -46,7 +93,6 @@ const Index = () => {
 
   const sendMessage = useCallback(
     async (content: string, files?: File[]) => {
-      // Build preview URLs for images
       const attachments = files?.map((f) => ({
         name: f.name,
         type: f.type,
@@ -62,7 +108,19 @@ const Index = () => {
       setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
 
-      // Convert files to base64 for the API
+      // Ensure we have a conversation
+      let convId = activeConversationId;
+      if (!convId) {
+        const title = content.slice(0, 60) || "Neues Gespräch";
+        convId = await createConversation(title);
+        if (convId) setActiveConversationId(convId);
+      }
+
+      // Save user message to DB
+      if (convId) {
+        await saveMessage(convId, "user", content);
+      }
+
       let filePayloads: { name: string; type: string; data: string }[] = [];
       if (files && files.length > 0) {
         filePayloads = await Promise.all(
@@ -74,7 +132,6 @@ const Index = () => {
         );
       }
 
-      // Build API messages
       const apiMessages = [...messages, userMsg].map((m) => ({
         role: m.role,
         content: m.content,
@@ -88,18 +145,12 @@ const Index = () => {
           const last = prev[prev.length - 1];
           if (last?.role === "assistant") {
             return prev.map((m, i) =>
-              i === prev.length - 1
-                ? { ...m, content: assistantContent }
-                : m
+              i === prev.length - 1 ? { ...m, content: assistantContent } : m
             );
           }
           return [
             ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: "assistant" as const,
-              content: assistantContent,
-            },
+            { id: crypto.randomUUID(), role: "assistant" as const, content: assistantContent },
           ];
         });
       };
@@ -109,15 +160,8 @@ const Index = () => {
         const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
         if (!supabaseUrl || !supabaseKey) {
-          // Fallback demo response when no backend
           setTimeout(() => {
-            upsertAssistant(
-              "⚠️ **Backend nicht verbunden.** Bitte aktivieren Sie Lovable Cloud, damit der KI-Assistent funktioniert.\n\nIn der Zwischenzeit sehen Sie hier eine Demo-Antwort:\n\n" +
-              "Für die beschriebenen Leistungen empfehle ich folgende GOÄ-Ziffern:\n\n" +
-              "| Ziffer | Bezeichnung | Punkte |\n|--------|-------------|--------|\n" +
-              "| 1 | Beratung | 80 |\n| 5 | Symptombezogene Untersuchung | 80 |\n\n" +
-              "💡 **Tipp:** Verbinden Sie das Backend für echte KI-basierte Abrechnungsberatung."
-            );
+            upsertAssistant("⚠️ **Backend nicht verbunden.**");
             setIsLoading(false);
           }, 1500);
           return;
@@ -138,7 +182,7 @@ const Index = () => {
         });
 
         if (resp.status === 429) {
-          toast({ title: "Rate Limit", description: "Zu viele Anfragen. Bitte warten Sie einen Moment.", variant: "destructive" });
+          toast({ title: "Rate Limit", description: "Zu viele Anfragen.", variant: "destructive" });
           setIsLoading(false);
           return;
         }
@@ -177,6 +221,12 @@ const Index = () => {
             }
           }
         }
+
+        // Save assistant message to DB
+        if (convId && assistantContent) {
+          await saveMessage(convId, "assistant", assistantContent);
+          await fetchConversations();
+        }
       } catch (e) {
         console.error(e);
         toast({ title: "Fehler", description: "Die Anfrage konnte nicht verarbeitet werden.", variant: "destructive" });
@@ -184,12 +234,22 @@ const Index = () => {
         setIsLoading(false);
       }
     },
-    [messages, toast]
+    [messages, toast, activeConversationId, createConversation, saveMessage, setActiveConversationId, userSettings, globalSettings, fetchConversations]
   );
 
   return (
     <div className="flex flex-col h-screen bg-background">
-      <AppHeader />
+      <ConversationSidebar
+        conversations={conversations}
+        activeId={activeConversationId}
+        onSelect={handleSelectConversation}
+        onNew={handleNewConversation}
+        onDelete={handleDeleteConversation}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      <AppHeader onToggleHistory={() => setSidebarOpen((v) => !v)} />
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto pb-32">
         {messages.length === 0 ? (
