@@ -120,35 +120,236 @@
   }
 }
 
-/* Enhanced markdown rendering for analysis output */
-.prose hr {
-  border-top-style: solid;
-  opacity: 0.5;
+/* ─── Markdown Output Styling ─── */
+
+.markdown-output {
+  color: hsl(var(--chat-assistant-foreground));
 }
 
-.prose h2 {
+/* Headings */
+.markdown-output h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid hsl(var(--border));
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  line-height: 1.4;
 }
 
-.prose table {
+.markdown-output h3 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Paragraphs */
+.markdown-output p {
+  margin: 0.5rem 0;
+  line-height: 1.65;
+  color: hsl(var(--chat-assistant-foreground));
+}
+
+.markdown-output strong {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+/* Section divider (hr) */
+.markdown-output .section-divider,
+.markdown-output hr {
+  border: none;
+  height: 2px;
+  background: linear-gradient(
+    to right,
+    hsl(var(--border)),
+    hsl(var(--accent) / 0.3),
+    hsl(var(--border))
+  );
+  margin: 1.5rem 0;
+  border-radius: 1px;
+}
+
+/* ─── Emoji Section Cards ─── */
+
+.section-card {
+  border-bottom: none !important;
+  border-radius: 0.5rem 0.5rem 0 0;
+  padding: 0.625rem 0.75rem !important;
+  margin-top: 1.5rem !important;
+  margin-bottom: 0.5rem !important;
+  font-size: 0.9rem !important;
+  border-left: 3px solid transparent;
+}
+
+.section-card-info {
+  background: hsl(210 60% 95%);
+  border-left-color: hsl(210 60% 50%);
+  color: hsl(210 50% 25%);
+}
+
+.section-card-success {
+  background: hsl(145 50% 94%);
+  border-left-color: hsl(145 55% 40%);
+  color: hsl(145 40% 22%);
+}
+
+.section-card-warning {
+  background: hsl(38 80% 94%);
+  border-left-color: hsl(38 75% 45%);
+  color: hsl(38 50% 22%);
+}
+
+.section-card-accent {
+  background: hsl(175 45% 93%);
+  border-left-color: hsl(var(--accent));
+  color: hsl(175 40% 20%);
+}
+
+.section-card-neutral {
+  background: hsl(var(--muted));
+  border-left-color: hsl(var(--muted-foreground));
+  color: hsl(var(--foreground));
+}
+
+/* Dark mode overrides for section cards */
+.dark .section-card-info {
+  background: hsl(210 40% 16%);
+  border-left-color: hsl(210 50% 55%);
+  color: hsl(210 30% 80%);
+}
+
+.dark .section-card-success {
+  background: hsl(145 30% 14%);
+  border-left-color: hsl(145 45% 50%);
+  color: hsl(145 25% 78%);
+}
+
+.dark .section-card-warning {
+  background: hsl(38 40% 14%);
+  border-left-color: hsl(38 60% 55%);
+  color: hsl(38 30% 78%);
+}
+
+.dark .section-card-accent {
+  background: hsl(175 30% 14%);
+  border-left-color: hsl(175 45% 50%);
+  color: hsl(175 25% 78%);
+}
+
+.dark .section-card-neutral {
+  background: hsl(215 20% 16%);
+  color: hsl(210 20% 80%);
+}
+
+/* ─── Tables ─── */
+
+.markdown-output table {
+  width: 100%;
+  font-size: 0.75rem;
   border-collapse: separate;
   border-spacing: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  overflow: hidden;
+  margin: 0.75rem 0;
 }
 
-.prose thead th:first-child {
-  border-top-left-radius: 0.375rem;
+.markdown-output thead {
+  background: hsl(var(--muted));
 }
 
-.prose thead th:last-child {
-  border-top-right-radius: 0.375rem;
+.markdown-output th {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: hsl(var(--foreground));
+  border-bottom: 1px solid hsl(var(--border));
 }
 
-.prose tbody tr:last-child td:first-child {
-  border-bottom-left-radius: 0.375rem;
+.markdown-output td {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid hsl(var(--border) / 0.5);
+  vertical-align: top;
 }
 
-.prose tbody tr:last-child td:last-child {
-  border-bottom-right-radius: 0.375rem;
+.markdown-output tbody tr:nth-child(even) {
+  background: hsl(var(--muted) / 0.3);
+}
+
+.markdown-output tbody tr:hover {
+  background: hsl(var(--muted) / 0.6);
+  transition: background 0.15s;
+}
+
+.markdown-output thead th:first-child {
+  border-top-left-radius: 0.5rem;
+}
+
+.markdown-output thead th:last-child {
+  border-top-right-radius: 0.5rem;
+}
+
+.markdown-output tbody tr:last-child td:first-child {
+  border-bottom-left-radius: 0.5rem;
+}
+
+.markdown-output tbody tr:last-child td:last-child {
+  border-bottom-right-radius: 0.5rem;
+}
+
+/* ─── Lists ─── */
+
+.markdown-output ul {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.markdown-output ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.markdown-output li {
+  margin: 0.25rem 0;
+  line-height: 1.6;
+}
+
+.markdown-output ul > li::marker {
+  color: hsl(var(--accent));
+}
+
+.markdown-output ol > li::marker {
+  color: hsl(var(--accent));
+  font-weight: 600;
+}
+
+/* ─── Code ─── */
+
+.markdown-output code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  background: hsl(var(--muted));
+  color: hsl(var(--accent));
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+}
+
+/* ─── Blockquotes ─── */
+
+.markdown-output blockquote {
+  border-left: 3px solid hsl(var(--accent));
+  background: hsl(var(--muted) / 0.5);
+  border-radius: 0 0.375rem 0.375rem 0;
+  padding: 0.5rem 0.75rem;
+  margin: 0.75rem 0;
 }
