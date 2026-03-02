@@ -299,14 +299,15 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, files } = await req.json();
+    const { messages, files, model, extra_rules } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
     // Build multimodal messages if files are attached
-    const apiMessages: any[] = [{ role: "system", content: SYSTEM_PROMPT }];
+    const systemContent = extra_rules ? `${SYSTEM_PROMPT}\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extra_rules}` : SYSTEM_PROMPT;
+    const apiMessages: any[] = [{ role: "system", content: systemContent }];
 
     for (const msg of messages) {
       apiMessages.push({ role: msg.role, content: msg.content });
@@ -342,7 +343,7 @@ serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
+          model: model || "google/gemini-2.5-flash",
           messages: apiMessages,
           stream: true,
         }),
