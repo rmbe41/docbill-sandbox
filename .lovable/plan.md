@@ -1,26 +1,20 @@
 
 
-## Problem
+## Plan: Decrease Floating Island Size by ~30%
 
-The 💡 Optimierungspotenzial table inherits the same sticky-column CSS and min-widths designed for the 7-column main table. This causes the middle columns to be unnecessarily wide while the last column ("Zusätzlich" or description text) gets compressed.
+### Change: `src/components/ChatInput.tsx`
 
-## Solution
+Reduce the padding, font sizes, button sizes, and internal spacing of the floating island:
 
-Two changes:
+- Outer padding: `px-4 py-3` → `px-3 py-2`
+- Textarea font: `text-sm` → `text-xs`, min-height `40px` → `32px`
+- Send button: `h-10 w-10` → `h-8 w-8`, icon `w-4 h-4` → `w-3.5 h-3.5`
+- Paperclip icon: `w-5 h-5` → `w-4 h-4`, padding `p-2` → `p-1.5`
+- File chips: `text-sm px-2.5 py-1` → `text-xs px-2 py-0.5`
+- Footer hint text: `text-[11px]` → `text-[9px]`, margin `mt-2` → `mt-1.5`
+- Halo blur spread: reduce slightly
 
-### 1. Restructure the prompt table format (`supabase/functions/goae-chat/index.ts`)
+### Change: `src/pages/Index.tsx`
 
-Change the Optimierungspotenzial table from 4 columns to 3 compact columns, merging GOÄ+Faktor into one and making the description the primary wide column:
-
-```
-| GOÄ | Beschreibung | Potenzial |
-|-----|-------------|-----------|
-| **1202** 2,3× | Refraktionsbestimmung – empfohlen bei [klinischer Kontext] | +9,92€ |
-```
-
-This puts the dense info (code + factor) in column 1, gives the description maximum space in column 2, and keeps the monetary value compact in column 3.
-
-### 2. CSS: Remove sticky behavior for smaller tables (`src/index.css`)
-
-The sticky column rules (with fixed `min-width` and `left` offsets) should only apply to tables with more than 4 columns. Add a CSS override so tables inside the optimization section don't get the sticky treatment, or use `:has()` / a wrapper class approach to scope sticky behavior to wide tables only.
+- Bottom padding on input container: `pb-5` → `pb-4`
 
