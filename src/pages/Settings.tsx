@@ -6,7 +6,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Save, Globe, User, Cpu } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
+import { ArrowLeft, Save, Globe, User, Cpu, Type } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const AVAILABLE_MODELS = [
@@ -23,7 +24,11 @@ const Settings = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<"global" | "user">("user");
+  const [activeTab, setActiveTab] = useState<"global" | "user" | "display">("user");
+  const [uiScale, setUiScale] = useState(() => {
+    const saved = localStorage.getItem("ui-scale");
+    return saved ? parseInt(saved, 10) : 100;
+  });
   const [globalModel, setGlobalModel] = useState("google/gemini-2.5-flash");
   const [globalRules, setGlobalRules] = useState("");
   const [userModel, setUserModel] = useState<string | null>(null);
@@ -110,6 +115,7 @@ const Settings = () => {
 
   const tabs = [
     { key: "user" as const, label: "Meine Einstellungen", icon: User },
+    { key: "display" as const, label: "Darstellung", icon: Type },
     { key: "global" as const, label: "Globale Defaults", icon: Globe },
   ];
 
@@ -154,7 +160,56 @@ const Settings = () => {
           </p>
         )}
 
-        {/* Model Selection */}
+        {activeTab === "display" && (
+          <div className="space-y-6">
+            <p className="text-sm text-muted-foreground">
+              Passen Sie die Schrift- und UI-Größe an Ihre Bedürfnisse an.
+            </p>
+            <div className="space-y-4">
+              <Label className="flex items-center gap-2 text-sm font-semibold">
+                <Type className="w-4 h-4 text-accent" />
+                UI-Größe: {uiScale}%
+              </Label>
+              <Slider
+                value={[uiScale]}
+                onValueChange={(v) => {
+                  const val = v[0];
+                  setUiScale(val);
+                  localStorage.setItem("ui-scale", String(val));
+                  document.documentElement.style.fontSize = `${val}%`;
+                }}
+                min={75}
+                max={150}
+                step={5}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Klein (75%)</span>
+                <span>Normal (100%)</span>
+                <span>Groß (150%)</span>
+              </div>
+              <div className="mt-4 p-4 rounded-xl border border-border bg-card">
+                <p className="text-sm font-medium mb-1">Vorschau</p>
+                <p className="text-muted-foreground">So sieht Ihr Text bei {uiScale}% aus. Alle UI-Elemente skalieren entsprechend mit.</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setUiScale(100);
+                  localStorage.setItem("ui-scale", "100");
+                  document.documentElement.style.fontSize = "100%";
+                }}
+              >
+                Auf Standard zurücksetzen
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {activeTab !== "display" && (
+        <>
+        {/* Model Selection — only for user/global tabs */}
         <div className="space-y-3">
           <Label className="flex items-center gap-2 text-sm font-semibold">
             <Cpu className="w-4 h-4 text-accent" />
@@ -211,6 +266,8 @@ const Settings = () => {
           <Save className="w-4 h-4" />
           {saving ? "Speichern…" : "Speichern"}
         </Button>
+        </>
+        )}
       </div>
     </div>
   );
