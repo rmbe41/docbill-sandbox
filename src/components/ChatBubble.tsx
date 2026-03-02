@@ -56,7 +56,24 @@ const ChatBubble = ({ message }: { message: ChatMessage }) => {
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
-          <div className="prose prose-sm max-w-none prose-headings:text-foreground prose-headings:mt-4 prose-headings:mb-2 prose-p:text-chat-assistant-foreground prose-strong:text-foreground prose-code:text-accent prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-table:text-xs prose-th:bg-muted prose-th:px-2 prose-th:py-1.5 prose-th:text-left prose-th:font-semibold prose-td:px-2 prose-td:py-1.5 prose-td:border-t prose-td:border-border prose-hr:my-3 prose-hr:border-border prose-li:my-0.5 prose-ul:my-1">
+          <div className="prose prose-sm max-w-none
+            prose-headings:text-foreground prose-headings:font-semibold
+            prose-h2:text-base prose-h2:mt-5 prose-h2:mb-3 prose-h2:pb-1.5 prose-h2:border-b prose-h2:border-border
+            prose-h3:text-sm prose-h3:mt-4 prose-h3:mb-2
+            prose-p:text-chat-assistant-foreground prose-p:my-1.5 prose-p:leading-relaxed
+            prose-strong:text-foreground prose-strong:font-semibold
+            prose-code:text-accent prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:text-xs prose-code:font-mono
+            prose-table:text-xs prose-table:my-3 prose-table:w-full
+            prose-th:bg-muted prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:font-semibold prose-th:text-foreground prose-th:text-xs prose-th:uppercase prose-th:tracking-wider
+            prose-td:px-3 prose-td:py-2 prose-td:border-t prose-td:border-border prose-td:align-top
+            prose-hr:my-4 prose-hr:border-border/60
+            prose-li:my-0.5 prose-li:leading-relaxed
+            prose-ul:my-2 prose-ul:space-y-1
+            prose-ol:my-2
+            prose-blockquote:border-l-accent prose-blockquote:bg-muted/50 prose-blockquote:rounded-r-md prose-blockquote:py-1 prose-blockquote:px-3 prose-blockquote:my-3
+            [&_table]:rounded-lg [&_table]:overflow-hidden [&_table]:border [&_table]:border-border
+            [&_thead]:bg-muted/80
+            [&_tbody_tr:hover]:bg-muted/30 [&_tbody_tr]:transition-colors">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {message.content}
             </ReactMarkdown>
