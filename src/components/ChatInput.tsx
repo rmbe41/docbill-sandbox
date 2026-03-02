@@ -59,11 +59,14 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
   };
 
   return (
-    <div
-      className="bg-card/80 backdrop-blur-xl border border-border/50 rounded-2xl shadow-[0_8px_40px_-12px_hsl(var(--foreground)/0.15)] px-4 py-3"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={handleFileDrop}
-    >
+    <div className="relative">
+      {/* Halo glow effect */}
+      <div className="absolute -inset-1 rounded-[28px] bg-gradient-to-r from-blue-400/20 via-purple-300/15 to-orange-300/20 blur-xl opacity-70" />
+      <div
+        className="relative bg-white/90 dark:bg-card/90 backdrop-blur-2xl border border-white/60 dark:border-border/40 rounded-2xl shadow-[0_4px_24px_-4px_rgba(0,0,0,0.08),0_0_0_1px_rgba(255,255,255,0.5)_inset] px-4 py-3"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleFileDrop}
+      >
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-2">
           {files.map((file, i) => (
@@ -124,6 +127,7 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
       <p className="text-[11px] text-muted-foreground mt-2 text-center">
         PDF, JPEG, PNG oder HEIC per Drag & Drop oder Klammer-Symbol hochladen
       </p>
+    </div>
     </div>
   );
 };

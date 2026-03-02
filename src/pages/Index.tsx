@@ -195,7 +195,7 @@ const Index = () => {
         {messages.length === 0 ? (
           <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
         ) : (
-          <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
+          <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
             {messages.map((msg) => (
               <ChatBubble key={msg.id} message={msg} />
             ))}
@@ -205,7 +205,7 @@ const Index = () => {
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-        <div className="max-w-3xl mx-auto w-full px-4 pb-5 pointer-events-auto">
+        <div className="max-w-6xl mx-auto w-full px-4 pb-5 pointer-events-auto">
           <ChatInput onSend={sendMessage} isLoading={isLoading} />
         </div>
       </div>
