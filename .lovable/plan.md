@@ -2,28 +2,25 @@
 
 ## Problem
 
-When the AI identifies issues (e.g., "factor above threshold, justification needed" or "justification too generic"), it only states the problem but doesn't provide a **concrete, copy-paste-ready suggestion** for how to fix it. Users need actionable text they can directly use.
+The 💡 Optimierungspotenzial table inherits the same sticky-column CSS and min-widths designed for the 7-column main table. This causes the middle columns to be unnecessarily wide while the last column ("Zusätzlich" or description text) gets compressed.
 
-## Plan
+## Solution
 
-### Add "KONKRETE VORSCHLÄGE" rule to the system prompt
+Two changes:
 
-In `supabase/functions/goae-chat/index.ts`, add a new mandatory rule section to `FORMATTING_RULES` and update the table example:
+### 1. Restructure the prompt table format (`supabase/functions/goae-chat/index.ts`)
 
-1. **New rule in HARTE REGELN**: Add a rule that every ⚠️ or ❌ annotation MUST include a concrete suggestion — not just describe the problem
-2. **New "Vorschlag" column** in the main table (or expand "Anmerkung" to include a suggestion line), e.g.:
+Change the Optimierungspotenzial table from 4 columns to 3 compact columns, merging GOÄ+Faktor into one and making the description the primary wide column:
 
 ```
-| 3 | 5 | Beratung | 3,0× | 30,60€ | ⚠️ | Über Schwellenwert → **Vorschlag:** „Aufgrund der überdurchschnittlichen Komplexität bei [Diagnose] und erhöhtem Zeitaufwand von ca. XX Min. ist ein Faktor von 3,0× gerechtfertigt." |
+| GOÄ | Beschreibung | Potenzial |
+|-----|-------------|-----------|
+| **1202** 2,3× | Refraktionsbestimmung – empfohlen bei [klinischer Kontext] | +9,92€ |
 ```
 
-3. **Add explicit instruction block** in SYSTEM_PROMPT explaining:
-   - For factor issues: provide a specific justification text template with placeholders
-   - For exclusion conflicts: suggest which code to keep/remove and why
-   - For missing codes: suggest the exact code with expected amount
-   - For generic justifications: rewrite the justification concretely
+This puts the dense info (code + factor) in column 1, gives the description maximum space in column 2, and keeps the monetary value compact in column 3.
 
-### Files to modify
+### 2. CSS: Remove sticky behavior for smaller tables (`src/index.css`)
 
-- `supabase/functions/goae-chat/index.ts` — add concrete-suggestion rules to prompt + update table example
+The sticky column rules (with fixed `min-width` and `left` offsets) should only apply to tables with more than 4 columns. Add a CSS override so tables inside the optimization section don't get the sticky treatment, or use `:has()` / a wrapper class approach to scope sticky behavior to wide tables only.
 
