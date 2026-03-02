@@ -60,11 +60,10 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
 
   return (
     <div className="relative group">
-      {/* Purple glow */}
-      <div className="absolute -inset-3 rounded-full bg-purple-500/20 blur-2xl animate-pulse" />
-      <div className="absolute -inset-1.5 rounded-full bg-purple-400/10 blur-md" />
+      {/* Subtle glow */}
+      <div className="absolute -inset-2 rounded-2xl bg-accent/8 blur-xl" />
       <div
-        className="relative bg-white/70 dark:bg-white/10 backdrop-blur-2xl backdrop-saturate-200 border border-purple-300/30 dark:border-purple-400/20 rounded-full shadow-[0_0_20px_rgba(168,85,247,0.15),0_0_40px_rgba(168,85,247,0.08),inset_0_0_0_1px_rgba(255,255,255,0.4)] px-4 py-3 sm:px-5 sm:py-4"
+        className="relative bg-card border border-border rounded-xl shadow-sm px-4 py-3"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleFileDrop}
       >

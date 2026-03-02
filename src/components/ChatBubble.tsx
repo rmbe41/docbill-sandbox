@@ -71,8 +71,8 @@ const ChatBubble = ({ message }: { message: ChatMessage }) => {
         className={cn(
           "rounded-2xl px-4 py-3 text-sm leading-relaxed",
           isUser
-            ? "max-w-[75%] bg-chat-user text-chat-user-foreground rounded-br-md"
-            : "max-w-[90%] chat-bubble-assistant rounded-bl-md"
+            ? "max-w-[85%] sm:max-w-[75%] bg-chat-user text-chat-user-foreground rounded-br-md"
+            : "max-w-[95%] sm:max-w-[90%] chat-bubble-assistant rounded-bl-md"
         )}
       >
         {message.attachments?.map((att) => (
