@@ -2,34 +2,28 @@
 
 ## Problem
 
-The assistant's table output is constrained to `max-w-[75%]` of the chat bubble. With 7 columns (Nr., GOÄ, Bezeichnung, Faktor, Betrag, Status, Anmerkung), the table gets cramped and hard to read. The user wants:
-
-1. **Wider table display** — tables should break out of the narrow bubble width
-2. **Horizontal scroll** when content overflows
-3. **Frozen/sticky first columns** (the original invoice data: Nr., GOÄ, Bezeichnung) so they stay visible while scrolling to see Status/Anmerkung
+When the AI identifies issues (e.g., "factor above threshold, justification needed" or "justification too generic"), it only states the problem but doesn't provide a **concrete, copy-paste-ready suggestion** for how to fix it. Users need actionable text they can directly use.
 
 ## Plan
 
-### 1. Widen assistant bubble for table content
+### Add "KONKRETE VORSCHLÄGE" rule to the system prompt
 
-In `ChatBubble.tsx`, change the assistant bubble's `max-w-[75%]` to `max-w-[90%]` so tables have more room. User bubbles stay at 75%.
+In `supabase/functions/goae-chat/index.ts`, add a new mandatory rule section to `FORMATTING_RULES` and update the table example:
 
-### 2. Add custom table renderer with horizontal scroll + sticky columns
+1. **New rule in HARTE REGELN**: Add a rule that every ⚠️ or ❌ annotation MUST include a concrete suggestion — not just describe the problem
+2. **New "Vorschlag" column** in the main table (or expand "Anmerkung" to include a suggestion line), e.g.:
 
-In `ChatBubble.tsx`, add a custom `table` component to `markdownComponents` that:
-- Wraps the table in a horizontally scrollable container (`overflow-x-auto`)
-- Applies `position: sticky; left: 0` to the first 3 columns (Nr., GOÄ, Bezeichnung) with a background color so they don't become transparent when scrolling
+```
+| 3 | 5 | Beratung | 3,0× | 30,60€ | ⚠️ | Über Schwellenwert → **Vorschlag:** „Aufgrund der überdurchschnittlichen Komplexität bei [Diagnose] und erhöhtem Zeitaufwand von ca. XX Min. ist ein Faktor von 3,0× gerechtfertigt." |
+```
 
-### 3. CSS for sticky columns
-
-In `index.css`, add styles:
-- `.markdown-output table td:nth-child(-n+3)` and `th:nth-child(-n+3)` get `position: sticky` with calculated `left` offsets
-- Background color matching the row (including zebra-stripe) so sticky cells cover content beneath
-- A subtle right border/shadow on the 3rd column to indicate the freeze boundary
-- `white-space: nowrap` on the first 3 columns to prevent wrapping, `min-width` values for consistent column sizing
+3. **Add explicit instruction block** in SYSTEM_PROMPT explaining:
+   - For factor issues: provide a specific justification text template with placeholders
+   - For exclusion conflicts: suggest which code to keep/remove and why
+   - For missing codes: suggest the exact code with expected amount
+   - For generic justifications: rewrite the justification concretely
 
 ### Files to modify
 
-- `src/components/ChatBubble.tsx` — widen assistant bubble, add custom table wrapper component
-- `src/index.css` — sticky column styles, scroll container styles
+- `supabase/functions/goae-chat/index.ts` — add concrete-suggestion rules to prompt + update table example
 
