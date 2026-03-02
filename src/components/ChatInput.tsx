@@ -108,7 +108,7 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           placeholder="Beschreiben Sie die erbrachten Leistungen oder stellen Sie eine Frage zur GOÄ…"
           rows={1}
           className={cn(
-            "flex-1 resize-none bg-transparent rounded-xl px-3 py-2 text-sm sm:text-base lg:text-lg",
+            "flex-1 resize-none bg-transparent rounded-xl px-3 py-2 text-sm",
             "placeholder:text-muted-foreground focus:outline-none",
             "min-h-[40px] sm:min-h-[44px] lg:min-h-[48px] max-h-[200px]"
           )}
