@@ -301,10 +301,10 @@
   transition: background 0.15s;
 }
 
-/* ─── Sticky first 3 columns ─── */
+/* ─── Sticky first 3 columns (only for wide tables with 5+ columns) ─── */
 
-.markdown-output th:nth-child(1),
-.markdown-output td:nth-child(1) {
+.markdown-output table:has(th:nth-child(5)) th:nth-child(1),
+.markdown-output table:has(th:nth-child(5)) td:nth-child(1) {
   position: sticky;
   left: 0;
   z-index: 2;
@@ -312,8 +312,8 @@
   white-space: nowrap;
 }
 
-.markdown-output th:nth-child(2),
-.markdown-output td:nth-child(2) {
+.markdown-output table:has(th:nth-child(5)) th:nth-child(2),
+.markdown-output table:has(th:nth-child(5)) td:nth-child(2) {
   position: sticky;
   left: 2.5rem;
   z-index: 2;
@@ -321,8 +321,8 @@
   white-space: nowrap;
 }
 
-.markdown-output th:nth-child(3),
-.markdown-output td:nth-child(3) {
+.markdown-output table:has(th:nth-child(5)) th:nth-child(3),
+.markdown-output table:has(th:nth-child(5)) td:nth-child(3) {
   position: sticky;
   left: 6rem;
   z-index: 2;
@@ -330,24 +330,24 @@
   box-shadow: 2px 0 4px hsl(var(--foreground) / 0.06);
 }
 
-/* Sticky column backgrounds */
-.markdown-output thead th:nth-child(-n+3) {
+/* Sticky column backgrounds (wide tables only) */
+.markdown-output table:has(th:nth-child(5)) thead th:nth-child(-n+3) {
   background: hsl(var(--muted));
 }
 
-.markdown-output tbody tr:nth-child(odd) td:nth-child(-n+3) {
+.markdown-output table:has(th:nth-child(5)) tbody tr:nth-child(odd) td:nth-child(-n+3) {
   background: hsl(var(--chat-assistant));
 }
 
-.markdown-output tbody tr:nth-child(even) td:nth-child(-n+3) {
+.markdown-output table:has(th:nth-child(5)) tbody tr:nth-child(even) td:nth-child(-n+3) {
   background: hsl(var(--muted) / 0.3);
 }
 
-.dark .markdown-output tbody tr:nth-child(odd) td:nth-child(-n+3) {
+.dark .markdown-output table:has(th:nth-child(5)) tbody tr:nth-child(odd) td:nth-child(-n+3) {
   background: hsl(var(--chat-assistant));
 }
 
-.dark .markdown-output tbody tr:nth-child(even) td:nth-child(-n+3) {
+.dark .markdown-output table:has(th:nth-child(5)) tbody tr:nth-child(even) td:nth-child(-n+3) {
   background: hsl(215 20% 14%);
 }
 

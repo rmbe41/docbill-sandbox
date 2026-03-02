@@ -44,9 +44,9 @@ Deine Antwort folgt IMMER dieser einfachen Struktur:
 
 ## 💡 Optimierungspotenzial
 
-| Empfehlung | GOÄ | Faktor | Zusätzlich |
-|------------|-----|--------|------------|
-| Hinzufügen | 1202 | 2,3× | +9,92€ |
+| GOÄ | Beschreibung | Potenzial |
+|-----|-------------|-----------|
+| **1202** 2,3× | Refraktionsbestimmung – empfohlen bei [klinischer Kontext] | +9,92€ |
 
 ---
 
