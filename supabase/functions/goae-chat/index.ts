@@ -12,63 +12,48 @@ import { GOAE_KATALOG } from "./goae-catalog.ts";
 const FORMATTING_RULES = `
 ## ⚠️ PFLICHT-FORMATIERUNGSREGELN (IMMER BEFOLGEN!)
 
-Du MUSST jede Antwort visuell klar strukturieren. Unformatierte Textwände sind INAKZEPTABEL.
+### STRUKTUR-PRINZIP: EINE TABELLE MIT INLINE-KORREKTUREN
+
+Deine Antwort folgt IMMER dieser einfachen Struktur:
+
+1. **EINE Haupttabelle** mit ALLEN Positionen der Rechnung — Korrekturen und Hinweise stehen DIREKT in der gleichen Zeile
+2. Danach ein kurzer **Optimierungsblock** (falls zutreffend)
+3. Am Ende eine **Zusammenfassung** in 2-3 Bullet Points
 
 ### HARTE REGELN:
-1. **Trennlinien**: Verwende \`---\` zwischen JEDEM thematischen Abschnitt
-2. **Überschriften**: Jeder Abschnitt beginnt mit einer \`## Emoji Überschrift\`
-3. **Bullet Points**: Jede Aufzählung ab 2 Punkten MUSS als Bullet-Liste formatiert sein
-4. **Tabellen**: Daten mit 3+ Spalten MÜSSEN als Markdown-Tabelle dargestellt werden
-5. **Kurze Absätze**: NIEMALS mehr als 3 Sätze ohne visuellen Umbruch (Leerzeile, Bullet, Tabelle oder Trennlinie)
-6. **Fettdruck**: Wichtige Begriffe, Ziffern und Beträge IMMER **fett** markieren
+- **Trennlinien**: Verwende \`---\` zwischen den 3 Blöcken
+- **Bullet Points**: Jede Aufzählung ab 2 Punkten als Liste
+- **Fettdruck**: Wichtige Begriffe, Ziffern und Beträge IMMER **fett**
+- **NIEMALS** mehr als 3 Sätze ohne visuellen Umbruch
+- **KEINE getrennten Sektionen** für "korrekt" und "fehlerhaft" — alles in EINER Tabelle
 
-### PFLICHT-EMOJIS FÜR SEKTIONEN:
-- 📋 = Erkannte Positionen / Übersicht
-- ✅ = Korrekte Positionen / Bestätigungen
-- ⚠️ = Probleme / Warnungen / Korrekturbedarf
-- 💡 = Optimierungspotenzial / Tipps
-- 📝 = Zusammenfassung
+### PFLICHT-TABELLENFORMAT:
 
-### BEISPIEL-AUSGABESTRUKTUR:
+## 📋 Rechnungsanalyse
 
-## 📋 Erkannte Abrechnungspositionen
+| Nr. | GOÄ | Bezeichnung | Faktor | Betrag | Status | Anmerkung |
+|-----|-----|-------------|--------|--------|--------|-----------|
+| 1 | 1240 | Spaltlampe | 2,3× | 9,92€ | ✅ | Korrekt |
+| 2 | 1242 | Funduskopie | 2,3× | 6,47€ | ⚠️ | Ausschluss mit 1240 |
+| 3 | 5 | Beratung | 3,0× | 30,60€ | ⚠️ | Über Schwellenwert, Begründung nötig |
 
-| Nr. | GOÄ-Ziffer | Bezeichnung | Faktor | Betrag |
-|-----|-----------|-------------|--------|--------|
-| 1   | 1240      | Spaltlampe  | 2,3×   | 9,92€  |
-
-**Summe:** 9,92 €
-
----
-
-## ✅ Korrekt abgerechnete Positionen
-
-- **GOÄ 1240** – Spaltlampenmikroskopie: korrekt mit Faktor 2,3×
-
----
-
-## ⚠️ Probleme & Korrekturbedarf
-
-- **GOÄ 1242** und **1240** dürfen nicht zusammen abgerechnet werden (Ausschlussziffer)
-- Faktor 3,0× bei **GOÄ 5** erfordert eine schriftliche Begründung (Schwellenwert 2,3×)
+**Legende:** ✅ = korrekt, ⚠️ = Korrekturbedarf, ❌ = fehlerhaft, 💡 = Optimierungstipp
 
 ---
 
 ## 💡 Optimierungspotenzial
 
-| Empfehlung | GOÄ-Ziffer | Faktor | Zusätzlich |
-|------------|-----------|--------|------------|
-| Hinzufügen | 1202      | 2,3×   | +9,92 €    |
-
-**Geschätztes Potenzial:** +9,92 €
+| Empfehlung | GOÄ | Faktor | Zusätzlich |
+|------------|-----|--------|------------|
+| Hinzufügen | 1202 | 2,3× | +9,92€ |
 
 ---
 
 ## 📝 Zusammenfassung
 
-- 2 Positionen korrekt
-- 1 Ausschlusskonflikt gefunden
-- Optimierungspotenzial: **+9,92 €**
+- **X** von **Y** Positionen korrekt
+- **Z** Korrekturen empfohlen
+- Optimierungspotenzial: **+XX,XX €**
 
 FORMATIERUNG IST PFLICHT — halte dich IMMER an diese Struktur!
 `;
