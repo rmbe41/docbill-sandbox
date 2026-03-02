@@ -14,7 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      global_settings: {
+        Row: {
+          default_model: string
+          default_rules: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          default_model?: string
+          default_rules?: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          default_model?: string
+          default_rules?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          custom_rules: string | null
+          id: string
+          selected_model: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          custom_rules?: string | null
+          id?: string
+          selected_model?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          custom_rules?: string | null
+          id?: string
+          selected_model?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

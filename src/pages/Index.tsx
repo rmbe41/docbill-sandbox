@@ -5,6 +5,8 @@ import ChatInput from "@/components/ChatInput";
 import TypingIndicator from "@/components/TypingIndicator";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 
@@ -13,6 +15,20 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const { user } = useAuth();
+  const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null }>({ selected_model: null, custom_rules: null });
+  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string }>({ default_model: "google/gemini-2.5-flash", default_rules: "" });
+
+  useEffect(() => {
+    if (!user) return;
+    const loadSettings = async () => {
+      const { data: gData } = await supabase.from("global_settings").select("*").limit(1).single();
+      if (gData) setGlobalSettings({ default_model: gData.default_model, default_rules: gData.default_rules });
+      const { data: uData } = await supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle();
+      if (uData) setUserSettings({ selected_model: uData.selected_model, custom_rules: uData.custom_rules });
+    };
+    loadSettings();
+  }, [user]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -113,7 +129,12 @@ const Index = () => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${supabaseKey}`,
           },
-          body: JSON.stringify({ messages: apiMessages, files: filePayloads.length > 0 ? filePayloads : undefined }),
+          body: JSON.stringify({
+            messages: apiMessages,
+            files: filePayloads.length > 0 ? filePayloads : undefined,
+            model: userSettings.selected_model || globalSettings.default_model,
+            extra_rules: [globalSettings.default_rules, userSettings.custom_rules].filter(Boolean).join("\n\n"),
+          }),
         });
 
         if (resp.status === 429) {
