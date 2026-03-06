@@ -31,7 +31,7 @@ const WelcomeScreen = ({ onSuggestionClick }: WelcomeScreenProps) => {
       </div>
 
       <h2 className="text-xl font-semibold text-foreground mb-2">
-        Willkommen bei GOÄ-DocBilling
+        Willkommen bei DocBill
       </h2>
       <p className="text-sm text-muted-foreground text-center max-w-md mb-8">
         Ihr KI-Assistent für die ophthalmologische GOÄ-Abrechnung. 
