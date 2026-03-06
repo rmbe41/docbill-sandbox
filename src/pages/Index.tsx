@@ -251,7 +251,7 @@ const Index = () => {
 
       <AppHeader onToggleHistory={() => setSidebarOpen((v) => !v)} />
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto pb-36 sm:pb-32">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto pb-44 sm:pb-40">
         {messages.length === 0 ? (
           <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
         ) : (
