@@ -1,4 +1,5 @@
-import { Eye, Settings, LogOut, History } from "lucide-react";
+import { Settings, LogOut, History } from "lucide-react";
+import DocBillLogo from "@/assets/DocBill-Logo.svg";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -18,8 +19,8 @@ const AppHeader = ({ onToggleHistory }: Props) => {
           <History className="w-4 h-4" />
         </Button>
       )}
-      <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary">
-        <Eye className="w-5 h-5 text-primary-foreground" />
+      <div className="flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden">
+        <img src={DocBillLogo} alt="DocBill Logo" className="w-9 h-9" />
       </div>
       <div className="flex-1">
         <h1 className="text-base font-semibold text-foreground leading-tight">
