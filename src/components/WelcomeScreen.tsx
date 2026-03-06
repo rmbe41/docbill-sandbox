@@ -1,5 +1,4 @@
 import { FileText, HelpCircle, ClipboardCheck } from "lucide-react";
-import DocBillLogo from "@/assets/DocBill-Logo.svg";
 
 const suggestions = [
   {
@@ -26,9 +25,7 @@ type WelcomeScreenProps = {
 const WelcomeScreen = ({ onSuggestionClick }: WelcomeScreenProps) => {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 animate-fade-in">
-      <div className="flex items-center justify-center w-16 h-16 rounded-2xl overflow-hidden mb-6">
-        <img src={DocBillLogo} alt="DocBill Logo" className="w-16 h-16" />
-      </div>
+      <div className="text-5xl mb-6">👋</div>
 
       <h2 className="text-xl font-semibold text-foreground mb-2">
         Willkommen bei DocBill

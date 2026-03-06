@@ -1,8 +1,9 @@
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { User, Bot, FileText } from "lucide-react";
+import { User, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
+import DocBillLogo from "@/assets/DocBill-Logo.svg";
 
 export type ChatMessage = {
   id: string;
@@ -62,8 +63,8 @@ const ChatBubble = ({ message }: { message: ChatMessage }) => {
       )}
     >
       {!isUser && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent flex items-center justify-center mt-1">
-          <Bot className="w-4 h-4 text-accent-foreground" />
+        <div className="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden mt-1">
+          <img src={DocBillLogo} alt="DocBill" className="w-8 h-8" />
         </div>
       )}
 
