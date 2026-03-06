@@ -8,4 +8,10 @@ if (savedScale) {
   document.documentElement.style.fontSize = `${savedScale}%`;
 }
 
+// Apply saved theme
+const savedTheme = localStorage.getItem("theme");
+if (savedTheme === "dark") {
+  document.documentElement.classList.add("dark");
+}
+
 createRoot(document.getElementById("root")!).render(<App />);

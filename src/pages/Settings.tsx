@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { ArrowLeft, Save, Globe, User, Cpu, Type } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { ArrowLeft, Save, Globe, User, Cpu, Type, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const AVAILABLE_MODELS = [
@@ -28,6 +29,9 @@ const Settings = () => {
   const [uiScale, setUiScale] = useState(() => {
     const saved = localStorage.getItem("ui-scale");
     return saved ? parseInt(saved, 10) : 100;
+  });
+  const [darkMode, setDarkMode] = useState(() => {
+    return document.documentElement.classList.contains("dark");
   });
   const [globalModel, setGlobalModel] = useState("google/gemini-2.5-flash");
   const [globalRules, setGlobalRules] = useState("");
@@ -163,8 +167,32 @@ const Settings = () => {
         {activeTab === "display" && (
           <div className="space-y-6">
             <p className="text-sm text-muted-foreground">
-              Passen Sie die Schrift- und UI-Größe an Ihre Bedürfnisse an.
+              Passen Sie Darstellung und Erscheinungsbild an.
             </p>
+
+            {/* Dark Mode Toggle */}
+            <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-card">
+              <div className="flex items-center gap-3">
+                {darkMode ? <Moon className="w-5 h-5 text-accent" /> : <Sun className="w-5 h-5 text-accent" />}
+                <div>
+                  <p className="text-sm font-medium text-foreground">Dark Mode</p>
+                  <p className="text-xs text-muted-foreground">Dunkles Erscheinungsbild aktivieren</p>
+                </div>
+              </div>
+              <Switch
+                checked={darkMode}
+                onCheckedChange={(checked) => {
+                  setDarkMode(checked);
+                  if (checked) {
+                    document.documentElement.classList.add("dark");
+                    localStorage.setItem("theme", "dark");
+                  } else {
+                    document.documentElement.classList.remove("dark");
+                    localStorage.setItem("theme", "light");
+                  }
+                }}
+              />
+            </div>
             <div className="space-y-4">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Type className="w-4 h-4 text-accent" />
