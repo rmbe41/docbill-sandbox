@@ -60,14 +60,25 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="flex flex-col items-center gap-3">
-          <div className="flex items-center justify-center w-14 h-14 rounded-2xl overflow-hidden">
-            <img src={DocBillLogo} alt="DocBill Logo" className="w-14 h-14" />
+      <div className="w-full max-w-md space-y-8">
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex items-center justify-center w-16 h-16 rounded-2xl overflow-hidden">
+            <img src={DocBillLogo} alt="DocBill Logo" className="w-16 h-16" />
           </div>
-          <h1 className="text-xl font-semibold text-foreground">GOÄ-DocBilling</h1>
-          <p className="text-sm text-muted-foreground text-center">
-            {isLogin ? "Melden Sie sich an" : "Erstellen Sie ein Konto"}
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-bold text-foreground">DocBilling</h1>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              Die KI für optimale Privatabrechnung in der Augenheilkunde.
+            </p>
+          </div>
+          <ul className="text-sm text-muted-foreground space-y-1.5 mt-2">
+            <li className="flex items-center gap-2"><span className="text-accent">✔</span> GOÄ-konforme Prüfung</li>
+            <li className="flex items-center gap-2"><span className="text-accent">✔</span> Automatische Rechnungserstellung</li>
+            <li className="flex items-center gap-2"><span className="text-accent">✔</span> Umsatzpotenziale erkennen</li>
+            <li className="flex items-center gap-2"><span className="text-accent">✔</span> 6 Stunden Zeit pro Woche sparen</li>
+          </ul>
+          <p className="text-xs font-medium text-foreground mt-2">
+            Jetzt anmelden und loslegen
           </p>
         </div>
 
