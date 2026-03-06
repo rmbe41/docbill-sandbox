@@ -66,7 +66,7 @@ const Auth = () => {
             <img src={DocBillLogo} alt="DocBill Logo" className="w-16 h-16" />
           </div>
           <div className="text-center space-y-2">
-            <h1 className="text-2xl font-bold text-foreground">DocBilling</h1>
+            <h1 className="text-2xl font-bold text-foreground">DocBill</h1>
             <p className="text-sm text-muted-foreground max-w-xs">
               Die KI für optimale Privatabrechnung in der Augenheilkunde.
             </p>
