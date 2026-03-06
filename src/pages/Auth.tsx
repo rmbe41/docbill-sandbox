@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, Mail, Lock } from "lucide-react";
+import { Mail, Lock } from "lucide-react";
+import DocBillLogo from "@/assets/DocBill-Logo.svg";
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -61,8 +62,8 @@ const Auth = () => {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-3">
-          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary">
-            <Eye className="w-7 h-7 text-primary-foreground" />
+          <div className="flex items-center justify-center w-14 h-14 rounded-2xl overflow-hidden">
+            <img src={DocBillLogo} alt="DocBill Logo" className="w-14 h-14" />
           </div>
           <h1 className="text-xl font-semibold text-foreground">GOÄ-DocBilling</h1>
           <p className="text-sm text-muted-foreground text-center">
