@@ -24,7 +24,7 @@
     --muted: 210 15% 95%;
     --muted-foreground: 215 12% 50%;
 
-    --accent: 175 55% 38%;
+    --accent: 222 70% 55%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 72% 51%;
@@ -32,7 +32,7 @@
 
     --border: 210 18% 89%;
     --input: 210 18% 89%;
-    --ring: 175 55% 38%;
+    --ring: 222 70% 55%;
 
     --radius: 0.625rem;
 
@@ -45,7 +45,7 @@
     --surface-raised: 0 0% 100%;
     --surface-raised-shadow: 0 0 0 1px hsl(210 18% 89%), 0 1px 3px hsl(215 25% 15% / 0.04), 0 4px 12px hsl(215 25% 15% / 0.03);
     --gradient-brand: linear-gradient(135deg, hsl(210 40% 18%), hsl(210 35% 28%));
-    --gradient-accent: linear-gradient(135deg, hsl(175 55% 38%), hsl(175 50% 45%));
+    --gradient-accent: linear-gradient(135deg, hsl(222 70% 55%), hsl(222 65% 62%));
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -64,20 +64,20 @@
     --card-foreground: 210 20% 92%;
     --popover: 215 22% 11%;
     --popover-foreground: 210 20% 92%;
-    --primary: 175 55% 45%;
+    --primary: 222 70% 55%;
     --primary-foreground: 215 25% 8%;
     --secondary: 215 20% 16%;
     --secondary-foreground: 210 20% 92%;
     --muted: 215 20% 16%;
     --muted-foreground: 215 12% 55%;
-    --accent: 175 55% 38%;
+    --accent: 222 70% 55%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
     --border: 215 18% 18%;
     --input: 215 18% 18%;
-    --ring: 175 55% 38%;
-    --chat-user: 175 55% 38%;
+    --ring: 222 70% 55%;
+    --chat-user: 222 70% 55%;
     --chat-user-foreground: 0 0% 100%;
     --chat-assistant: 215 22% 14%;
     --chat-assistant-foreground: 210 20% 92%;
@@ -207,9 +207,9 @@
 }
 
 .section-card-accent {
-  background: hsl(175 45% 93%);
+  background: hsl(222 45% 93%);
   border-left-color: hsl(var(--accent));
-  color: hsl(175 40% 20%);
+  color: hsl(222 40% 20%);
 }
 
 .section-card-neutral {
@@ -238,9 +238,9 @@
 }
 
 .dark .section-card-accent {
-  background: hsl(175 30% 14%);
-  border-left-color: hsl(175 45% 50%);
-  color: hsl(175 25% 78%);
+  background: hsl(222 30% 14%);
+  border-left-color: hsl(222 45% 50%);
+  color: hsl(222 25% 78%);
 }
 
 .dark .section-card-neutral {
