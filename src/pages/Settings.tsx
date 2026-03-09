@@ -8,10 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { ArrowLeft, Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText } from "lucide-react";
+import { DEFAULT_GLOBAL_GUARDRAILS_RULES } from "@/data/default-global-rules";
+import { ArrowLeft, Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const DEBOUNCE_MS = 500;
+const GLOBAL_RULE_SEPARATOR = "\n\n<<DOCBILL_RULE_SEPARATOR>>\n\n";
 
 const AVAILABLE_MODELS = [
   { value: "openrouter/free", label: "OpenRouter Free", desc: "Kostenlos – für Tests" },
@@ -30,6 +32,18 @@ type ContextFile = {
   created_at: string;
 };
 
+const serializeGlobalRuleFields = (fields: string[]): string =>
+  fields.map((f) => f.trim()).filter(Boolean).join(GLOBAL_RULE_SEPARATOR);
+
+const parseGlobalRuleFields = (value: string): string[] => {
+  if (!value?.trim()) return [DEFAULT_GLOBAL_GUARDRAILS_RULES];
+  if (value.includes(GLOBAL_RULE_SEPARATOR)) {
+    const blocks = value.split(GLOBAL_RULE_SEPARATOR).map((b) => b.trim()).filter(Boolean);
+    return blocks.length > 0 ? blocks : [DEFAULT_GLOBAL_GUARDRAILS_RULES];
+  }
+  return [value];
+};
+
 const Settings = () => {
   const { user, isAdmin } = useAuth();
   const navigate = useNavigate();
@@ -45,6 +59,7 @@ const Settings = () => {
   });
   const [globalModel, setGlobalModel] = useState("openrouter/free");
   const [globalRules, setGlobalRules] = useState("");
+  const [globalRuleFields, setGlobalRuleFields] = useState<string[]>([DEFAULT_GLOBAL_GUARDRAILS_RULES]);
   const [userModel, setUserModel] = useState<string | null>(null);
   const [userRules, setUserRules] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,6 +85,7 @@ const Settings = () => {
       if (gData) {
         setGlobalModel(gData.default_model);
         setGlobalRules(gData.default_rules);
+        setGlobalRuleFields(parseGlobalRuleFields(gData.default_rules));
       }
       const { data: uData } = await supabase
         .from("user_settings")
@@ -206,7 +222,7 @@ const Settings = () => {
   const handleModelSelect = (value: string) => {
     if (activeTab === "global") {
       setGlobalModel(value);
-      saveGlobal(value, globalRules);
+      saveGlobal(value, serializeGlobalRuleFields(globalRuleFields));
     } else {
       setUserModel(value);
       saveUser(value, userRules);
@@ -215,9 +231,8 @@ const Settings = () => {
 
   const handleRulesChange = (value: string) => {
     if (activeTab === "global") {
+      // Global rules are edited via dedicated field handlers below.
       setGlobalRules(value);
-      if (rulesDebounceRef.current) clearTimeout(rulesDebounceRef.current);
-      rulesDebounceRef.current = setTimeout(() => saveGlobal(modelRef.current, value), DEBOUNCE_MS);
     } else {
       setUserRules(value);
       if (rulesDebounceRef.current) clearTimeout(rulesDebounceRef.current);
@@ -232,6 +247,36 @@ const Settings = () => {
     setUserModel(null);
     saveUser(null, userRules);
   };
+
+  const handleResetGlobalRulesToDefault = () => {
+    if (!isAdmin) return;
+    const resetFields = [DEFAULT_GLOBAL_GUARDRAILS_RULES];
+    setGlobalRuleFields(resetFields);
+    setGlobalRules(DEFAULT_GLOBAL_GUARDRAILS_RULES);
+    saveGlobal(globalModel, DEFAULT_GLOBAL_GUARDRAILS_RULES);
+  };
+
+  const handleGlobalRuleFieldChange = (index: number, value: string) => {
+    const next = [...globalRuleFields];
+    next[index] = value;
+    setGlobalRuleFields(next);
+    const serialized = serializeGlobalRuleFields(next);
+    setGlobalRules(serialized);
+    if (rulesDebounceRef.current) clearTimeout(rulesDebounceRef.current);
+    rulesDebounceRef.current = setTimeout(
+      () => saveGlobal(modelRef.current, serialized),
+      DEBOUNCE_MS
+    );
+  };
+
+  const handleAddGlobalRuleField = () => {
+    setGlobalRuleFields((prev) => [...prev, ""]);
+  };
+
+  const currentGlobalRulesSerialized = serializeGlobalRuleFields(globalRuleFields);
+  const isGlobalRulesEdited =
+    activeTab === "global" &&
+    currentGlobalRulesSerialized.trim() !== DEFAULT_GLOBAL_GUARDRAILS_RULES.trim();
 
   const handleDisplayChange = (msg: string) => {
     toast({ title: "Gespeichert", description: msg });
@@ -379,22 +424,66 @@ const Settings = () => {
           <Label className="text-sm font-semibold">
             {activeTab === "global" ? "Globale Guardrails & Rules" : "Persönliche Rules (Optional)"}
           </Label>
-          <Textarea
-            value={currentRules}
-            onChange={(e) => handleRulesChange(e.target.value)}
-            placeholder={
-              activeTab === "global"
-                ? "z.B. Antworte immer auf Deutsch. Empfehle keine rechtswidrigen Praktiken."
-                : "z.B. Fokussiere dich auf Retinologie. Verwende immer die höchstmöglichen Steigerungssätze."
-            }
-            rows={6}
-            className="font-mono text-sm"
-          />
+          {activeTab === "global" && isAdmin ? (
+            <div className="space-y-3">
+              {globalRuleFields.map((rule, index) => (
+                <div key={index} className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs text-muted-foreground">
+                      {index === 0 ? "Standard Global Guardrails & Rules" : `Zusätzliche Regel ${index}`}
+                    </Label>
+                    {index === 0 && isGlobalRulesEdited && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleResetGlobalRulesToDefault}
+                      >
+                        Auf Standard „Global Guardrails & Rules“ zurücksetzen
+                      </Button>
+                    )}
+                  </div>
+                  <Textarea
+                    value={rule}
+                    onChange={(e) => handleGlobalRuleFieldChange(index, e.target.value)}
+                    placeholder={
+                      index === 0
+                        ? "Standard-Guardrails..."
+                        : "Neue zusätzliche Regel..."
+                    }
+                    rows={index === 0 ? 10 : 4}
+                    className="font-mono text-sm"
+                  />
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAddGlobalRuleField}
+                className="gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Neue Regel hinzufügen
+              </Button>
+            </div>
+          ) : (
+            <Textarea
+              value={currentRules}
+              onChange={(e) => handleRulesChange(e.target.value)}
+              placeholder="z.B. Fokussiere dich auf Retinologie. Verwende immer die höchstmöglichen Steigerungssätze."
+              rows={6}
+              className="font-mono text-sm"
+            />
+          )}
           <p className="text-xs text-muted-foreground">
             {activeTab === "global"
               ? "Diese Regeln gelten für alle Nutzer als Basis."
               : "Ihre Regeln werden zusätzlich zu den globalen Defaults angewendet."}
           </p>
+          {activeTab === "global" && isAdmin && (
+            <p className="text-xs text-muted-foreground">
+              Admins können weiterhin jederzeit neue Regeln ergänzen oder bestehende Regeln bearbeiten.
+            </p>
+          )}
         </div>
 
         {activeTab === "global" && isAdmin && (

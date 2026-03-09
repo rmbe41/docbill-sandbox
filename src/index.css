@@ -398,4 +398,59 @@
   margin: 0.75rem 0;
 }
 
+/* ─── Invoice Result Tables ─── */
+
+.invoice-table-wrapper {
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
+.invoice-table {
+  width: 100%;
+  font-size: 0.8rem;
+  border-collapse: collapse;
+}
+
+.invoice-th {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
+  border-bottom: 1px solid hsl(var(--border));
+  white-space: nowrap;
+}
+
+.invoice-td {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid hsl(var(--border) / 0.4);
+  vertical-align: middle;
+}
+
+.invoice-table tbody tr:hover {
+  background: hsl(var(--muted) / 0.4);
+  transition: background 0.15s;
+}
+
+.invoice-table tbody tr:nth-child(even) {
+  background: hsl(var(--muted) / 0.15);
+}
+
+.invoice-table tbody tr:nth-child(even):hover {
+  background: hsl(var(--muted) / 0.4);
+}
+
+/* Subtle left-border highlight for rows with issues */
+.invoice-table tbody tr:has(td .bg-red-50) {
+  border-left: 2px solid hsl(0 72% 51%);
+}
+.invoice-table tbody tr:has(td .bg-amber-50) {
+  border-left: 2px solid hsl(38 92% 50%);
+}
+
 /* ─── Floating Island removed sparkle/blue ─── */

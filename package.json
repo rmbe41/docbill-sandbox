@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "goae:fetch": "npx tsx scripts/fetch-goae-all.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

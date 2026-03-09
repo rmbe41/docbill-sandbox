@@ -3,6 +3,7 @@ import AppHeader from "@/components/AppHeader";
 import ChatBubble, { type ChatMessage } from "@/components/ChatBubble";
 import ChatInput from "@/components/ChatInput";
 import TypingIndicator from "@/components/TypingIndicator";
+import PipelineProgress from "@/components/PipelineProgress";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import ConversationSidebar from "@/components/ConversationSidebar";
 import { useToast } from "@/hooks/use-toast";
@@ -10,6 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { supabase } from "@/integrations/supabase/client";
 import { parsePositionsFromText, validatePositions } from "@/lib/goae-validator";
+import type { InvoiceResultData } from "@/components/InvoiceResult";
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 
@@ -17,6 +19,11 @@ const Index = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pipelineStep, setPipelineStep] = useState<{
+    step: number;
+    totalSteps: number;
+    label: string;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
@@ -49,7 +56,7 @@ const Index = () => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, pipelineStep]);
 
   // Load messages when selecting a conversation
   const handleSelectConversation = useCallback(
@@ -139,6 +146,7 @@ const Index = () => {
       }));
 
       let assistantContent = "";
+      let invoiceData: InvoiceResultData | undefined;
 
       const upsertAssistant = (chunk: string) => {
         assistantContent += chunk;
@@ -146,12 +154,19 @@ const Index = () => {
           const last = prev[prev.length - 1];
           if (last?.role === "assistant") {
             return prev.map((m, i) =>
-              i === prev.length - 1 ? { ...m, content: assistantContent } : m
+              i === prev.length - 1
+                ? { ...m, content: assistantContent, invoiceResult: invoiceData }
+                : m
             );
           }
           return [
             ...prev,
-            { id: crypto.randomUUID(), role: "assistant" as const, content: assistantContent },
+            {
+              id: crypto.randomUUID(),
+              role: "assistant" as const,
+              content: assistantContent,
+              invoiceResult: invoiceData,
+            },
           ];
         });
       };
@@ -226,6 +241,33 @@ const Index = () => {
             if (jsonStr === "[DONE]") break;
             try {
               const parsed = JSON.parse(jsonStr);
+
+              // Pipeline progress events
+              if (parsed.type === "pipeline_progress") {
+                setPipelineStep({
+                  step: parsed.step,
+                  totalSteps: parsed.totalSteps,
+                  label: parsed.label,
+                });
+                continue;
+              }
+
+              // Pipeline result (structured data → render InvoiceResult component)
+              if (parsed.type === "pipeline_result") {
+                setPipelineStep(null);
+                invoiceData = parsed.data as InvoiceResultData;
+                upsertAssistant("");
+                continue;
+              }
+
+              // Pipeline error
+              if (parsed.type === "pipeline_error") {
+                setPipelineStep(null);
+                upsertAssistant(`\n\n❌ **Pipeline-Fehler:** ${parsed.error}`);
+                continue;
+              }
+
+              // Standard OpenRouter streaming content
               const c = parsed.choices?.[0]?.delta?.content as string | undefined;
               if (c) upsertAssistant(c);
             } catch {
@@ -234,6 +276,8 @@ const Index = () => {
             }
           }
         }
+
+        setPipelineStep(null);
 
         // Post-response validation: parse GOÄ positions and validate deterministically
         if (assistantContent) {
@@ -296,7 +340,14 @@ const Index = () => {
             {messages.map((msg) => (
               <ChatBubble key={msg.id} message={msg} />
             ))}
-            {isLoading && <TypingIndicator />}
+            {isLoading && pipelineStep && (
+              <PipelineProgress
+                step={pipelineStep.step}
+                totalSteps={pipelineStep.totalSteps}
+                label={pipelineStep.label}
+              />
+            )}
+            {isLoading && !pipelineStep && <TypingIndicator />}
           </div>
         )}
       </div>
