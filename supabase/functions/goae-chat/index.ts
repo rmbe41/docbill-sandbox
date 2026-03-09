@@ -97,12 +97,16 @@ DEINE KERNKOMPETENZEN:
 - Fokus auf Augenheilkunde, aber alle Fachgebiete abdeckbar
 
 DOKUMENTENANALYSE (WICHTIGSTE FUNKTION):
-Wenn der Nutzer ein Bild oder PDF einer Rechnung/Abrechnung hochlädt:
+Wenn der Nutzer ein Bild oder PDF einer Rechnung/Abrechnung hochlädt, MUSST du das Dokument ZUERST vollständig auslesen, dann wie folgt vorgehen:
 
-1. **ERKENNUNG**: Lies ALLE Abrechnungspositionen aus dem Dokument aus
-2. **IST-ANALYSE**: Stelle die erkannten Positionen als Tabelle dar
-3. **PRÜFUNG**: Analysiere jede Position auf Korrektheit
-4. **OPTIMIERUNG**: Schlage konkrete Verbesserungen vor
+1. **AUSLESEN**: Lies das Dokument vollständig aus – alle Texte, Tabellen, Abrechnungspositionen, Ziffern, Beträge und Faktoren. Ignoriere das Dokument NICHT.
+2. **STRUKTURIERTE DARSTELLUNG**: Stelle ALLE erkannten Positionen in der vorgeschriebenen Tabellenform dar.
+3. **BEWERTUNG**: Für jede Position: Bestätigung (✅), Korrektur (⚠️/❌) oder Optimierungsvorschlag (💡).
+4. **KORREKTUREN**: Bei Fehlern nenne konkrete Lösungen – welche Ziffer entfernen/ändern, welcher Betrag korrekt ist.
+5. **OPTIMIERUNG**: Schlage fehlende abrechenbare Ziffern vor, wenn sie im GOÄ-Katalog stehen und klinisch passen.
+6. **BEGRÜNDUNGEN**: Bei Steigerungsfaktoren über Schwellenwert: formuliere fertige Begründungsvorschläge.
+
+⚠️ PFLICHT: Du darfst NICHTS erfinden. Agiere ausschließlich im Rahmen deines Kontextwissens (GOÄ-Katalog, Paragraphen, Regeln). Keine Ziffern oder Beträge, die nicht in deinem Kontext stehen.
 
 ⚠️ DATENSCHUTZ / DSGVO:
 - Gib NIEMALS personenbezogene Daten in deiner Antwort wieder
@@ -117,6 +121,16 @@ WICHTIGE REGELN:
 - Sei bei der Optimierung IMMER regelkonform
 - Antworte IMMER auf Deutsch
 - Verwende Euro-Beträge mit 2 Dezimalstellen
+
+QUELLEN DEINES WISSENS bei Fragen wie "Woher beziehst du dein Wissen?":
+Antworte stets, dass dein GOÄ-Wissen aus dem **lokalen DocBill-Kontext** stammt, NICHT aus Wikipedia oder allgemeinem Training:
+- **GOÄ-Katalog**: Ziffern, Bezeichnungen, Punktwerte
+- **GOÄ-Paragraphen**: Rechtliche Grundlagen
+- **GOÄ-Regeln**: Analoge Bewertung, Begründungen, Abschnitte
+- **Globale Regeln**: Vom Administrator vorgegebene Guardrails
+- **Persönliche Regeln**: Nutzerspezifische Zusatzregeln
+- **Admin-Kontext-Dateien**: Vom Admin hochgeladene .txt/.md/.csv
+Erwähne NICHT Wikipedia, allgemeines Internet oder generelles Modell-Training.
 
 ERINNERUNG: Befolge IMMER die Formatierungsregeln am Anfang dieser Anweisung!
 
@@ -185,7 +199,7 @@ serve(async (req) => {
       const lastMsg = apiMessages[lastUserIdx];
 
       const fileDescriptions = files.map((f: any) => f.name).join(", ");
-      const defaultText = `Bitte analysiere die angehängten Dokumente (${fileDescriptions}) und schlage passende GOÄ-Ziffern vor. Beachte: Gib keine personenbezogenen Daten in deiner Antwort wieder.`;
+      const defaultText = `Lies die angehängten Dokumente (${fileDescriptions}) vollständig aus. Extrahiere alle Abrechnungspositionen, stelle sie strukturiert dar und gib für jede Position Bestätigung, Korrektur oder Optimierungsvorschläge. Erfinde nichts – nutze nur dein GOÄ-Kontextwissen. Gib keine personenbezogenen Daten wieder.`;
 
       const contentParts: any[] = [
         { type: "text", text: lastMsg.content || defaultText },
@@ -194,15 +208,13 @@ serve(async (req) => {
       for (const file of files) {
         const mimeType = file.type || "application/octet-stream";
         if (mimeType === "application/pdf") {
-          // PDFs: send as data URL so multimodal models can process them visually,
-          // plus add a text hint so the model knows to OCR it
+          // PDFs: send as file type (OpenRouter parses PDF natively)
           contentParts.push({
-            type: "image_url",
-            image_url: { url: `data:${mimeType};base64,${file.data}` },
-          });
-          contentParts.push({
-            type: "text",
-            text: `[Anhang: PDF-Dokument "${file.name}" – bitte lese alle sichtbaren Texte, Tabellen und Abrechnungspositionen aus diesem PDF aus. Gib keine personenbezogenen Daten wieder.]`,
+            type: "file",
+            file: {
+              filename: file.name,
+              fileData: `data:application/pdf;base64,${file.data}`,
+            },
           });
         } else {
           contentParts.push({
@@ -215,6 +227,18 @@ serve(async (req) => {
       apiMessages[lastUserIdx] = { role: lastMsg.role, content: contentParts };
     }
 
+    const hasPdf = files?.some((f: any) => (f.type || "").includes("pdf"));
+    const requestBody: Record<string, unknown> = {
+      model: model || "openrouter/free",
+      messages: apiMessages,
+      stream: true,
+    };
+    if (hasPdf) {
+      requestBody.plugins = [
+        { id: "file-parser", pdf: { engine: "mistral-ocr" } },
+      ];
+    }
+
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
@@ -223,11 +247,7 @@ serve(async (req) => {
           Authorization: `Bearer ${OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: model || "openrouter/free",
-          messages: apiMessages,
-          stream: true,
-        }),
+        body: JSON.stringify(requestBody),
       }
     );
 
