@@ -41,9 +41,12 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
 
   const handleFileDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const ALLOWED = ["application/pdf", "image/jpeg", "image/png", "image/heic"];
+    const ALLOWED = [
+      "application/pdf",
+      "image/jpeg", "image/png", "image/gif", "image/bmp", "image/tiff", "image/heic",
+    ];
     const dropped = Array.from(e.dataTransfer.files).filter(
-      (f) => ALLOWED.includes(f.type) || /\.(jpe?g|png|heic|pdf)$/i.test(f.name)
+      (f) => ALLOWED.includes(f.type) || /\.(jpe?g|png|gif|bmp|tiff?|heic|pdf)$/i.test(f.name)
     );
     if (dropped.length > 0) setFiles((prev) => [...prev, ...dropped]);
   }, []);
@@ -87,14 +90,14 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
         <button
           onClick={() => fileInputRef.current?.click()}
           className="flex-shrink-0 p-1.5 sm:p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-          title="Datei hochladen (PDF, JPEG, PNG, HEIC)"
+          title="Datei hochladen (PDF, JPEG, PNG, GIF, BMP, TIFF, HEIC)"
         >
           <Paperclip className="w-5 h-5" />
         </button>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.jpg,.jpeg,.png,.heic"
+          accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.tif,.tiff,.heic"
           multiple
           className="hidden"
           onChange={handleFileSelect}

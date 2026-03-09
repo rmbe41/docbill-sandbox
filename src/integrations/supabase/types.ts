@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_context_files: {
+        Row: {
+          id: string
+          filename: string
+          content_text: string
+          uploaded_by: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          filename: string
+          content_text: string
+          uploaded_by: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          filename?: string
+          content_text?: string
+          uploaded_by?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       conversations: {
         Row: {
           created_at: string
@@ -90,6 +114,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_roles: {
+        Row: {
+          id: string
+          user_id: string
+          role: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          role?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          role?: string
+          created_at?: string
+        }
+        Relationships: []
       }
       user_settings: {
         Row: {

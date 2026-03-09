@@ -1,12 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Mail, Lock } from "lucide-react";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
+
+const getRedirectUrl = () => {
+  const url = window.location.origin;
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+};
+
+const isOAuthSuccessCallback = () => {
+  const hash = window.location.hash;
+  if (!hash) return false;
+  const params = new URLSearchParams(hash.replace("#", ""));
+  return !!params.get("access_token");
+};
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -15,29 +26,58 @@ const Auth = () => {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash) return;
+    const params = new URLSearchParams(hash.replace("#", ""));
+    const error = params.get("error");
+    const errorDescription = params.get("error_description");
+    if (error) {
+      toast({
+        title: "Anmeldung fehlgeschlagen",
+        description: errorDescription || error,
+        variant: "destructive",
+      });
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [toast]);
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        if (data.session) {
+          setEmail("");
+          setPassword("");
+        }
       } else {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: window.location.origin },
+          options: {
+            emailRedirectTo: getRedirectUrl(),
+          },
         });
         if (error) throw error;
-        toast({
-          title: "Registrierung erfolgreich",
-          description: "Bitte bestätigen Sie Ihre E-Mail-Adresse.",
-        });
+        if (data.session) {
+          setEmail("");
+          setPassword("");
+          toast({ title: "Registrierung erfolgreich", description: "Sie sind angemeldet." });
+        } else {
+          toast({
+            title: "Registrierung erfolgreich",
+            description: "Bitte bestätigen Sie Ihre E-Mail-Adresse über den Link in der E-Mail.",
+          });
+        }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Ein Fehler ist aufgetreten.";
       toast({
         title: "Fehler",
-        description: error.message,
+        description: msg,
         variant: "destructive",
       });
     } finally {
@@ -46,17 +86,34 @@ const Auth = () => {
   };
 
   const handleGoogleSignIn = async () => {
-    const { error } = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${getRedirectUrl()}/auth`,
+        queryParams: {
+          prompt: "select_account",
+          access_type: "offline",
+        },
+      },
     });
+    setLoading(false);
     if (error) {
       toast({
         title: "Fehler",
-        description: "Google-Anmeldung fehlgeschlagen.",
+        description: error.message,
         variant: "destructive",
       });
     }
   };
+
+  if (isOAuthSuccessCallback()) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-muted-foreground">Anmeldung wird abgeschlossen…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
@@ -86,6 +143,7 @@ const Auth = () => {
           variant="outline"
           className="w-full"
           onClick={handleGoogleSignIn}
+          disabled={loading}
         >
           <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>

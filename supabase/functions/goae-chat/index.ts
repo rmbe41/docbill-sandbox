@@ -6,8 +6,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// GOÄ catalog imported as separate constant for clarity
 import { GOAE_KATALOG } from "./goae-catalog.ts";
+import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
+import { GOAE_ANALOGE_BEWERTUNG, GOAE_BEGRUENDUNGEN, GOAE_ABSCHNITTE } from "./goae-regeln.ts";
 
 const FORMATTING_RULES = `
 ## ⚠️ PFLICHT-FORMATIERUNGSREGELN (IMMER BEFOLGEN!)
@@ -120,7 +121,16 @@ WICHTIGE REGELN:
 ERINNERUNG: Befolge IMMER die Formatierungsregeln am Anfang dieser Anweisung!
 
 DEIN GOÄ-WISSEN:
-${GOAE_KATALOG}`;
+
+${GOAE_PARAGRAPHEN}
+
+${GOAE_ABSCHNITTE}
+
+${GOAE_KATALOG}
+
+${GOAE_ANALOGE_BEWERTUNG}
+
+${GOAE_BEGRUENDUNGEN}`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -129,14 +139,40 @@ serve(async (req) => {
 
   try {
     const { messages, files, model, extra_rules } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+    if (!OPENROUTER_API_KEY) {
+      return new Response(
+        JSON.stringify({
+          error: "OPENROUTER_API_KEY fehlt. Supabase Dashboard → Project Settings → Edge Functions → Secrets → OPENROUTER_API_KEY hinzufügen. Kostenloser Key: openrouter.ai",
+        }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    const systemContent = extra_rules
-      ? `${SYSTEM_PROMPT}\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extra_rules}`
-      : SYSTEM_PROMPT;
+    // Load admin-uploaded context files from Supabase
+    let adminContext = "";
+    try {
+      const sbUrl = Deno.env.get("SUPABASE_URL");
+      const sbKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (sbUrl && sbKey) {
+        const ctxResp = await fetch(
+          `${sbUrl}/rest/v1/admin_context_files?select=filename,content_text&order=created_at.asc`,
+          { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
+        );
+        if (ctxResp.ok) {
+          const ctxFiles = await ctxResp.json();
+          if (ctxFiles?.length > 0) {
+            adminContext = "\n\n## ADMIN-KONTEXT-DATEIEN:\n" +
+              ctxFiles.map((f: any) => `### ${f.filename}\n${f.content_text}`).join("\n\n");
+          }
+        }
+      }
+    } catch { /* non-critical */ }
+
+    let systemContent = SYSTEM_PROMPT + adminContext;
+    if (extra_rules) {
+      systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extra_rules}`;
+    }
     const apiMessages: any[] = [{ role: "system", content: systemContent }];
 
     for (const msg of messages) {
@@ -157,25 +193,38 @@ serve(async (req) => {
 
       for (const file of files) {
         const mimeType = file.type || "application/octet-stream";
-        contentParts.push({
-          type: "image_url",
-          image_url: { url: `data:${mimeType};base64,${file.data}` },
-        });
+        if (mimeType === "application/pdf") {
+          // PDFs: send as data URL so multimodal models can process them visually,
+          // plus add a text hint so the model knows to OCR it
+          contentParts.push({
+            type: "image_url",
+            image_url: { url: `data:${mimeType};base64,${file.data}` },
+          });
+          contentParts.push({
+            type: "text",
+            text: `[Anhang: PDF-Dokument "${file.name}" – bitte lese alle sichtbaren Texte, Tabellen und Abrechnungspositionen aus diesem PDF aus. Gib keine personenbezogenen Daten wieder.]`,
+          });
+        } else {
+          contentParts.push({
+            type: "image_url",
+            image_url: { url: `data:${mimeType};base64,${file.data}` },
+          });
+        }
       }
 
       apiMessages[lastUserIdx] = { role: lastMsg.role, content: contentParts };
     }
 
     const response = await fetch(
-      "https://ai.gateway.lovable.dev/v1/chat/completions",
+      "https://openrouter.ai/api/v1/chat/completions",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: model || "google/gemini-2.5-flash",
+          model: model || "openrouter/free",
           messages: apiMessages,
           stream: true,
         }),
@@ -207,8 +256,29 @@ serve(async (req) => {
       }
       const t = await response.text();
       console.error("AI gateway error:", response.status, t);
+      let errMsg = "AI-Gateway Fehler";
+      try {
+        const parsed = JSON.parse(t);
+        const e = parsed?.error;
+        if (typeof e === "object" && e?.message) errMsg = e.message;
+        else if (typeof e === "string") errMsg = e;
+        else if (parsed?.detail) errMsg = String(parsed.detail);
+        else if (parsed?.message) errMsg = String(parsed.message);
+      } catch {
+        /* use fallback */
+      }
+      if (errMsg === "AI-Gateway Fehler") {
+        const hints: Record<number, string> = {
+          401: "OpenRouter API-Key ungültig. Prüfen Sie OPENROUTER_API_KEY in Supabase Secrets.",
+          403: "Anfrage von Moderation blockiert.",
+          408: "Zeitüberschreitung. Bitte erneut versuchen.",
+          502: "Modell-Anbieter vorübergehend nicht erreichbar.",
+          503: "Kein Modell-Anbieter verfügbar. Anderes Modell wählen (z.B. google/gemma-3n-e2b-it:free).",
+        };
+        errMsg = hints[response.status] ?? `OpenRouter Fehler (${response.status}).`;
+      }
       return new Response(
-        JSON.stringify({ error: "AI-Gateway Fehler" }),
+        JSON.stringify({ error: errMsg }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

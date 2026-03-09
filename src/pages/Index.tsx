@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { supabase } from "@/integrations/supabase/client";
+import { parsePositionsFromText, validatePositions } from "@/lib/goae-validator";
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 
@@ -20,7 +21,7 @@ const Index = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null }>({ selected_model: null, custom_rules: null });
-  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string }>({ default_model: "google/gemini-2.5-flash", default_rules: "" });
+  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string }>({ default_model: "openrouter/free", default_rules: "" });
 
   const {
     conversations,
@@ -187,11 +188,23 @@ const Index = () => {
           return;
         }
         if (resp.status === 402) {
-          toast({ title: "Credits erschöpft", description: "Bitte laden Sie Ihre Credits auf.", variant: "destructive" });
+          toast({ title: "Credits erschöpft", description: "Bitte laden Sie Ihre Credits auf oder wählen Sie ein kostenloses Modell (Einstellungen).", variant: "destructive" });
           setIsLoading(false);
           return;
         }
-        if (!resp.ok || !resp.body) throw new Error("Stream failed");
+        if (!resp.ok) {
+          let errMsg = "Die Anfrage konnte nicht verarbeitet werden.";
+          try {
+            const errBody = await resp.json();
+            if (errBody?.error) errMsg = errBody.error;
+          } catch {
+            errMsg = resp.status === 401 ? "Nicht autorisiert. Prüfen Sie die Supabase-Konfiguration." : errMsg;
+          }
+          toast({ title: "Fehler", description: errMsg, variant: "destructive" });
+          setIsLoading(false);
+          return;
+        }
+        if (!resp.body) throw new Error("Stream failed");
 
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
@@ -218,6 +231,30 @@ const Index = () => {
             } catch {
               textBuffer = line + "\n" + textBuffer;
               break;
+            }
+          }
+        }
+
+        // Post-response validation: parse GOÄ positions and validate deterministically
+        if (assistantContent) {
+          const positions = parsePositionsFromText(assistantContent);
+          if (positions.length > 0) {
+            const validationResults = validatePositions(positions);
+            if (validationResults.length > 0) {
+              const warnings = validationResults
+                .map((r) => `- ${r.severity === "error" ? "❌" : "⚠️"} ${r.message}`)
+                .join("\n");
+              const validationNote = `\n\n---\n\n## 🔍 Automatische Validierung\n\n${warnings}`;
+              assistantContent += validationNote;
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return prev.map((m, i) =>
+                    i === prev.length - 1 ? { ...m, content: assistantContent } : m
+                  );
+                }
+                return prev;
+              });
             }
           }
         }
