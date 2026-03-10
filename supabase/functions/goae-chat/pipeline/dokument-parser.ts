@@ -71,7 +71,7 @@ export async function parseDokument(
         type: "file",
         file: {
           filename: file.name,
-          fileData: `data:application/pdf;base64,${file.data}`,
+          file_data: `data:application/pdf;base64,${file.data}`,
         },
       });
     } else {

@@ -21,7 +21,12 @@ export interface LlmCallOptions {
 }
 
 export async function callLlm(opts: LlmCallOptions): Promise<string> {
-  const modelsToTry = buildFallbackModels(opts.model);
+  const hasMultimodal = opts.userContent.some((part) => {
+    if (!part || typeof part !== "object") return false;
+    const t = (part as { type?: string }).type;
+    return t === "file" || t === "image_url";
+  });
+  const modelsToTry = buildFallbackModels(opts.model, { multimodal: hasMultimodal });
   let lastError = "Unbekannter Fehler";
 
   for (let i = 0; i < modelsToTry.length; i++) {
