@@ -44,12 +44,13 @@ export default function FileOverlay({ src, name, type, onClose }: FileOverlayPro
   }, []);
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center"
-      onClick={onClose}
-    >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      {/* Backdrop – Klick schließt Overlay */}
+      <div
+        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden
+      />
 
       {/* Toolbar */}
       <div
@@ -86,16 +87,13 @@ export default function FileOverlay({ src, name, type, onClose }: FileOverlayPro
         <ToolbarButton icon={X} onClick={onClose} title="Schließen (Esc)" />
       </div>
 
-      {/* Content */}
-      <div
-        className="relative z-[1] flex items-center justify-center w-full h-full p-12"
-        onClick={(e) => e.stopPropagation()}
-      >
+      {/* Content – Klick auf leeren Bereich (außer Bild/PDF) schließt via Backdrop */}
+      <div className="relative z-[1] flex items-center justify-center w-full h-full p-12 pointer-events-none">
         {isImage && src && (
           <img
             src={src}
             alt={name}
-            className="max-w-full max-h-full object-contain select-none transition-transform duration-200"
+            className="max-w-full max-h-full object-contain select-none transition-transform duration-200 pointer-events-auto"
             style={{
               transform: `scale(${scale}) rotate(${rotation}deg)`,
             }}
@@ -109,12 +107,12 @@ export default function FileOverlay({ src, name, type, onClose }: FileOverlayPro
           <iframe
             src={src}
             title={name}
-            className="w-full max-w-4xl h-[85vh] rounded-lg border border-white/10 bg-white"
+            className="w-full max-w-4xl h-[85vh] rounded-lg border border-white/10 bg-white pointer-events-auto"
           />
         )}
 
         {!isImage && !isPdf && (
-          <div className="flex flex-col items-center gap-4 text-white/80">
+          <div className="flex flex-col items-center gap-4 text-white/80 pointer-events-auto">
             <FileText className="w-16 h-16" />
             <p className="text-lg font-medium">{name}</p>
             <p className="text-sm text-white/50">Vorschau nicht verfügbar</p>

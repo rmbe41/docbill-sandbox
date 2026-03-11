@@ -453,4 +453,18 @@
   border-left: 2px solid hsl(38 92% 50%);
 }
 
+/* Mobile: kleinere Schrift und Paddings */
+@media (max-width: 639px) {
+  .invoice-table-mobile {
+    font-size: 0.7rem;
+  }
+  .invoice-table-mobile .invoice-th,
+  .invoice-table-mobile .invoice-td {
+    padding: 0.35rem 0.5rem;
+  }
+  .invoice-table-mobile .invoice-th {
+    font-size: 0.65rem;
+  }
+}
+
 /* ─── Floating Island removed sparkle/blue ─── */

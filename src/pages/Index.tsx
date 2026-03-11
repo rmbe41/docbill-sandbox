@@ -104,7 +104,10 @@ const Index = () => {
       const attachments = files?.map((f) => ({
         name: f.name,
         type: f.type,
-        previewUrl: f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined,
+        previewUrl:
+          f.type.startsWith("image/") || f.type === "application/pdf"
+            ? URL.createObjectURL(f)
+            : undefined,
       }));
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),

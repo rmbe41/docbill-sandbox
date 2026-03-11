@@ -150,11 +150,28 @@ export function pruefeRechnung(
   const positionen: GeprueftePosition[] = [];
   const optimierungen: Optimierung[] = [];
 
+  // Bei Ausschluss: welche Positionen streichen (niedrigerer Betrag)
+  const ausschlussExcluded = new Set<number>();
+
   let korrekt = 0;
   let warnungen = 0;
   let fehler = 0;
   let rechnungsSumme = 0;
   let korrigierteSumme = 0;
+
+  // Erste Runde: Ausschluss-Paare ermitteln
+  for (const pos of rechnung.positionen) {
+    const eintrag = katalog.get(pos.ziffer);
+    if (!eintrag) continue;
+    const expandedAusschl = expandAusschluesse(eintrag.ausschlussziffern);
+    for (const andere of rechnung.positionen) {
+      if (andere.nr === pos.nr) continue;
+      if (expandedAusschl.includes(andere.ziffer)) {
+        const toExclude = pos.betrag <= andere.betrag ? pos.nr : andere.nr;
+        ausschlussExcluded.add(toExclude);
+      }
+    }
+  }
 
   for (const pos of rechnung.positionen) {
     const eintrag = katalog.get(pos.ziffer);
@@ -262,7 +279,10 @@ export function pruefeRechnung(
     else fehler++;
 
     const korrigiert = eintrag ? berechneterBetrag : pos.betrag;
-    korrigierteSumme += korrigiert * pos.anzahl;
+    // Bei Ausschluss: Position nicht in korrigierteSumme (wird gestrichen)
+    if (!ausschlussExcluded.has(pos.nr)) {
+      korrigierteSumme += korrigiert * pos.anzahl;
+    }
 
     positionen.push({
       nr: pos.nr,

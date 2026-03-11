@@ -198,100 +198,210 @@ function PositionRow({ pos }: { pos: GeprueftePosition }) {
 
 export default function InvoiceResult({ data }: { data: InvoiceResultData }) {
   const { positionen, optimierungen, zusammenfassung: z } = data;
+  const [optExpanded, setOptExpanded] = useState(false);
 
   return (
-    <div className="invoice-result space-y-4">
-      {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <SummaryCard
-          label="Positionen"
-          value={z.gesamt}
-          detail={`${z.korrekt} korrekt`}
-          variant="neutral"
-        />
-        <SummaryCard
-          label="Warnungen"
-          value={z.warnungen}
-          variant={z.warnungen > 0 ? "warning" : "neutral"}
-        />
-        <SummaryCard
-          label="Fehler"
-          value={z.fehler}
-          variant={z.fehler > 0 ? "error" : "neutral"}
-        />
-        <SummaryCard
-          label="Optimierung"
-          value={`+${formatEuro(z.optimierungsPotenzial)}`}
-          variant={z.optimierungsPotenzial > 0 ? "accent" : "neutral"}
-        />
-      </div>
-
-      {/* ── Totals ── */}
-      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground px-1">
-        <span>Rechnungssumme: <strong className="text-foreground">{formatEuro(z.rechnungsSumme)}</strong></span>
-        {Math.abs(z.rechnungsSumme - z.korrigierteSumme) > 0.02 && (
-          <span>Korrigiert: <strong className="text-emerald-600 dark:text-emerald-400">{formatEuro(z.korrigierteSumme)}</strong></span>
-        )}
-      </div>
-
-      {/* ── Positions Table ── */}
-      <div className="invoice-table-wrapper">
-        <table className="invoice-table">
-          <thead>
-            <tr>
-              <th className="invoice-th text-center w-10">Nr.</th>
-              <th className="invoice-th w-16">GOÄ</th>
-              <th className="invoice-th">Bezeichnung</th>
-              <th className="invoice-th text-right w-16">Faktor</th>
-              <th className="invoice-th text-right w-20">Betrag</th>
-              <th className="invoice-th text-right w-20">Korrektur</th>
-              <th className="invoice-th text-center w-20">Status</th>
-              <th className="invoice-th w-8" />
-            </tr>
-          </thead>
-          <tbody>
-            {positionen.map((pos) => (
-              <PositionRow key={pos.nr} pos={pos} />
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ── Optimizations ── */}
-      {optimierungen.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Lightbulb className="w-4 h-4 text-amber-500" />
-            Optimierungspotenzial
-          </h3>
-          <div className="invoice-table-wrapper">
-            <table className="invoice-table">
-              <thead>
-                <tr>
-                  <th className="invoice-th w-16">GOÄ</th>
-                  <th className="invoice-th">Bezeichnung</th>
-                  <th className="invoice-th text-right w-16">Faktor</th>
-                  <th className="invoice-th text-right w-20">Potenzial</th>
-                  <th className="invoice-th">Begründung</th>
-                </tr>
-              </thead>
-              <tbody>
-                {optimierungen.map((opt, i) => (
-                  <tr key={i}>
-                    <td className="invoice-td font-mono font-semibold">{opt.ziffer}</td>
-                    <td className="invoice-td">{opt.bezeichnung}</td>
-                    <td className="invoice-td text-right font-mono">{opt.faktor.toFixed(1).replace(".", ",")}×</td>
-                    <td className="invoice-td text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                      +{formatEuro(opt.betrag)}
-                    </td>
-                    <td className="invoice-td text-muted-foreground text-xs">{opt.begruendung}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+    <div className="invoice-result space-y-6">
+      {/* ── Überblick ── */}
+      <section className="rounded-xl border border-border bg-card p-4">
+        <h2 className="text-sm font-semibold text-foreground mb-3">Überblick</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <SummaryCard
+            label="Pos."
+            value={z.gesamt}
+            detail={`${z.korrekt} korrekt`}
+            variant="neutral"
+          />
+          <SummaryCard
+            label="Warn."
+            value={z.warnungen}
+            variant={z.warnungen > 0 ? "warning" : "neutral"}
+          />
+          <SummaryCard
+            label="Fehl."
+            value={z.fehler}
+            variant={z.fehler > 0 ? "error" : "neutral"}
+          />
+          <BetragCard
+            rechnungsSumme={z.rechnungsSumme}
+            korrigierteSumme={z.korrigierteSumme}
+            optimierungsPotenzial={z.optimierungsPotenzial}
+          />
         </div>
+        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
+          <span>Rechnungssumme: <strong className="text-foreground">{formatEuro(z.rechnungsSumme)}</strong></span>
+          {Math.abs(z.rechnungsSumme - z.korrigierteSumme) > 0.02 && (
+            <span>Korrigiert: <strong className="text-emerald-600 dark:text-emerald-400">{formatEuro(z.korrigierteSumme)}</strong></span>
+          )}
+        </div>
+      </section>
+
+      {/* ── Geprüfte Positionen ── */}
+      <section className="rounded-xl border border-border bg-card p-4">
+        <h2 className="text-sm font-semibold text-foreground mb-3">Geprüfte Positionen</h2>
+        <div className="invoice-table-wrapper">
+          <table className="invoice-table invoice-table-mobile">
+            <thead>
+              <tr>
+                <th className="invoice-th text-center w-10">Nr.</th>
+                <th className="invoice-th w-16">GOÄ</th>
+                <th className="invoice-th">Bezeichnung</th>
+                <th className="invoice-th text-right w-16">Faktor</th>
+                <th className="invoice-th text-right w-20">Betrag</th>
+                <th className="invoice-th text-right w-20">Korrektur</th>
+                <th className="invoice-th text-center w-20">Status</th>
+                <th className="invoice-th w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {positionen.map((pos) => (
+                <PositionRow key={pos.nr} pos={pos} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ── Optimierungspotenzial (einklappbar) ── */}
+      {optimierungen.length > 0 && (
+        <section className="rounded-xl border border-border bg-card overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setOptExpanded(!optExpanded)}
+            className="flex items-center justify-between w-full p-4 text-left hover:bg-muted/30 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Lightbulb className="w-4 h-4 text-amber-500" />
+              Optimierungspotenzial ({optimierungen.length})
+            </span>
+            {optExpanded ? (
+              <ChevronUp className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+          {optExpanded && (
+            <div className="px-4 pb-4 pt-0">
+              {/* Mobile: Cards */}
+              <div className="sm:hidden space-y-2">
+                {optimierungen.map((opt, i) => (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-border bg-muted/30 p-3 space-y-1"
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="font-mono font-semibold">{opt.ziffer}</span>
+                      <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                        +{formatEuro(opt.betrag)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-foreground">{opt.bezeichnung}</p>
+                    <p className="text-xs text-muted-foreground">{opt.begruendung}</p>
+                    <p className="text-xs font-mono text-muted-foreground">{opt.faktor.toFixed(1).replace(".", ",")}×</p>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop: Tabelle */}
+              <div className="hidden sm:block invoice-table-wrapper">
+                <table className="invoice-table">
+                  <thead>
+                    <tr>
+                      <th className="invoice-th w-16">GOÄ</th>
+                      <th className="invoice-th">Bezeichnung</th>
+                      <th className="invoice-th text-right w-16">Faktor</th>
+                      <th className="invoice-th text-right w-20">Potenzial</th>
+                      <th className="invoice-th">Begründung</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {optimierungen.map((opt, i) => (
+                      <tr key={i}>
+                        <td className="invoice-td font-mono font-semibold">{opt.ziffer}</td>
+                        <td className="invoice-td">{opt.bezeichnung}</td>
+                        <td className="invoice-td text-right font-mono">{opt.faktor.toFixed(1).replace(".", ",")}×</td>
+                        <td className="invoice-td text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                          +{formatEuro(opt.betrag)}
+                        </td>
+                        <td className="invoice-td text-muted-foreground text-xs">{opt.begruendung}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
       )}
+    </div>
+  );
+}
+
+// ── Betrag Card (Korrektur + Opt.) ──
+
+function BetragCard({
+  rechnungsSumme,
+  korrigierteSumme,
+  optimierungsPotenzial,
+}: {
+  rechnungsSumme: number;
+  korrigierteSumme: number;
+  optimierungsPotenzial: number;
+}) {
+  const delta = korrigierteSumme - rechnungsSumme;
+  const hasKorrektur = Math.abs(delta) > 0.02;
+  const hasOpt = optimierungsPotenzial > 0.01;
+
+  if (hasKorrektur) {
+    const isReduktion = delta < 0;
+    return (
+      <div
+        className={cn(
+          "rounded-lg border p-2.5",
+          isReduktion
+            ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
+            : "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
+        )}
+      >
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+          Betrag
+        </p>
+        <p
+          className={cn(
+            "text-lg font-bold",
+            isReduktion ? "text-red-700 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400",
+          )}
+        >
+          {isReduktion ? "" : "+"}
+          {formatEuro(Math.abs(delta))}
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          {isReduktion ? "Reduktion" : "Korrektur"}
+        </p>
+      </div>
+    );
+  }
+
+  if (hasOpt) {
+    return (
+      <div className="rounded-lg border p-2.5 bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+          Betrag
+        </p>
+        <p className="text-lg font-bold text-emerald-700 dark:text-emerald-400">
+          +{formatEuro(optimierungsPotenzial)}
+        </p>
+        <p className="text-[10px] text-muted-foreground">Optimierung</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border p-2.5 bg-muted/50 dark:bg-muted/30">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+        Betrag
+      </p>
+      <p className="text-lg font-bold text-foreground">—</p>
+      <p className="text-[10px] text-muted-foreground">unverändert</p>
     </div>
   );
 }
