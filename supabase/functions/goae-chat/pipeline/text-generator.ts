@@ -52,6 +52,12 @@ Für JEDE Position mit Fehler/Warnung als EIGENER Bullet (keine Fließtexte):
 Bei Begründungspflicht: Formuliere eine fertige, kopierbare Begründung mit klinischem Bezug.
 Bei Ausschlussziffern: Sage konkret, welche Ziffer behalten/entfernen (mit Betragsvergleich).
 
+Bei Betragsfehler UND vorhandener Begründung (z.B. „aufwändig“, „Zeitaufwand“):
+- Ziffer im GOÄ-Katalog prüfen (Schwellenwert, Höchstsatz)
+- Wenn Begründung auf höheren Aufwand hindeutet: erhöhten Faktor vorschlagen (bis Schwellenwert, ggf. Höchstsatz)
+- Betrag neu berechnen: Punkte × Punktwert × neuer Faktor
+- Falls Begründung zu pauschal: konkretere, kopierbare Begründung vorschlagen (z.B. mit Zeitangabe, § 5 Abs. 2 GOÄ)
+
 ### 💡 Empfehlungen
 
 Falls Optimierungen vorgeschlagen wurden, als Bullets:
@@ -95,6 +101,9 @@ export function buildTextGenerationPrompt(result: PipelineResult): string {
   for (const pos of result.pruefung.positionen) {
     lines.push(`### Position ${pos.nr}: GOÄ ${pos.ziffer} – ${pos.bezeichnung}`);
     lines.push(`Faktor: ${pos.faktor}× | Betrag: ${pos.betrag.toFixed(2)}€ | Berechnet: ${pos.berechneterBetrag.toFixed(2)}€ | Status: ${pos.status}`);
+    if (pos.begruendung) {
+      lines.push(`Begründung: ${pos.begruendung}`);
+    }
 
     if (pos.pruefungen.length > 0) {
       lines.push("Prüfungen:");

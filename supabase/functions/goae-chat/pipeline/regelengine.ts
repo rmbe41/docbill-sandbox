@@ -193,6 +193,18 @@ export function pruefeRechnung(
           nachricht: `Betrag ${formatEuro(pos.betrag)} weicht ab. Korrekt bei ${pos.faktor}×: ${formatEuro(berechneterBetrag)} (${eintrag.punkte} Pkt × ${PUNKTWERT}€ × ${pos.faktor}).`,
           vorschlag: `Betrag auf ${formatEuro(berechneterBetrag)} korrigieren.`,
         });
+        // Bei Betragsfehler + Begründung mit Aufwand-Hinweis: Faktoranhebung prüfen
+        const AUFWAND_KEYWORDS = /aufwändig|aufwendig|zeitaufwand|erhöht|enorm|verlängert|erschwert/i;
+        const deutetAufAufwand = pos.begruendung && AUFWAND_KEYWORDS.test(pos.begruendung);
+        if (deutetAufAufwand && pos.faktor < eintrag.schwellenfaktor) {
+          const betragBeiSchwelle = round2(eintrag.punkte * PUNKTWERT * eintrag.schwellenfaktor);
+          pruefungen.push({
+            typ: "faktor_erhoehung_empfohlen",
+            schwere: "info",
+            nachricht: `Begründung deutet auf höheren Aufwand. Schwellenwert: ${eintrag.schwellenfaktor}×, Höchstsatz: ${eintrag.hoechstfaktor}×.`,
+            vorschlag: `Faktor auf ${eintrag.schwellenfaktor}× erhöhen → ${formatEuro(betragBeiSchwelle)}. Begründung ggf. mit Zeitangabe präzisieren (§ 5 Abs. 2 GOÄ).`,
+          });
+        }
       }
     }
 
@@ -293,6 +305,7 @@ export function pruefeRechnung(
       berechneterBetrag,
       status,
       pruefungen,
+      begruendung: pos.begruendung,
     });
   }
 

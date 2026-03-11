@@ -110,7 +110,8 @@ export interface Pruefung {
     | "doppelt"
     | "begruendung_fehlt"
     | "analog"
-    | "zielleistung";
+    | "zielleistung"
+    | "faktor_erhoehung_empfohlen";
   schwere: "fehler" | "warnung" | "info";
   nachricht: string;
   vorschlag?: string;
@@ -125,6 +126,7 @@ export interface GeprueftePosition {
   berechneterBetrag: number;
   status: "korrekt" | "warnung" | "fehler";
   pruefungen: Pruefung[];
+  begruendung?: string;
 }
 
 export interface Optimierung {
