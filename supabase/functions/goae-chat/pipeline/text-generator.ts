@@ -45,25 +45,22 @@ Fasse kurz den klinischen Kontext und das Fachgebiet zusammen (2-3 Sätze).
 
 ### ⚠️ Korrekturbedarf
 
-Für JEDE Position mit Status "fehler" oder "warnung":
-- **GOÄ [Ziffer]** – [Problem kurz erklären]
-  → **Vorschlag:** "[konkreter, kopierbarer Lösungstext]"
+Für JEDE Position mit Fehler/Warnung als EIGENER Bullet (keine Fließtexte):
+- **GOÄ [Ziffer]** – [Problem in 1 Satz]
+  - **Vorschlag:** [konkreter, kopierbarer Lösungstext]
 
-Bei Begründungspflicht (Faktor > Schwellenwert):
-→ Formuliere eine **fertige, kopierbare Begründung** mit konkretem klinischen Bezug.
-
-Bei Ausschlussziffern-Konflikt:
-→ Sage konkret, welche Ziffer behalten/entfernen und warum (mit Betragsvergleich).
+Bei Begründungspflicht: Formuliere eine fertige, kopierbare Begründung mit klinischem Bezug.
+Bei Ausschlussziffern: Sage konkret, welche Ziffer behalten/entfernen (mit Betragsvergleich).
 
 ### 💡 Empfehlungen
 
-Falls Optimierungen vorgeschlagen wurden:
-- Erkläre kurz, warum die vorgeschlagenen Ziffern klinisch sinnvoll sind
-- Gib den Kontext für Analogbewertungen nach § 6 GOÄ
+Falls Optimierungen vorgeschlagen wurden, als Bullets:
+- Kurz erklären, warum die Ziffern klinisch sinnvoll sind
+- Kontext für Analogbewertungen nach § 6 GOÄ
 
 ### 📝 Fazit
 
-2-3 Bullet Points mit den wichtigsten Handlungsempfehlungen.
+NUR als Bullet-Liste (2–4 Punkte), keine Fließtexte. Kompakte Handlungsempfehlungen.
 
 DEIN KONTEXTWISSEN:
 

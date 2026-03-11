@@ -248,6 +248,39 @@
   color: hsl(210 20% 80%);
 }
 
+/* ─── Section Boxes (remark-sectionize) ─── */
+
+.markdown-output section {
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  padding: 0;
+  margin-bottom: 1rem;
+  background: hsl(var(--card) / 0.5);
+  overflow: hidden;
+}
+
+.markdown-output section:first-child {
+  margin-top: 0;
+}
+
+.markdown-output section:has(.section-card) .section-card {
+  margin-top: 0 !important;
+}
+
+.markdown-output section:has(.section-card) > *:not(.section-card) {
+  padding: 0 1rem 1rem 1rem;
+  margin: 0;
+}
+
+.markdown-output section:has(.section-card) > *:not(.section-card):first-child {
+  padding-top: 0.5rem;
+}
+
+/* Sections without emoji header: uniform padding */
+.markdown-output section:not(:has(.section-card)) {
+  padding: 0.75rem 1rem;
+}
+
 /* ─── Table Scroll Wrapper ─── */
 
 .table-scroll-wrapper {
@@ -354,18 +387,46 @@
 /* ─── Lists ─── */
 
 .markdown-output ul {
-  margin: 0.5rem 0;
+  margin: 0.75rem 0;
   padding-left: 1.25rem;
+  list-style-position: outside;
 }
 
 .markdown-output ol {
-  margin: 0.5rem 0;
+  margin: 0.75rem 0;
   padding-left: 1.25rem;
+  list-style-position: outside;
 }
 
 .markdown-output li {
-  margin: 0.25rem 0;
+  margin: 0.35rem 0;
   line-height: 1.6;
+}
+
+/* List items as mini-cards in sections */
+.markdown-output section ul li,
+.markdown-output section ol li {
+  padding: 0.5rem 0.75rem;
+  margin: 0.35rem 0;
+  border-radius: 0.375rem;
+  border-left: 3px solid hsl(var(--accent));
+  background: hsl(var(--muted) / 0.3);
+}
+
+.markdown-output section ul li ul,
+.markdown-output section ul li ol,
+.markdown-output section ol li ul,
+.markdown-output section ol li ol {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+  padding-left: 1rem;
+}
+
+.markdown-output section ul li li,
+.markdown-output section ol li li {
+  padding: 0.25rem 0.5rem;
+  background: transparent;
+  border-left-color: hsl(var(--accent) / 0.6);
 }
 
 .markdown-output ul > li::marker {
@@ -375,6 +436,25 @@
 .markdown-output ol > li::marker {
   color: hsl(var(--accent));
   font-weight: 600;
+}
+
+.dark .markdown-output section ul li,
+.dark .markdown-output section ol li {
+  background: hsl(var(--muted) / 0.4);
+}
+
+/* Fallback: Paragraphs in Korrekturbedarf as cards (when LLM uses p instead of bullets) */
+.markdown-output .section-card-warning ~ p {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  border-left: 3px solid hsl(38 75% 45%);
+  background: hsl(38 80% 94% / 0.5);
+  margin: 0.5rem 0;
+}
+
+.dark .markdown-output .section-card-warning ~ p {
+  background: hsl(38 40% 14% / 0.6);
+  border-left-color: hsl(38 60% 55%);
 }
 
 /* ─── Code ─── */

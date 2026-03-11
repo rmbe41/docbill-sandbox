@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkSectionize from "remark-sectionize";
 import { User, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
@@ -155,7 +156,7 @@ const ChatBubble = ({ message }: { message: ChatMessage }) => {
             {message.content && (
               <div className="markdown-output prose prose-sm max-w-none">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkSectionize]}
                   components={markdownComponents}
                 >
                   {message.content}
