@@ -62,9 +62,8 @@ const ConversationSidebar = ({
         className={cn(
           "fixed top-0 left-0 h-full z-50 flex flex-col shrink-0 overflow-hidden",
           "bg-muted/50 dark:bg-muted/20 border-r border-border/50",
-          "md:relative md:translate-x-0 md:z-auto",
           (open ? "translate-x-0" : "-translate-x-full") + " md:translate-x-0",
-          "transition-[width] duration-200 ease-in-out",
+          "transition-[width,transform] duration-200 ease-in-out",
           collapsed ? "w-12" : "w-40"
         )}
       >

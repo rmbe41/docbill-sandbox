@@ -349,6 +349,7 @@ const Index = () => {
 
   return (
     <div className="flex h-screen bg-background">
+      {/* Sidebar: fixed overlay, expands over content */}
       <ConversationSidebar
         onNew={handleNewConversation}
         onHistory={handleHistory}
@@ -359,7 +360,7 @@ const Index = () => {
         onCollapsedChange={setSidebarCollapsed}
       />
 
-      <div className="flex-1 flex flex-col min-w-0 relative">
+      <div className="flex-1 flex flex-col min-w-0 relative md:ml-12">
         <header className="absolute top-0 right-0 left-0 z-50">
           <AppHeader onToggleSidebar={() => setSidebarOpen((v) => !v)} />
         </header>
@@ -410,12 +411,7 @@ const Index = () => {
         </div>
 
         {mainView === "chat" && (
-          <div
-            className={cn(
-              "fixed bottom-0 left-0 right-0 z-50 pointer-events-none",
-              sidebarCollapsed ? "md:left-12" : "md:left-40"
-            )}
-          >
+          <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none md:left-12">
             <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
               <ChatInput onSend={sendMessage} isLoading={isLoading} />
             </div>
