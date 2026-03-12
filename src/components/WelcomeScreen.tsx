@@ -25,7 +25,7 @@ type WelcomeScreenProps = {
 
 const WelcomeScreen = ({ onSuggestionClick }: WelcomeScreenProps) => {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 animate-fade-in">
+    <div className="flex-1 flex flex-col items-center justify-center px-6 pt-20 pb-12 animate-fade-in">
       <div className="flex items-center justify-center w-16 h-16 rounded-2xl overflow-hidden mb-6">
         <img src={DocBillLogo} alt="DocBill Logo" className="w-16 h-16" />
       </div>

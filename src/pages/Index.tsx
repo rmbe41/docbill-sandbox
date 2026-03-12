@@ -6,12 +6,17 @@ import TypingIndicator from "@/components/TypingIndicator";
 import PipelineProgress from "@/components/PipelineProgress";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import ConversationSidebar from "@/components/ConversationSidebar";
+import HistoryView from "@/components/HistoryView";
+import SettingsContent from "@/components/SettingsContent";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { supabase } from "@/integrations/supabase/client";
 import { parsePositionsFromText, validatePositions } from "@/lib/goae-validator";
 import type { InvoiceResultData } from "@/components/InvoiceResult";
+import { cn } from "@/lib/utils";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 
@@ -19,6 +24,8 @@ const Index = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [mainView, setMainView] = useState<"chat" | "history" | "settings">("chat");
   const [pipelineStep, setPipelineStep] = useState<{
     step: number;
     totalSteps: number;
@@ -38,6 +45,7 @@ const Index = () => {
     loadMessages,
     saveMessage,
     deleteConversation,
+    updateTitle,
     fetchConversations,
   } = useConversations();
 
@@ -58,11 +66,12 @@ const Index = () => {
     }
   }, [messages, isLoading, pipelineStep]);
 
-  // Load messages when selecting a conversation
+  // Load messages when selecting a conversation (from HistoryView)
   const handleSelectConversation = useCallback(
     async (id: string) => {
       setActiveConversationId(id);
       setSidebarOpen(false);
+      setMainView("chat");
       const dbMessages = await loadMessages(id);
       setMessages(
         dbMessages.map((m) => ({
@@ -79,6 +88,7 @@ const Index = () => {
     setActiveConversationId(null);
     setMessages([]);
     setSidebarOpen(false);
+    setMainView("chat");
   }, [setActiveConversationId]);
 
   const handleDeleteConversation = useCallback(
@@ -90,6 +100,22 @@ const Index = () => {
     },
     [deleteConversation, activeConversationId]
   );
+
+  const handleRenameConversation = useCallback(
+    async (id: string, title: string) => {
+      await updateTitle(id, title);
+    },
+    [updateTitle]
+  );
+
+  const handleSettings = useCallback(() => {
+    setMainView("settings");
+  }, []);
+
+  const handleHistory = useCallback(() => {
+    setMainView("history");
+  }, []);
+
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -322,43 +348,79 @@ const Index = () => {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex h-screen bg-background">
       <ConversationSidebar
-        conversations={conversations}
-        activeId={activeConversationId}
-        onSelect={handleSelectConversation}
         onNew={handleNewConversation}
-        onDelete={handleDeleteConversation}
+        onHistory={handleHistory}
+        onSettings={handleSettings}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onCollapsedChange={setSidebarCollapsed}
       />
 
-      <AppHeader onToggleHistory={() => setSidebarOpen((v) => !v)} />
+      <div className="flex-1 flex flex-col min-w-0 relative">
+        <header className="absolute top-0 right-0 left-0 z-50">
+          <AppHeader onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+        </header>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto pb-44 sm:pb-40">
-        {messages.length === 0 ? (
-          <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
-        ) : (
-          <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
-            {messages.map((msg) => (
-              <ChatBubble key={msg.id} message={msg} />
-            ))}
-            {isLoading && pipelineStep && (
-              <PipelineProgress
-                step={pipelineStep.step}
-                totalSteps={pipelineStep.totalSteps}
-                label={pipelineStep.label}
-              />
+        <div ref={scrollRef} className="flex-1 overflow-y-auto pb-44 sm:pb-40 pt-14 min-h-0">
+          {mainView === "chat" && (
+            messages.length === 0 ? (
+              <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
+            ) : (
+              <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
+                {messages.map((msg) => (
+                  <ChatBubble key={msg.id} message={msg} />
+                ))}
+                {isLoading && pipelineStep && (
+                  <PipelineProgress
+                    step={pipelineStep.step}
+                    totalSteps={pipelineStep.totalSteps}
+                    label={pipelineStep.label}
+                  />
+                )}
+                {isLoading && !pipelineStep && <TypingIndicator />}
+              </div>
+            )
+          )}
+          {mainView === "history" && (
+            <HistoryView
+              conversations={conversations}
+              activeId={activeConversationId}
+              onSelect={handleSelectConversation}
+              onDelete={handleDeleteConversation}
+              onRename={handleRenameConversation}
+              onBack={() => setMainView("chat")}
+            />
+          )}
+          {mainView === "settings" && (
+            <div className="flex flex-col h-full">
+              <header className="flex items-center gap-3 px-4 py-3 shrink-0">
+                <Button variant="ghost" size="icon" onClick={() => setMainView("chat")} title="Zurück">
+                  <ArrowLeft className="w-5 h-5" />
+                </Button>
+                <h1 className="text-base font-semibold text-foreground">Einstellungen</h1>
+              </header>
+              <div className="flex-1 overflow-y-auto">
+                <SettingsContent />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {mainView === "chat" && (
+          <div
+            className={cn(
+              "fixed bottom-0 left-0 right-0 z-50 pointer-events-none",
+              sidebarCollapsed ? "md:left-12" : "md:left-40"
             )}
-            {isLoading && !pipelineStep && <TypingIndicator />}
+          >
+            <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
+              <ChatInput onSend={sendMessage} isLoading={isLoading} />
+            </div>
           </div>
         )}
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-        <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
-          <ChatInput onSend={sendMessage} isLoading={isLoading} />
-        </div>
       </div>
     </div>
   );

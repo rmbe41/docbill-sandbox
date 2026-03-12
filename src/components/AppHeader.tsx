@@ -1,47 +1,86 @@
-import { Settings, LogOut, History } from "lucide-react";
-import DocBillLogo from "@/assets/DocBill-Logo.svg";
+import { LogOut, Menu, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 type Props = {
-  onToggleHistory?: () => void;
+  onToggleSidebar?: () => void;
 };
 
-const AppHeader = ({ onToggleHistory }: Props) => {
+function getInitials(email: string | undefined): string {
+  if (!email) return "?";
+  const part = email.split("@")[0];
+  if (part.length >= 2) return part.slice(0, 2).toUpperCase();
+  return part.slice(0, 1).toUpperCase();
+}
+
+const AppHeader = ({ onToggleSidebar }: Props) => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const avatarUrl = user?.user_metadata?.avatar_url as string | undefined;
 
   return (
-    <header className="flex items-center gap-3 px-5 py-3 border-b bg-card">
-      {user && onToggleHistory && (
-        <Button variant="ghost" size="icon" onClick={onToggleHistory} title="Verlauf">
-          <History className="w-4 h-4" />
+    <header className="flex items-center gap-3 px-5 py-3 bg-transparent border-none pointer-events-none">
+      {user && onToggleSidebar && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggleSidebar}
+          title="Menü"
+          className="md:hidden pointer-events-auto"
+          variant="ghost"
+          size="icon"
+          onClick={onToggleSidebar}
+          title="Menü"
+          className="md:hidden"
+        >
+          <Menu className="w-4 h-4" />
         </Button>
       )}
-      <div className="flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden">
-        <img src={DocBillLogo} alt="DocBill Logo" className="w-9 h-9" />
-      </div>
-      <div className="flex-1">
-        <h1 className="text-base font-semibold text-foreground leading-tight">
-          DocBill
-        </h1>
-        <p className="text-xs text-muted-foreground">
-          Abrechnungsassistent für Augenheilkunde
-        </p>
-      </div>
+      <div className="flex-1 min-w-0" />
       {user && (
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground hidden sm:block mr-2 truncate max-w-[150px]">
-            {user.email}
-          </span>
-          <Button variant="ghost" size="icon" onClick={() => navigate("/settings")} title="Einstellungen">
-            <Settings className="w-4 h-4" />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={signOut} title="Abmelden">
-            <LogOut className="w-4 h-4" />
-          </Button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="rounded-full shrink-0 pointer-events-auto">
+              <Avatar className="h-8 w-8">
+                <AvatarImage src={avatarUrl} alt={user.email ?? ""} />
+                <AvatarFallback className="text-xs bg-muted">
+                  {getInitials(user.email)}
+                </AvatarFallback>
+              </Avatar>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={8}
+            className="w-56 z-[100]"
+          >
+            <DropdownMenuLabel className="font-normal">
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium truncate">{user.email}</p>
+                <p className="text-xs text-muted-foreground">Kontostatus: Aktiv</p>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate("/settings")}>
+              <Settings className="w-4 h-4 mr-2" />
+              Einstellungen
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={signOut} className="text-destructive">
+              <LogOut className="w-4 h-4 mr-2" />
+              Abmelden
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
     </header>
   );

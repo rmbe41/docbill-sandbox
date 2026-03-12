@@ -115,6 +115,12 @@ export interface Pruefung {
   schwere: "fehler" | "warnung" | "info";
   nachricht: string;
   vorschlag?: string;
+  /** Übernehmbare Begründung für die Rechnung (bei Faktor-Erhöhung) */
+  begruendungVorschlag?: string;
+  /** Neuer Faktor (bei Faktor-Erhöhung/-Reduktion) */
+  neueFaktor?: number;
+  /** Neuer Betrag (bei Faktor-/Betragsänderung) */
+  neuerBetrag?: number;
 }
 
 export interface GeprueftePosition {

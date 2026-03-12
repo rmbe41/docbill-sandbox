@@ -198,11 +198,20 @@ export function pruefeRechnung(
         const deutetAufAufwand = pos.begruendung && AUFWAND_KEYWORDS.test(pos.begruendung);
         if (deutetAufAufwand && pos.faktor < eintrag.schwellenfaktor) {
           const betragBeiSchwelle = round2(eintrag.punkte * PUNKTWERT * eintrag.schwellenfaktor);
+          const begruendungText = begruendungNurText(
+            pos.ziffer,
+            eintrag.schwellenfaktor,
+            eintrag,
+            analyse,
+          );
           pruefungen.push({
             typ: "faktor_erhoehung_empfohlen",
             schwere: "info",
             nachricht: `Begründung deutet auf höheren Aufwand. Schwellenwert: ${eintrag.schwellenfaktor}×, Höchstsatz: ${eintrag.hoechstfaktor}×.`,
-            vorschlag: `Faktor auf ${eintrag.schwellenfaktor}× erhöhen → ${formatEuro(betragBeiSchwelle)}. Begründung ggf. mit Zeitangabe präzisieren (§ 5 Abs. 2 GOÄ).`,
+            vorschlag: `Faktor auf ${eintrag.schwellenfaktor}× erhöhen → ${formatEuro(betragBeiSchwelle)}. Begründung: „${begruendungText}"`,
+            begruendungVorschlag: begruendungText,
+            neueFaktor: eintrag.schwellenfaktor,
+            neuerBetrag: betragBeiSchwelle,
           });
         }
       }
@@ -212,11 +221,16 @@ export function pruefeRechnung(
     if (eintrag && pos.faktor > eintrag.schwellenfaktor) {
       const hatBegruendung = !!pos.begruendung;
       if (!hatBegruendung) {
+        const begruendungText = begruendungNurText(pos.ziffer, pos.faktor, eintrag, analyse);
+        const berechneterBetragFuerPos = round2(eintrag.punkte * PUNKTWERT * pos.faktor);
         pruefungen.push({
           typ: "begruendung_fehlt",
           schwere: "warnung",
           nachricht: `Faktor ${pos.faktor}× überschreitet Schwellenwert ${eintrag.schwellenfaktor}×. Schriftliche Begründung gemäß § 5 Abs. 2 / § 12 Abs. 3 GOÄ erforderlich.`,
           vorschlag: begründungsVorschlag(pos.ziffer, pos.faktor, eintrag, analyse),
+          begruendungVorschlag: begruendungText,
+          neueFaktor: pos.faktor,
+          neuerBetrag: berechneterBetragFuerPos,
         });
       } else {
         pruefungen.push({
@@ -423,5 +437,26 @@ function begründungsVorschlag(
     `"Aufgrund der überdurchschnittlichen Schwierigkeit bei ${diagnose} ` +
     `und einem erhöhten Zeitaufwand ist ein Steigerungsfaktor von ${faktor}× ` +
     `gemäß § 5 Abs. 2 GOÄ gerechtfertigt. ${context}."`
+  );
+}
+
+/** Extrahiert den reinen Begründungstext (ohne Präfix) für Übernahme in die Rechnung. */
+function begruendungNurText(
+  ziffer: string,
+  faktor: number,
+  eintrag: KatalogEintrag,
+  analyse: MedizinischeAnalyse,
+): string {
+  const diagnose =
+    analyse.diagnosen.length > 0
+      ? analyse.diagnosen[0].text
+      : "[Diagnose einfügen]";
+
+  const context = analyse.klinischerKontext || "[klinischer Kontext]";
+
+  return (
+    `Aufgrund der überdurchschnittlichen Schwierigkeit bei ${diagnose} ` +
+    `und einem erhöhten Zeitaufwand ist ein Steigerungsfaktor von ${faktor}× ` +
+    `gemäß § 5 Abs. 2 GOÄ gerechtfertigt. ${context}.`
   );
 }
