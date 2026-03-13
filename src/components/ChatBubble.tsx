@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import remarkSectionize from "remark-sectionize";
 import { User, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
@@ -16,41 +15,16 @@ export type ChatMessage = {
   invoiceResult?: InvoiceResultData;
 };
 
-// Detect emoji at start of heading text for section-card coloring
-const getEmojiStyle = (text: string): string | null => {
-  if (text.startsWith("📋")) return "section-card section-card-info";
-  if (text.startsWith("✅")) return "section-card section-card-success";
-  if (text.startsWith("⚠️")) return "section-card section-card-warning";
-  if (text.startsWith("💡")) return "section-card section-card-accent";
-  if (text.startsWith("📝")) return "section-card section-card-neutral";
-  return null;
-};
-
-const extractText = (children: React.ReactNode): string => {
-  if (typeof children === "string") return children;
-  if (Array.isArray(children)) return children.map(extractText).join("");
-  if (React.isValidElement(children) && children.props?.children)
-    return extractText(children.props.children);
-  return "";
-};
-
-// Custom markdown components for styled sections
+// Custom markdown components – flache Typografie, keine Boxen
 const markdownComponents = {
-  h2: ({ children, ...props }: any) => {
-    const text = extractText(children);
-    const cardClass = getEmojiStyle(text);
-    if (cardClass) {
-      return (
-        <h2 className={cardClass} {...props}>
-          {children}
-        </h2>
-      );
-    }
-    return <h2 {...props}>{children}</h2>;
-  },
+  h2: ({ children, ...props }: any) => (
+    <h2 className="font-semibold mt-6 mb-2 first:mt-0" {...props}>
+      {children}
+    </h2>
+  ),
   hr: (props: any) => <hr className="section-divider" {...props} />,
   table: ({ children, ...props }: any) => (
-    <div className="table-scroll-wrapper">
+    <div className="overflow-x-auto my-4">
       <table {...props}>{children}</table>
     </div>
   ),
@@ -156,7 +130,7 @@ const ChatBubble = ({ message }: { message: ChatMessage }) => {
             {message.content && (
               <div className="markdown-output prose prose-sm max-w-none">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkSectionize]}
+                  remarkPlugins={[remarkGfm]}
                   components={markdownComponents}
                 >
                   {message.content}

@@ -124,14 +124,16 @@
 
 .markdown-output {
   color: hsl(var(--chat-assistant-foreground));
+  padding-left: 1rem;
+  padding-right: 1rem;
 }
 
-/* Headings */
+/* Headings – mehr Abstand bei neuen Überschriften */
 .markdown-output h2 {
   font-size: 0.95rem;
   font-weight: 600;
   color: hsl(var(--foreground));
-  margin-top: 1.25rem;
+  margin-top: 1.75rem;
   margin-bottom: 0.75rem;
   padding-bottom: 0.5rem;
   border-bottom: 2px solid hsl(var(--border));
@@ -145,7 +147,7 @@
   font-size: 0.85rem;
   font-weight: 600;
   color: hsl(var(--foreground));
-  margin-top: 1rem;
+  margin-top: 1.5rem;
   margin-bottom: 0.5rem;
 }
 
@@ -176,81 +178,7 @@
   border-radius: 1px;
 }
 
-/* ─── Emoji Section Cards (dezentes, einheitliches Design) ─── */
-
-.section-card {
-  border-bottom: none !important;
-  border-radius: 0.5rem 0.5rem 0 0;
-  padding: 0.5rem 0.75rem !important;
-  margin-top: 1.5rem !important;
-  margin-bottom: 0 !important;
-  font-size: 0.875rem !important;
-  border-left: 2px solid hsl(var(--border));
-  background: hsl(var(--muted) / 0.4);
-  color: hsl(var(--foreground));
-}
-
-.section-card-info,
-.section-card-success,
-.section-card-warning,
-.section-card-accent,
-.section-card-neutral {
-  background: hsl(var(--muted) / 0.4);
-  border-left-color: hsl(var(--muted-foreground) / 0.5);
-  color: hsl(var(--foreground));
-}
-
-.dark .section-card-info,
-.dark .section-card-success,
-.dark .section-card-warning,
-.dark .section-card-accent,
-.dark .section-card-neutral {
-  background: hsl(var(--muted) / 0.3);
-  border-left-color: hsl(var(--muted-foreground) / 0.4);
-  color: hsl(var(--foreground));
-}
-
-/* ─── Section Boxes (remark-sectionize, dezent) ─── */
-
-.markdown-output section {
-  border: 1px solid hsl(var(--border) / 0.8);
-  border-radius: 0.5rem;
-  padding: 0;
-  margin-bottom: 1rem;
-  background: transparent;
-  overflow: hidden;
-}
-
-.markdown-output section:first-child {
-  margin-top: 0;
-}
-
-.markdown-output section:has(.section-card) .section-card {
-  margin-top: 0 !important;
-}
-
-.markdown-output section:has(.section-card) > *:not(.section-card) {
-  padding: 0 1rem 1rem 1rem;
-  margin: 0;
-}
-
-.markdown-output section:has(.section-card) > *:not(.section-card):first-child {
-  padding-top: 0.5rem;
-}
-
-/* Sections without emoji header: uniform padding */
-.markdown-output section:not(:has(.section-card)) {
-  padding: 0.75rem 1rem;
-}
-
-/* ─── Table Scroll Wrapper ─── */
-
-.table-scroll-wrapper {
-  overflow-x: auto;
-  margin: 0.75rem -0.25rem;
-  border-radius: 0.5rem;
-  border: 1px solid hsl(var(--border));
-}
+/* ─── Keine Section-Boxen: flache Typografie ─── */
 
 /* ─── Tables ─── */
 
@@ -346,17 +274,18 @@
   background: hsl(215 20% 14%);
 }
 
-/* ─── Lists ─── */
+/* ─── Lists – Punkte (•) statt Striche, gut sichtbar ─── */
 
 .markdown-output ul {
   margin: 0.75rem 0;
-  padding-left: 1.25rem;
+  padding-left: 1.5rem;
+  list-style-type: disc;
   list-style-position: outside;
 }
 
 .markdown-output ol {
   margin: 0.75rem 0;
-  padding-left: 1.25rem;
+  padding-left: 1.5rem;
   list-style-position: outside;
 }
 
@@ -365,56 +294,13 @@
   line-height: 1.6;
 }
 
-/* List items: dezente Struktur, keine starken Farben */
-.markdown-output section ul li,
-.markdown-output section ol li {
-  padding: 0.35rem 0.5rem 0.35rem 0.75rem;
-  margin: 0.25rem 0;
-  border-radius: 0.25rem;
-  border-left: 1px solid hsl(var(--border));
-  background: transparent;
-}
-
-.markdown-output section ul li ul,
-.markdown-output section ul li ol,
-.markdown-output section ol li ul,
-.markdown-output section ol li ol {
-  margin-top: 0.35rem;
-  margin-bottom: 0;
-  padding-left: 1rem;
-}
-
-.markdown-output section ul li li,
-.markdown-output section ol li li {
-  padding: 0.2rem 0.4rem;
-  border-left-color: hsl(var(--border));
-}
-
 .markdown-output ul > li::marker {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--foreground));
 }
 
 .markdown-output ol > li::marker {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--foreground));
   font-weight: 500;
-}
-
-.dark .markdown-output section ul li,
-.dark .markdown-output section ol li {
-  border-left-color: hsl(var(--border));
-}
-
-/* Fallback: Paragraphs in Korrekturbedarf (dezentes Styling) */
-.markdown-output .section-card-warning ~ p {
-  padding: 0.4rem 0.6rem;
-  border-radius: 0.25rem;
-  border-left: 1px solid hsl(var(--border));
-  background: transparent;
-  margin: 0.4rem 0;
-}
-
-.dark .markdown-output .section-card-warning ~ p {
-  border-left-color: hsl(var(--border));
 }
 
 /* ─── Code ─── */
@@ -431,11 +317,10 @@
 /* ─── Blockquotes ─── */
 
 .markdown-output blockquote {
-  border-left: 3px solid hsl(var(--accent));
-  background: hsl(var(--muted) / 0.5);
-  border-radius: 0 0.375rem 0.375rem 0;
-  padding: 0.5rem 0.75rem;
+  border-left: 3px solid hsl(var(--accent) / 0.6);
+  padding-left: 0.75rem;
   margin: 0.75rem 0;
+  color: hsl(var(--muted-foreground));
 }
 
 /* ─── Invoice Result Tables ─── */
