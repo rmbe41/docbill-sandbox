@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { History, ArrowLeft, Trash2, Pencil } from "lucide-react";
+import { Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -26,7 +26,6 @@ type Props = {
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
-  onBack: () => void;
 };
 
 const HistoryView = ({
@@ -35,7 +34,6 @@ const HistoryView = ({
   onSelect,
   onDelete,
   onRename,
-  onBack,
 }: Props) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -131,19 +129,9 @@ const HistoryView = ({
   const { today, yesterday, earlier } = groupByDate(conversations);
 
   return (
-    <div className="flex flex-col h-full">
-      <header className="flex items-center gap-3 px-4 py-3 shrink-0">
-        <Button variant="ghost" size="icon" onClick={onBack} title="Zurück">
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <div className="flex items-center gap-2">
-          <History className="w-5 h-5 text-muted-foreground" />
-          <h1 className="text-base font-semibold text-foreground">Verlauf</h1>
-        </div>
-      </header>
-
+    <div className="flex flex-col h-full min-h-0">
       <ScrollArea className="flex-1">
-        <div className="max-w-2xl mx-auto px-4 py-6">
+        <div className="max-w-2xl mx-auto px-4 py-6 pb-12">
           {conversations.length === 0 ? (
             <p className="text-sm text-muted-foreground/80 text-center py-12">
               Noch keine Chats

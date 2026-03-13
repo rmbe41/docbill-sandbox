@@ -8,21 +8,27 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { DEFAULT_GLOBAL_GUARDRAILS_RULES } from "@/data/default-global-rules";
-import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus } from "lucide-react";
+import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const DEBOUNCE_MS = 500;
 const GLOBAL_RULE_SEPARATOR = "\n\n<<DOCBILL_RULE_SEPARATOR>>\n\n";
 
-const AVAILABLE_MODELS = [
-  { value: "openrouter/free", label: "OpenRouter Free", desc: "Kostenlos – für Tests" },
-  { value: "google/gemma-3n-e2b-it:free", label: "Gemma 3n 2B (Free)", desc: "Google kostenlos" },
-  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", desc: "Schnell & günstig" },
-  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", desc: "Beste Qualität" },
-  { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash", desc: "Neueste Generation" },
-  { value: "google/gemini-3-pro-preview", label: "Gemini 3 Pro", desc: "Top-Tier neu" },
-  { value: "openai/gpt-5", label: "GPT-5", desc: "Starke Reasoning" },
-  { value: "openai/gpt-5-mini", label: "GPT-5 Mini", desc: "Ausgewogen" },
+const AVAILABLE_MODELS: { value: string; label: string; desc: string; isFree: boolean }[] = [
+  { value: "openrouter/free", label: "OpenRouter Free Router", desc: "Wählt automatisch aus kostenlosen Modellen", isFree: true },
+  { value: "google/gemma-3n-e2b-it:free", label: "Gemma 3n 2B", desc: "Google – klein & schnell", isFree: true },
+  { value: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B", desc: "Meta – multilingual", isFree: true },
+  { value: "nvidia/nemotron-nano-12b-2-vl:free", label: "Nemotron Nano 12B VL", desc: "NVIDIA – Dokumente/Bilder", isFree: true },
+  { value: "stepfun/step-3.5-flash:free", label: "Step 3.5 Flash", desc: "StepFun – Reasoning", isFree: true },
+  { value: "arcee-ai/trinity-large-preview:free", label: "Trinity Large Preview", desc: "Arcee – Frontier-Scale", isFree: true },
+  { value: "nvidia/nemotron-3-super:free", label: "Nemotron 3 Super", desc: "NVIDIA – 120B MoE", isFree: true },
+  { value: "qwen/qwen3-coder-480b-a35b-instruct:free", label: "Qwen3 Coder 480B", desc: "Alibaba – Code/Agentic", isFree: true },
+  { value: "anthropic/claude-3.5-haiku", label: "Claude 3.5 Haiku", desc: "Schnell & zuverlässig", isFree: false },
+  { value: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", desc: "Starke Qualität", isFree: false },
+  { value: "openai/gpt-4o-mini", label: "GPT-4o Mini", desc: "OpenAI – ausgewogen", isFree: false },
+  { value: "openai/gpt-4o", label: "GPT-4o", desc: "OpenAI – Top-Qualität", isFree: false },
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", desc: "Google – schnell", isFree: false },
+  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", desc: "Google – beste Qualität", isFree: false },
 ];
 
 type ContextFile = {
@@ -33,6 +39,9 @@ type ContextFile = {
 
 const serializeGlobalRuleFields = (fields: string[]): string =>
   fields.map((f) => f.trim()).filter(Boolean).join(GLOBAL_RULE_SEPARATOR);
+
+const getModelLabel = (value: string): string =>
+  AVAILABLE_MODELS.find((m) => m.value === value)?.label ?? value;
 
 const parseGlobalRuleFields = (value: string): string[] => {
   if (!value?.trim()) return [DEFAULT_GLOBAL_GUARDRAILS_RULES];
@@ -67,6 +76,8 @@ const SettingsContent = () => {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelRef = useRef("");
+
+  const [credits, setCredits] = useState<{ total_credits: number | null; total_usage: number | null; remaining: number | null; error?: string } | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -105,6 +116,41 @@ const SettingsContent = () => {
     };
     load();
   }, [user, isAdmin]);
+
+  useEffect(() => {
+    if (activeTab !== "user" && activeTab !== "global") return;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    if (!supabaseUrl || !supabaseKey) return;
+    const fetchCredits = async () => {
+      try {
+        const r = await fetch(`${supabaseUrl}/functions/v1/goae-credits`, {
+          headers: { Authorization: `Bearer ${supabaseKey}` },
+        });
+        let data: { total_credits?: number; total_usage?: number; remaining?: number; error?: string } = {};
+        try {
+          data = await r.json();
+        } catch {
+          setCredits({
+            total_credits: null,
+            total_usage: null,
+            remaining: null,
+            error: r.status === 404 ? "Credits-Funktion nicht deployed. Bitte 'supabase functions deploy goae-credits' ausführen." : "Laden fehlgeschlagen",
+          });
+          return;
+        }
+        setCredits({
+          total_credits: data.total_credits ?? null,
+          total_usage: data.total_usage ?? null,
+          remaining: data.remaining ?? null,
+          error: data.error,
+        });
+      } catch {
+        setCredits({ total_credits: null, total_usage: null, remaining: null, error: "Laden fehlgeschlagen (Netzwerkfehler)" });
+      }
+    };
+    fetchCredits();
+  }, [activeTab]);
 
   useEffect(() => () => {
     if (rulesDebounceRef.current) clearTimeout(rulesDebounceRef.current);
@@ -214,6 +260,7 @@ const SettingsContent = () => {
   ];
 
   const currentModel = activeTab === "global" ? globalModel : (userModel ?? "");
+  const effectiveModel = activeTab === "global" ? globalModel : (userModel ?? globalModel);
   const currentRules = activeTab === "global" ? globalRules : (userRules ?? "");
   modelRef.current = currentModel;
 
@@ -381,9 +428,36 @@ const SettingsContent = () => {
       {(activeTab === "user" || activeTab === "global") && (
         <>
           <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-4 rounded-xl border border-border bg-muted/30">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Aktuell genutzt</p>
+                <p className="text-base font-semibold text-foreground mt-0.5">{getModelLabel(effectiveModel) || effectiveModel || "—"}</p>
+              </div>
+              {activeTab === "user" && !userModel && (
+                <p className="text-xs text-muted-foreground">Globaler Standard wird verwendet</p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 p-4 rounded-xl border border-border bg-muted/30">
+              <CreditCard className="w-5 h-5 text-muted-foreground shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">OpenRouter Credits & Usage</p>
+                {credits?.error ? (
+                  <p className="text-sm text-muted-foreground mt-0.5">{credits.error}</p>
+                ) : credits?.total_credits != null && credits?.total_usage != null ? (
+                  <p className="text-sm font-medium text-foreground mt-0.5">
+                    Verbleibend: <span className="font-mono">{credits.remaining?.toFixed(2) ?? "—"}</span> $
+                    <span className="text-muted-foreground font-normal ml-1">
+                      (gekauft: {credits.total_credits.toFixed(2)} $, genutzt: {credits.total_usage.toFixed(2)} $)
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground mt-0.5">Laden…</p>
+                )}
+              </div>
+            </div>
             <Label className="flex items-center gap-2 text-sm font-semibold">
               <Cpu className="w-4 h-4 text-accent" />
-              KI-Modell
+              KI-Modell wählen
             </Label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {AVAILABLE_MODELS.map((m) => (
@@ -391,13 +465,21 @@ const SettingsContent = () => {
                   key={m.value}
                   onClick={() => handleModelSelect(m.value)}
                   className={cn(
-                    "flex flex-col text-left px-4 py-3 rounded-xl border transition-all",
+                    "relative flex flex-col text-left px-4 py-3 rounded-xl border transition-all",
                     currentModel === m.value
                       ? "border-accent bg-accent/5 ring-1 ring-accent"
                       : "border-border bg-card hover:border-muted-foreground/30"
                   )}
                 >
-                  <span className="text-sm font-medium text-foreground">{m.label}</span>
+                  <span
+                    className={cn(
+                      "absolute top-2 right-2 text-[10px] font-medium px-1.5 py-0.5 rounded",
+                      m.isFree ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                    )}
+                  >
+                    {m.isFree ? "Free" : "Pay"}
+                  </span>
+                  <span className="text-sm font-medium text-foreground pr-12">{m.label}</span>
                   <span className="text-xs text-muted-foreground">{m.desc}</span>
                 </button>
               ))}

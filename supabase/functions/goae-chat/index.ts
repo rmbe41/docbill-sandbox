@@ -10,7 +10,7 @@ import { GOAE_KATALOG } from "./goae-catalog.ts";
 import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
 import { GOAE_ANALOGE_BEWERTUNG, GOAE_BEGRUENDUNGEN, GOAE_ABSCHNITTE } from "./goae-regeln.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
-import { buildFallbackModels, isRetryableModelStatus, resolveModel } from "./model-resolver.ts";
+import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel } from "./model-resolver.ts";
 
 // ---------------------------------------------------------------------------
 // System-Prompt für den regulären Chat-Modus (ohne Dokument-Upload)
@@ -223,8 +223,12 @@ async function handleChatMode(
     }
   }
 
+  const isFree = isFreeModel(model);
   return new Response(
-    JSON.stringify({ error: "AI-Gateway Fehler: Kein Modell verfügbar." }),
+    JSON.stringify({
+      error: "AI-Gateway Fehler: Kein Modell verfügbar.",
+      code: isFree ? "FREE_MODELS_EXHAUSTED" : undefined,
+    }),
     { status: 500, headers: { "Content-Type": "application/json" } },
   );
 }

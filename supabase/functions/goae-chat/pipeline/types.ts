@@ -26,12 +26,21 @@ export interface FilePayload {
 // Step 1 – Dokument Parser
 // ---------------------------------------------------------------------------
 
+export interface Stammdaten {
+  praxis?: { name?: string; adresse?: string; telefon?: string; email?: string; steuernummer?: string };
+  patient?: { name?: string; adresse?: string; geburtsdatum?: string };
+  bank?: { iban?: string; bic?: string; bankName?: string; kontoinhaber?: string };
+  rechnungsnummer?: string;
+  rechnungsdatum?: string;
+}
+
 export interface ParsedRechnung {
   positionen: RechnungsPosition[];
   diagnosen: string[];
   datum?: string;
   freitext?: string;
   rawText: string;
+  stammdaten?: Stammdaten;
 }
 
 export interface RechnungsPosition {

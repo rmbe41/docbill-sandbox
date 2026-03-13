@@ -60,8 +60,9 @@ const ConversationSidebar = ({
       )}
       <aside
         className={cn(
-          "fixed top-0 left-0 h-full z-50 flex flex-col shrink-0 overflow-hidden",
-          "bg-muted/50 dark:bg-muted/20 border-r border-border/50",
+          "fixed top-2 left-2 bottom-2 z-[100] flex flex-col shrink-0 overflow-hidden",
+          "bg-muted/50 dark:bg-muted/20 border border-border/50",
+          "rounded-xl shadow-lg",
           (open ? "translate-x-0" : "-translate-x-full") + " md:translate-x-0",
           "transition-[width,transform] duration-200 ease-in-out",
           collapsed ? "w-12" : "w-40"

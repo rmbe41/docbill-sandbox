@@ -2,3 +2,6 @@ project_id = "qxaijnupaxxxsqaivbtj"
 
 [functions.goae-chat]
 verify_jwt = false
+
+[functions.goae-credits]
+verify_jwt = false

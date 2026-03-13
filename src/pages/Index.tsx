@@ -15,8 +15,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { parsePositionsFromText, validatePositions } from "@/lib/goae-validator";
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import { cn } from "@/lib/utils";
-import { ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 
@@ -26,6 +35,7 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mainView, setMainView] = useState<"chat" | "history" | "settings">("chat");
+  const [freeExhaustedDialogOpen, setFreeExhaustedDialogOpen] = useState(false);
   const [pipelineStep, setPipelineStep] = useState<{
     step: number;
     totalSteps: number;
@@ -238,13 +248,18 @@ const Index = () => {
         }
         if (!resp.ok) {
           let errMsg = "Die Anfrage konnte nicht verarbeitet werden.";
+          let errBody: { error?: string; code?: string } = {};
           try {
-            const errBody = await resp.json();
+            errBody = await resp.json();
             if (errBody?.error) errMsg = errBody.error;
           } catch {
             errMsg = resp.status === 401 ? "Nicht autorisiert. Prüfen Sie die Supabase-Konfiguration." : errMsg;
           }
-          toast({ title: "Fehler", description: errMsg, variant: "destructive" });
+          if (errBody?.code === "FREE_MODELS_EXHAUSTED") {
+            setFreeExhaustedDialogOpen(true);
+          } else {
+            toast({ title: "Fehler", description: errMsg, variant: "destructive" });
+          }
           setIsLoading(false);
           return;
         }
@@ -282,9 +297,21 @@ const Index = () => {
               }
 
               // Pipeline result (structured data → render InvoiceResult component)
+              // Support both formats: { pruefung, stammdaten } and legacy (data = pruefung directly)
               if (parsed.type === "pipeline_result") {
                 setPipelineStep(null);
-                invoiceData = parsed.data as InvoiceResultData;
+                const raw = parsed.data as { pruefung?: InvoiceResultData; stammdaten?: InvoiceResultData["stammdaten"] } | InvoiceResultData;
+                const pruefung = "pruefung" in raw && raw.pruefung ? raw.pruefung : (raw as InvoiceResultData);
+                const stammdaten = "stammdaten" in raw ? raw.stammdaten : undefined;
+                invoiceData = {
+                  positionen: pruefung?.positionen ?? [],
+                  optimierungen: pruefung?.optimierungen ?? [],
+                  zusammenfassung: pruefung?.zusammenfassung ?? {
+                    gesamt: 0, korrekt: 0, warnungen: 0, fehler: 0,
+                    rechnungsSumme: 0, korrigierteSumme: 0, optimierungsPotenzial: 0,
+                  },
+                  ...(stammdaten && { stammdaten }),
+                };
                 upsertAssistant("");
                 continue;
               }
@@ -293,6 +320,9 @@ const Index = () => {
               if (parsed.type === "pipeline_error") {
                 setPipelineStep(null);
                 upsertAssistant(`\n\n❌ **Pipeline-Fehler:** ${parsed.error}`);
+                if (parsed.code === "FREE_MODELS_EXHAUSTED") {
+                  setFreeExhaustedDialogOpen(true);
+                }
                 continue;
               }
 
@@ -332,9 +362,18 @@ const Index = () => {
           }
         }
 
-        // Save assistant message to DB
+        // Save assistant message to DB and update message id for feedback
         if (convId && assistantContent) {
-          await saveMessage(convId, "assistant", assistantContent);
+          const savedId = await saveMessage(convId, "assistant", assistantContent);
+          if (savedId) {
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.role === "assistant") {
+                return prev.map((m, i) => (i === prev.length - 1 ? { ...m, id: savedId } : m));
+              }
+              return prev;
+            });
+          }
           await fetchConversations();
         }
       } catch (e) {
@@ -360,28 +399,49 @@ const Index = () => {
         onCollapsedChange={setSidebarCollapsed}
       />
 
-      <div className="flex-1 flex flex-col min-w-0 relative md:ml-12">
+      <div
+        className={cn(
+          "flex-1 flex flex-col min-w-0 relative transition-[margin] duration-200 ease-in-out",
+          sidebarCollapsed ? "md:ml-14" : "md:ml-[10.5rem]"
+        )}
+      >
         <header className="absolute top-0 right-0 left-0 z-50">
-          <AppHeader onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+          <AppHeader
+            onToggleSidebar={() => setSidebarOpen((v) => !v)}
+            viewType={mainView}
+            onBack={mainView !== "chat" ? () => setMainView("chat") : undefined}
+          />
         </header>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto pb-44 sm:pb-40 pt-14 min-h-0">
+        <div
+          ref={scrollRef}
+          className={cn(
+            "flex-1 overflow-y-auto pt-14 min-h-0",
+            mainView === "chat" ? "pb-44 sm:pb-40" : "pb-24"
+          )}
+        >
           {mainView === "chat" && (
             messages.length === 0 ? (
               <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
             ) : (
-              <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
-                {messages.map((msg) => (
-                  <ChatBubble key={msg.id} message={msg} />
-                ))}
-                {isLoading && pipelineStep && (
-                  <PipelineProgress
-                    step={pipelineStep.step}
-                    totalSteps={pipelineStep.totalSteps}
-                    label={pipelineStep.label}
-                  />
-                )}
-                {isLoading && !pipelineStep && <TypingIndicator />}
+              <div className="max-w-6xl mx-auto px-4 py-6 space-y-4 min-h-[40vh]">
+                <ErrorBoundary>
+                  {messages.map((msg) => (
+                    <ChatBubble
+                      key={msg.id}
+                      message={msg}
+                      conversationId={activeConversationId}
+                    />
+                  ))}
+                  {isLoading && pipelineStep && (
+                    <PipelineProgress
+                      step={pipelineStep.step}
+                      totalSteps={pipelineStep.totalSteps}
+                      label={pipelineStep.label}
+                    />
+                  )}
+                  {isLoading && !pipelineStep && <TypingIndicator />}
+                </ErrorBoundary>
               </div>
             )
           )}
@@ -392,18 +452,11 @@ const Index = () => {
               onSelect={handleSelectConversation}
               onDelete={handleDeleteConversation}
               onRename={handleRenameConversation}
-              onBack={() => setMainView("chat")}
             />
           )}
           {mainView === "settings" && (
-            <div className="flex flex-col h-full">
-              <header className="flex items-center gap-3 px-4 py-3 shrink-0">
-                <Button variant="ghost" size="icon" onClick={() => setMainView("chat")} title="Zurück">
-                  <ArrowLeft className="w-5 h-5" />
-                </Button>
-                <h1 className="text-base font-semibold text-foreground">Einstellungen</h1>
-              </header>
-              <div className="flex-1 overflow-y-auto">
+            <div className="flex flex-col h-full min-h-0">
+              <div className="flex-1 overflow-y-auto pb-8">
                 <SettingsContent />
               </div>
             </div>
@@ -411,13 +464,41 @@ const Index = () => {
         </div>
 
         {mainView === "chat" && (
-          <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none md:left-12">
+          <div
+            className={cn(
+              "fixed bottom-0 left-0 right-0 z-50 pointer-events-none transition-[left] duration-200 ease-in-out",
+              sidebarCollapsed ? "md:left-12" : "md:left-40"
+            )}
+          >
             <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
               <ChatInput onSend={sendMessage} isLoading={isLoading} />
             </div>
           </div>
         )}
       </div>
+
+      <AlertDialog open={freeExhaustedDialogOpen} onOpenChange={setFreeExhaustedDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kostenlose Modelle nicht verfügbar</AlertDialogTitle>
+            <AlertDialogDescription>
+              Die ausgewählten kostenlosen Modelle konnten die Anfrage nicht verarbeiten.
+              Möchten Sie auf ein kostenpflichtiges Modell wechseln?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setMainView("settings");
+                setSidebarOpen(true);
+              }}
+            >
+              Zu Einstellungen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -12,12 +12,7 @@ import type { FilePayload, ParsedRechnung } from "./types.ts";
 
 const PARSER_SYSTEM_PROMPT = `Du bist ein Dokumentenparser für ärztliche Rechnungen nach der Gebührenordnung für Ärzte (GOÄ).
 
-AUFGABE: Extrahiere ALLE strukturierten Daten aus dem hochgeladenen Rechnungsdokument.
-
-WICHTIG:
-- Gib KEINE personenbezogenen Daten wieder (Namen, Geburtsdaten, Adressen)
-- Extrahiere NUR die abrechnungsrelevanten Informationen
-- Jede GOÄ-Position muss erfasst werden
+AUFGABE: Extrahiere ALLE strukturierten Daten aus dem hochgeladenen Rechnungsdokument – inklusive Stammdaten für den Rechnungsexport.
 
 Antworte AUSSCHLIESSLICH mit einem JSON-Objekt in diesem Format:
 
@@ -37,7 +32,14 @@ Antworte AUSSCHLIESSLICH mit einem JSON-Objekt in diesem Format:
   "diagnosen": ["Verdacht auf Glaukom", "Katarakt beidseits"],
   "datum": "2025-01-15",
   "freitext": "Befundbericht: ...",
-  "rawText": "der komplette Text des Dokuments"
+  "rawText": "der komplette Text des Dokuments",
+  "stammdaten": {
+    "praxis": { "name": "Dr. med. Beispiel", "adresse": "Musterstr. 1, 12345 Stadt", "telefon": "0123/456789", "email": "praxis@example.de", "steuernummer": "12/345/67890" },
+    "patient": { "name": "Max Mustermann", "adresse": "Patientenstr. 1, 12345 Stadt", "geburtsdatum": "01.01.1980" },
+    "bank": { "iban": "DE89 3704 0044 0532 0130 00", "bic": "COBADEFFXXX", "bankName": "Commerzbank", "kontoinhaber": "Dr. med. Beispiel" },
+    "rechnungsnummer": "RE-2025-001",
+    "rechnungsdatum": "2025-01-15"
+  }
 }
 
 REGELN:
@@ -48,6 +50,7 @@ REGELN:
 - "begruendung": falls eine Begründung für den Steigerungsfaktor angegeben ist
 - "diagnosen": Liste aller genannten Diagnosen/Befunde
 - "rawText": der gesamte extrahierte Text des Dokuments
+- "stammdaten": Extrahiere ALLE Stammdaten aus der Rechnung – Praxis (Name, Adresse, Telefon, E-Mail, Steuernummer), Patient (Name, Adresse, Geburtsdatum), Bankverbindung (IBAN, BIC, Bankname, Kontoinhaber), Rechnungsnummer, Rechnungsdatum. Fehlende Felder als null oder weglassen.
 - Bei unleserlichen Stellen: bestmögliche Interpretation, im freitext vermerken`;
 
 export async function parseDokument(

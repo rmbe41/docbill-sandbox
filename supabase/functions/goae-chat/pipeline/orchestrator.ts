@@ -14,6 +14,7 @@ import { extrahiereLeistungen } from "./leistungs-extraktion.ts";
 import { mappeGoae } from "./goae-mapping.ts";
 import { pruefeRechnung } from "./regelengine.ts";
 import { generateTextStream, buildTextGenerationPrompt } from "./text-generator.ts";
+import { isFreeModel } from "../model-resolver.ts";
 import { GOAE_KATALOG } from "../goae-catalog.ts";
 import type {
   PipelineInput,
@@ -56,7 +57,10 @@ export async function runPipeline(
   const sendPipelineResult = async (result: PipelineResult) => {
     const data = `data: ${JSON.stringify({
       type: "pipeline_result",
-      data: result.pruefung,
+      data: {
+        pruefung: result.pruefung,
+        stammdaten: result.parsedRechnung.stammdaten,
+      },
     })}\n\n`;
     await writer.write(encoder.encode(data));
   };
@@ -140,9 +144,12 @@ export async function runPipeline(
       console.error("Pipeline error:", error);
       const errMsg =
         error instanceof Error ? error.message : "Pipeline-Fehler";
+      const looksLikeModelFailure = /fehlgeschlagen|Kein Modell|nicht verfügbar/i.test(errMsg);
+      const code = isFreeModel(input.model) && looksLikeModelFailure ? "FREE_MODELS_EXHAUSTED" : undefined;
       const data = `data: ${JSON.stringify({
         type: "pipeline_error",
         error: errMsg,
+        ...(code && { code }),
       })}\n\n`;
       await writer.write(encoder.encode(data));
       await writer.close();

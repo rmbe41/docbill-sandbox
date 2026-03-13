@@ -138,7 +138,8 @@ export const GOAE_KATALOG = `
 1371|Enukleation mit Einpflanzung Plombe|832|48,50€|2,3→111,54€|3,5→169,73€
 1372|Exenteration Orbita|1480|86,27€|2,3→198,41€|3,5→301,93€|Ausschl: 1370
 1373|Eviszeration Bulbus|554|32,29€|2,3→74,27€|3,5→113,02€
-1375|Einpflanzung Augenprothese|463|26,99€|2,3→62,07€|3,5→94,45€
+1374|Extrakapsuläre Katarakt-OP (Phako) ohne IOL|3050|177,78€|2,3→408,89€|3,5→622,22€|Ausschl: 1349,1350,1351,1352
+1375|Extrakapsuläre Katarakt-OP (Phako) mit IOL-Implantation|3500|204,01€|2,3→469,21€|3,5→714,02€|Ausschl: 1320,1349,1350,1351,1352,1356
 1380|Nachstarlaserung (YAG)|600|34,97€|2,3→80,44€|3,5→122,40€
 1381|Laser-Iridotomie|600|34,97€|2,3→80,44€|3,5→122,40€
 1382|Zyklophotokoagulation|600|34,97€|2,3→80,44€|3,5→122,40€

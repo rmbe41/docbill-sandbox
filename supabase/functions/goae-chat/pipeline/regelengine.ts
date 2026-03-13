@@ -195,23 +195,30 @@ export function pruefeRechnung(
         });
         // Bei Betragsfehler + Begründung mit Aufwand-Hinweis: Faktoranhebung prüfen
         const AUFWAND_KEYWORDS = /aufwändig|aufwendig|zeitaufwand|erhöht|enorm|verlängert|erschwert/i;
+        const STARKER_AUFWAND_KEYWORDS = /enorm|sehr aufwändig|sehr aufwendig|erhöhter zeitaufwand|erhöhten zeitaufwand|enormer zeitaufwand/i;
         const deutetAufAufwand = pos.begruendung && AUFWAND_KEYWORDS.test(pos.begruendung);
+        const deutetAufStarkenAufwand = pos.begruendung && STARKER_AUFWAND_KEYWORDS.test(pos.begruendung);
         if (deutetAufAufwand && pos.faktor < eintrag.schwellenfaktor) {
-          const betragBeiSchwelle = round2(eintrag.punkte * PUNKTWERT * eintrag.schwellenfaktor);
+          const zielFaktor = deutetAufStarkenAufwand && pos.faktor < eintrag.hoechstfaktor
+            ? eintrag.hoechstfaktor
+            : eintrag.schwellenfaktor;
+          const betragBeiZiel = round2(eintrag.punkte * PUNKTWERT * zielFaktor);
           const begruendungText = begruendungNurText(
             pos.ziffer,
-            eintrag.schwellenfaktor,
+            zielFaktor,
             eintrag,
             analyse,
           );
           pruefungen.push({
             typ: "faktor_erhoehung_empfohlen",
             schwere: "info",
-            nachricht: `Begründung deutet auf höheren Aufwand. Schwellenwert: ${eintrag.schwellenfaktor}×, Höchstsatz: ${eintrag.hoechstfaktor}×.`,
-            vorschlag: `Faktor auf ${eintrag.schwellenfaktor}× erhöhen → ${formatEuro(betragBeiSchwelle)}. Begründung: „${begruendungText}"`,
+            nachricht: deutetAufStarkenAufwand
+              ? `Begründung deutet auf sehr hohen Aufwand. Höchstsatz ${eintrag.hoechstfaktor}× kann gerechtfertigt sein.`
+              : `Begründung deutet auf höheren Aufwand. Schwellenwert: ${eintrag.schwellenfaktor}×, Höchstsatz: ${eintrag.hoechstfaktor}×.`,
+            vorschlag: `Faktor auf ${zielFaktor}× erhöhen → ${formatEuro(betragBeiZiel)}. Begründung: „${begruendungText}"`,
             begruendungVorschlag: begruendungText,
-            neueFaktor: eintrag.schwellenfaktor,
-            neuerBetrag: betragBeiSchwelle,
+            neueFaktor: zielFaktor,
+            neuerBetrag: betragBeiZiel,
           });
         }
       }

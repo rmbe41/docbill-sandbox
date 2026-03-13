@@ -64,12 +64,14 @@ export const useConversations = () => {
   );
 
   const saveMessage = useCallback(
-    async (conversationId: string, role: "user" | "assistant", content: string) => {
-      await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        role,
-        content,
-      });
+    async (conversationId: string, role: "user" | "assistant", content: string): Promise<string | null> => {
+      const { data, error } = await supabase
+        .from("messages")
+        .insert({ conversation_id: conversationId, role, content })
+        .select("id")
+        .single();
+      if (error || !data) return null;
+      return data.id;
     },
     []
   );

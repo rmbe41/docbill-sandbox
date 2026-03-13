@@ -3,18 +3,15 @@
  * damit das AI-Gateway auch bei Provider-/Modell-Ausfällen weiterläuft.
  */
 
-const DEFAULT_FREE_MODEL = "google/gemma-3n-e2b-it:free";
+const DEFAULT_FREE_MODEL = "openrouter/free";
 
-const KNOWN_ALIASES: Record<string, string> = {
-  "openrouter/free": DEFAULT_FREE_MODEL,
-};
+const KNOWN_ALIASES: Record<string, string> = {};
 
-/** Modelle, die mit Dateien/Bildern über OpenRouter funktionieren (Google Gemini: "File data is missing"). */
+/** Free-Modelle für Multimodal (Dokumente/Bilder) – Gemini hat oft "File data is missing". */
 const MULTIMODAL_SAFE_FALLBACKS = [
-  "anthropic/claude-3.5-sonnet",
-  "anthropic/claude-3-haiku",
-  "openai/gpt-4o",
-  "openai/gpt-4o-mini",
+  "nvidia/nemotron-nano-12b-2-vl:free",
+  "google/gemma-3n-e2b-it:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
 ];
 
 export function resolveModel(input?: string): string {
@@ -39,8 +36,8 @@ export function buildFallbackModels(
     candidates = [
       primary,
       DEFAULT_FREE_MODEL,
-      "google/gemini-2.0-flash-lite-001",
-      "openai/gpt-4o-mini",
+      "google/gemma-3n-e2b-it:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
     ];
   }
 
@@ -49,4 +46,9 @@ export function buildFallbackModels(
 
 export function isRetryableModelStatus(status: number): boolean {
   return [400, 402, 404, 408, 429, 500, 502, 503].includes(status);
+}
+
+export function isFreeModel(model: string): boolean {
+  if (!model) return false;
+  return model === "openrouter/free" || model.includes(":free");
 }
