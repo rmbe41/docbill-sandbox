@@ -402,7 +402,7 @@ const Index = () => {
       <div
         className={cn(
           "flex-1 flex flex-col min-w-0 relative transition-[margin] duration-200 ease-in-out",
-          sidebarCollapsed ? "md:ml-14" : "md:ml-[10.5rem]"
+          sidebarCollapsed ? "md:ml-12" : "md:ml-40"
         )}
       >
         <header className="absolute top-0 right-0 left-0 z-50">
