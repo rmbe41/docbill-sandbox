@@ -60,7 +60,7 @@ const ConversationSidebar = ({
       )}
       <aside
         className={cn(
-          "fixed top-2 left-0 bottom-2 z-[100] flex flex-col shrink-0 overflow-hidden",
+          "fixed top-4 left-0 bottom-4 z-[100] flex flex-col shrink-0 overflow-hidden",
           "bg-muted/50 dark:bg-muted/20 border border-border/50",
           "rounded-r-xl shadow-lg",
           (open ? "translate-x-0" : "-translate-x-full") + " md:translate-x-0",
@@ -68,8 +68,8 @@ const ConversationSidebar = ({
           collapsed ? "w-12" : "w-40"
         )}
       >
-        {/* Logo (top) - Vertical alignment with header profile (h-14 = 56px) */}
-        <div className="flex items-center shrink-0 h-14 gap-0 px-0 pr-2 min-w-0">
+        {/* Logo (top) */}
+        <div className="flex items-center shrink-0 h-12 gap-0 px-0 pr-2 min-w-0">
           <div className="w-12 min-w-[3rem] flex justify-center items-center shrink-0">
             <img src={DocBillLogo} alt="DocBill" className="w-[22px] h-[22px]" />
           </div>
@@ -79,7 +79,7 @@ const ConversationSidebar = ({
         </div>
 
         {/* Menu items - Icons always in fixed 56px column, no shift */}
-        <div className="flex-1 flex flex-col items-stretch justify-end gap-0.5 pb-8 pt-2">
+        <div className="flex-1 flex flex-col items-stretch justify-end gap-0.5 pb-4 pt-1">
           <Button
             variant="ghost"
             className="h-8 w-full flex items-center justify-start group hover:bg-transparent hover:text-foreground px-0"
