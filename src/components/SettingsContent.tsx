@@ -21,7 +21,8 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { DEFAULT_GLOBAL_GUARDRAILS_RULES } from "@/data/default-global-rules";
-import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Eye, Loader2 } from "lucide-react";
+import { AVAILABLE_MODELS } from "@/data/models";
+import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Eye, Loader2, Building2 } from "lucide-react";
 import FileOverlay from "@/components/FileOverlay";
 import TextPreviewOverlay from "@/components/TextPreviewOverlay";
 import { goaeCatalogMeta } from "@/data/goae-catalog-meta";
@@ -29,28 +30,19 @@ import { cn } from "@/lib/utils";
 
 const DEBOUNCE_MS = 500;
 const GLOBAL_RULE_SEPARATOR = "\n\n<<DOCBILL_RULE_SEPARATOR>>\n\n";
+const UPLOAD_TIMEOUT_MS = 180_000; // 3 min – verhindert endloses Warten bei hängendem Upload
 
-const AVAILABLE_MODELS: { value: string; label: string; desc: string; isFree: boolean }[] = [
-  { value: "openrouter/free", label: "OpenRouter Free Router", desc: "Wählt automatisch aus kostenlosen Modellen", isFree: true },
-  { value: "openrouter/hunter-alpha", label: "Hunter Alpha", desc: "1T Parameter – Frontier", isFree: true },
-  { value: "openrouter/healer-alpha", label: "Healer Alpha", desc: "Omni-modal – Vision + Audio", isFree: true },
-  { value: "stepfun/step-3.5-flash:free", label: "Step 3.5 Flash", desc: "StepFun – Reasoning", isFree: true },
-  { value: "arcee-ai/trinity-large-preview:free", label: "Trinity Large Preview", desc: "Arcee – Frontier-Scale", isFree: true },
-  { value: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super", desc: "NVIDIA – 120B MoE", isFree: true },
-  { value: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B", desc: "Meta – multilingual", isFree: true },
-  { value: "nvidia/nemotron-nano-12b-2-vl:free", label: "Nemotron Nano 12B VL", desc: "NVIDIA – Dokumente/Bilder", isFree: true },
-  { value: "qwen/qwen3-coder-480b-a35b-instruct:free", label: "Qwen3 Coder 480B", desc: "Alibaba – Code/Agentic", isFree: true },
-  { value: "z-ai/glm-4.5-air:free", label: "GLM 4.5 Air", desc: "Z.ai – Agentic", isFree: true },
-  { value: "mistralai/mistral-small-3.1-24b-instruct:free", label: "Mistral Small 3.1 24B", desc: "Mistral – multimodal", isFree: true },
-  { value: "nvidia/nemotron-3-nano-30b-a3b:free", label: "Nemotron 3 Nano 30B", desc: "NVIDIA – effizient", isFree: true },
-  { value: "google/gemma-3n-e2b-it:free", label: "Gemma 3n 2B", desc: "Google – klein & schnell", isFree: true },
-  { value: "anthropic/claude-3.5-haiku", label: "Claude 3.5 Haiku", desc: "Schnell & zuverlässig", isFree: false },
-  { value: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", desc: "Starke Qualität", isFree: false },
-  { value: "openai/gpt-4o-mini", label: "GPT-4o Mini", desc: "OpenAI – ausgewogen", isFree: false },
-  { value: "openai/gpt-4o", label: "GPT-4o", desc: "OpenAI – Top-Qualität", isFree: false },
-  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", desc: "Google – schnell", isFree: false },
-  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", desc: "Google – beste Qualität", isFree: false },
-];
+function invokeWithTimeout<T>(
+  fn: () => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("Upload-Timeout – die Verbindung hat zu lange gedauert.")), timeoutMs),
+    ),
+  ]);
+}
 
 type ContextFile = {
   id: string;
@@ -87,13 +79,14 @@ const parseGlobalRuleFields = (value: string): string[] => {
 
 type SettingsContentProps = {
   onSettingsSaved?: () => void;
+  initialTab?: "user" | "display" | "global";
 };
 
-const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
+const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) => {
   const { user, isAdmin } = useAuth();
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<"user" | "display" | "global">("user");
+  const [activeTab, setActiveTab] = useState<"user" | "display" | "global" | "praxis">(initialTab ?? "user");
   const [uiScale, setUiScale] = useState(() => {
     const saved = localStorage.getItem("ui-scale");
     return saved ? parseInt(saved, 10) : 100;
@@ -122,6 +115,12 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
 
   const [credits, setCredits] = useState<{ total_credits: number | null; total_usage: number | null; remaining: number | null; error?: string } | null>(null);
 
+  type PraxisStammdaten = {
+    praxis?: { name?: string; adresse?: string; telefon?: string; email?: string; steuernummer?: string };
+    bank?: { iban?: string; bic?: string; bankName?: string; kontoinhaber?: string };
+  };
+  const [praxisStammdaten, setPraxisStammdaten] = useState<PraxisStammdaten>({});
+
   useEffect(() => {
     if (!user) {
       setLoading(false);
@@ -147,6 +146,8 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
       if (uData) {
         setUserModel(uData.selected_model);
         setUserRules(uData.custom_rules);
+        const ps = (uData as { praxis_stammdaten?: PraxisStammdaten }).praxis_stammdaten as PraxisStammdaten | undefined;
+        setPraxisStammdaten(ps && typeof ps === "object" ? ps : {});
       }
       if (isAdmin) {
         const { data: files } = await supabase
@@ -274,6 +275,29 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
     [user, userModel, userRules, toast, onSettingsSaved]
   );
 
+  const savePraxisStammdaten = useCallback(
+    async (data: PraxisStammdaten) => {
+      if (!user) return;
+      const { data: existing } = await supabase
+        .from("user_settings")
+        .select("id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const payload = { praxis_stammdaten: data, updated_at: new Date().toISOString() };
+      if (existing) {
+        await supabase.from("user_settings").update(payload).eq("id", existing.id);
+      } else {
+        await supabase.from("user_settings").insert({
+          user_id: user.id,
+          ...payload,
+        });
+      }
+      toast({ title: "Gespeichert", description: "Praxisdaten wurden aktualisiert." });
+      onSettingsSaved?.();
+    },
+    [user, toast, onSettingsSaved]
+  );
+
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -306,9 +330,10 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
       };
       if (isPdf) body.file_base64 = await fileToBase64(file);
 
-      const { data, error } = await supabase.functions.invoke("admin-context-upload", {
-        body,
-      });
+      const { data, error } = await invokeWithTimeout(
+        () => supabase.functions.invoke("admin-context-upload", { body }),
+        UPLOAD_TIMEOUT_MS,
+      );
 
       if (error) {
         throw new Error(error.message ?? "Upload fehlgeschlagen");
@@ -346,9 +371,10 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
     if (!user) return;
     setMigrating(true);
     try {
-      const { data, error } = await supabase.functions.invoke("admin-context-upload", {
-        body: { migrate: true },
-      });
+      const { data, error } = await invokeWithTimeout(
+        () => supabase.functions.invoke("admin-context-upload", { body: { migrate: true } }),
+        UPLOAD_TIMEOUT_MS,
+      );
 
       if (error) {
         throw new Error(error.message ?? "Migration fehlgeschlagen");
@@ -427,6 +453,7 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
 
   const tabs = [
     { key: "user" as const, label: "Meine Einstellungen", icon: User },
+    { key: "praxis" as const, label: "Praxis & Bank", icon: Building2 },
     { key: "display" as const, label: "Darstellung", icon: Type },
     ...(isAdmin ? [{ key: "global" as const, label: "Admin / Global", icon: Globe }] : []),
   ];
@@ -613,6 +640,177 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
         </div>
       )}
 
+      {activeTab === "praxis" && (
+        <div className="space-y-10">
+          <p className="text-sm text-muted-foreground">
+            Praxis- und Bankdaten für den PDF-Export neuer Rechnungen (Leistungen abrechnen). Einmal einrichten, dann bei jedem Export verwendet.
+          </p>
+          <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-accent" />
+              Praxis
+            </h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Label htmlFor="praxis-name">Name</Label>
+                <Textarea
+                  id="praxis-name"
+                  placeholder="Dr. med. Muster"
+                  value={praxisStammdaten.praxis?.name ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      praxis: { ...prev.praxis, name: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={1}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="praxis-adresse">Adresse</Label>
+                <Textarea
+                  id="praxis-adresse"
+                  placeholder="Musterstr. 1, 12345 Stadt"
+                  value={praxisStammdaten.praxis?.adresse ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      praxis: { ...prev.praxis, adresse: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={2}
+                />
+              </div>
+              <div>
+                <Label htmlFor="praxis-telefon">Telefon</Label>
+                <Textarea
+                  id="praxis-telefon"
+                  placeholder="0123/456789"
+                  value={praxisStammdaten.praxis?.telefon ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      praxis: { ...prev.praxis, telefon: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={1}
+                />
+              </div>
+              <div>
+                <Label htmlFor="praxis-email">E-Mail</Label>
+                <Textarea
+                  id="praxis-email"
+                  placeholder="praxis@example.de"
+                  value={praxisStammdaten.praxis?.email ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      praxis: { ...prev.praxis, email: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={1}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="praxis-steuernummer">Steuernummer</Label>
+                <Textarea
+                  id="praxis-steuernummer"
+                  placeholder="12/345/67890"
+                  value={praxisStammdaten.praxis?.steuernummer ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      praxis: { ...prev.praxis, steuernummer: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={1}
+                />
+              </div>
+            </div>
+          </section>
+          <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-accent" />
+              Bankverbindung
+            </h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Label htmlFor="bank-iban">IBAN</Label>
+                <Textarea
+                  id="bank-iban"
+                  placeholder="DE89 3704 0044 0532 0130 00"
+                  value={praxisStammdaten.bank?.iban ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      bank: { ...prev.bank, iban: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={1}
+                />
+              </div>
+              <div>
+                <Label htmlFor="bank-bic">BIC</Label>
+                <Textarea
+                  id="bank-bic"
+                  placeholder="COBADEFFXXX"
+                  value={praxisStammdaten.bank?.bic ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      bank: { ...prev.bank, bic: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={1}
+                />
+              </div>
+              <div>
+                <Label htmlFor="bank-name">Bankname</Label>
+                <Textarea
+                  id="bank-name"
+                  placeholder="Commerzbank"
+                  value={praxisStammdaten.bank?.bankName ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      bank: { ...prev.bank, bankName: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={1}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="bank-kontoinhaber">Kontoinhaber</Label>
+                <Textarea
+                  id="bank-kontoinhaber"
+                  placeholder="Dr. med. Muster"
+                  value={praxisStammdaten.bank?.kontoinhaber ?? ""}
+                  onChange={(e) =>
+                    setPraxisStammdaten((prev) => ({
+                      ...prev,
+                      bank: { ...prev.bank, kontoinhaber: e.target.value || undefined },
+                    }))
+                  }
+                  className="mt-1"
+                  rows={1}
+                />
+              </div>
+            </div>
+          </section>
+          <Button onClick={() => savePraxisStammdaten(praxisStammdaten)}>
+            Praxisdaten speichern
+          </Button>
+        </div>
+      )}
+
       {(activeTab === "user" || activeTab === "global") && (
         <div className="space-y-10">
           <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-5">
@@ -645,6 +843,9 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
             </div>
             <div className="space-y-3">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">KI-Modell wählen</p>
+              <p className="text-xs text-muted-foreground -mt-1">
+                Für Rechnungsprüfung wird ein multimodal-fähiges Modell empfohlen (z.B. Healer Alpha, Nemotron Nano VL).
+              </p>
               <Select
                 value={activeTab === "user" && userModel === null ? "__global__" : currentModel || "__global__"}
                 onValueChange={(v) => {
@@ -819,7 +1020,7 @@ const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
                   </div>
                 </div>
               <p className="text-xs text-muted-foreground mb-4">
-                Laden Sie Textdateien (.txt, .md, .csv) oder PDFs hoch, um den Wissenskontext der KI zu erweitern. Relevante Ausschnitte werden automatisch bei jeder Anfrage abgerufen.
+                Laden Sie Textdateien (.txt, .md, .csv) oder PDFs hoch, um den Wissenskontext der KI zu erweitern. Empfohlene Inhalte: fachspezifische Guidelines (z.B. Retinologie), Analog-Bewertungen, Begründungsbeispiele. Relevante Ausschnitte werden automatisch bei jeder Rechnungsprüfung abgerufen.
               </p>
 
               {uploadStatus && (

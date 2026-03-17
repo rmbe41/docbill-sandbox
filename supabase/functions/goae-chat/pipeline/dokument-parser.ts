@@ -8,7 +8,18 @@
  */
 
 import { callLlm, extractJson, pickExtractionModel } from "./llm-client.ts";
+import { buildFallbackModels } from "../model-resolver.ts";
 import type { FilePayload, ParsedRechnung } from "./types.ts";
+
+/** Prüft ob das Parse-Ergebnis plausibel ist. Unplausibel = leere Positionen bei vorhandenem Text/Dokument. */
+export function isPlausibleParseResult(
+  parsed: ParsedRechnung,
+  hasFiles: boolean,
+): boolean {
+  if (parsed.positionen.length > 0) return true;
+  if (!hasFiles && (parsed.rawText?.length ?? 0) < 200) return true;
+  return false;
+}
 
 const PARSER_SYSTEM_PROMPT = `Du bist ein Dokumentenparser für ärztliche Rechnungen nach der Gebührenordnung für Ärzte (GOÄ).
 
@@ -57,8 +68,9 @@ export async function parseDokument(
   files: FilePayload[],
   apiKey: string,
   userModel: string,
+  modelOverride?: string,
 ): Promise<ParsedRechnung> {
-  const model = pickExtractionModel(userModel);
+  const model = modelOverride ?? pickExtractionModel(userModel);
 
   const contentParts: unknown[] = [
     {
@@ -99,6 +111,7 @@ export async function parseDokument(
     temperature: 0.05,
     maxTokens: 8192,
     plugins,
+    skipFallbacks: !!modelOverride,
   });
 
   const parsed = extractJson<ParsedRechnung>(raw);
@@ -113,4 +126,111 @@ export async function parseDokument(
   }
 
   return parsed;
+}
+
+const MAX_PARSER_RETRIES = 3;
+
+/** Parser für Behandlungsberichte/Arztbriefe (keine Rechnung).
+ * Extrahiert rawText und diagnosen, positionen bleiben leer. */
+const BEHANDLUNGSBERICHT_PROMPT = `Du bist ein Dokumentenparser für medizinische Behandlungsberichte und Arztbriefe.
+
+AUFGABE: Extrahiere den vollständigen Text und alle genannten Diagnosen/Befunde aus dem Dokument.
+Dies ist KEIN Rechnungsdokument, sondern ein Behandlungsbericht, Befund oder Arztbrief.
+
+Antworte AUSSCHLIESSLICH mit einem JSON-Objekt:
+
+{
+  "positionen": [],
+  "diagnosen": ["Diagnose 1", "Diagnose 2"],
+  "rawText": "der komplette Text des Dokuments",
+  "freitext": "optional: Befundzusammenfassung"
+}
+
+REGELN:
+- positionen: IMMER leeres Array (keine Abrechnungspositionen)
+- rawText: der gesamte extrahierte Text
+- diagnosen: alle genannten Diagnosen, Befunde, Verdachtsdiagnosen`;
+
+export async function parseBehandlungsbericht(
+  files: FilePayload[],
+  apiKey: string,
+  userModel: string,
+): Promise<ParsedRechnung> {
+  const model = pickExtractionModel(userModel);
+
+  const contentParts: unknown[] = [
+    {
+      type: "text",
+      text: "Lies dieses medizinische Dokument vollständig aus und extrahiere den Text sowie alle Diagnosen als JSON.",
+    },
+  ];
+
+  for (const file of files) {
+    const mimeType = file.type || "application/octet-stream";
+    if (mimeType === "application/pdf") {
+      contentParts.push({
+        type: "file",
+        file: {
+          filename: file.name,
+          file_data: `data:application/pdf;base64,${file.data}`,
+        },
+      });
+    } else {
+      contentParts.push({
+        type: "image_url",
+        image_url: { url: `data:${mimeType};base64,${file.data}` },
+      });
+    }
+  }
+
+  const hasPdf = files.some((f) => (f.type || "").includes("pdf"));
+  const plugins = hasPdf
+    ? [{ id: "file-parser", pdf: { engine: "mistral-ocr" } }]
+    : undefined;
+
+  const raw = await callLlm({
+    apiKey,
+    model,
+    systemPrompt: BEHANDLUNGSBERICHT_PROMPT,
+    userContent: contentParts,
+    jsonMode: true,
+    temperature: 0.05,
+    maxTokens: 8192,
+    plugins,
+  });
+
+  const parsed = extractJson<ParsedRechnung>(raw);
+  if (!parsed.positionen) parsed.positionen = [];
+  if (!parsed.diagnosen) parsed.diagnosen = [];
+  if (!parsed.rawText) parsed.rawText = "";
+
+  return parsed;
+}
+
+/** Ruft parseDokument mit Retry auf, bis das Ergebnis plausibel ist oder alle Modelle durch sind. */
+export async function parseDokumentWithRetry(
+  files: FilePayload[],
+  apiKey: string,
+  userModel: string,
+): Promise<ParsedRechnung> {
+  const modelsToTry = buildFallbackModels(userModel, { multimodal: true });
+  const hasFiles = files.length > 0;
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < Math.min(MAX_PARSER_RETRIES, modelsToTry.length); i++) {
+    const model = modelsToTry[i];
+    try {
+      const parsed = await parseDokument(files, apiKey, userModel, model);
+      if (isPlausibleParseResult(parsed, hasFiles)) {
+        return parsed;
+      }
+      lastError = new Error(
+        `Parser lieferte leere Positionen trotz ${hasFiles ? "hochgeladenem Dokument" : "vorhandenem Text"}.`,
+      );
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  throw lastError ?? new Error("Parser-Retry fehlgeschlagen.");
 }

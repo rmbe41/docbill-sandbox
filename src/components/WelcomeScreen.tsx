@@ -36,7 +36,7 @@ const WelcomeScreen = ({ onSuggestionClick }: WelcomeScreenProps) => {
       <p className="text-sm text-muted-foreground text-center max-w-md mb-8">
         Ihr KI-Assistent für die ophthalmologische GOÄ-Abrechnung. 
         Beschreiben Sie Ihre erbrachten Leistungen, laden Sie eine Rechnung hoch 
-        oder stellen Sie eine Frage.
+        oder stellen Sie eine Frage. Das System erkennt automatisch, was Sie brauchen.
       </p>
 
       <div className="grid gap-3 w-full max-w-md">

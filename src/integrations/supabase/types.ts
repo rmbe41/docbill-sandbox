@@ -48,6 +48,7 @@ export type Database = {
           title: string
           updated_at: string
           user_id: string
+          source_filename: string | null
         }
         Insert: {
           created_at?: string
@@ -55,6 +56,7 @@ export type Database = {
           title?: string
           updated_at?: string
           user_id: string
+          source_filename?: string | null
         }
         Update: {
           created_at?: string
@@ -62,6 +64,7 @@ export type Database = {
           title?: string
           updated_at?: string
           user_id?: string
+          source_filename?: string | null
         }
         Relationships: []
       }
@@ -143,6 +146,7 @@ export type Database = {
         Row: {
           custom_rules: string | null
           id: string
+          praxis_stammdaten: Record<string, unknown> | null
           selected_model: string | null
           updated_at: string
           user_id: string
@@ -150,6 +154,7 @@ export type Database = {
         Insert: {
           custom_rules?: string | null
           id?: string
+          praxis_stammdaten?: Record<string, unknown> | null
           selected_model?: string | null
           updated_at?: string
           user_id: string
@@ -157,6 +162,7 @@ export type Database = {
         Update: {
           custom_rules?: string | null
           id?: string
+          praxis_stammdaten?: Record<string, unknown> | null
           selected_model?: string | null
           updated_at?: string
           user_id?: string

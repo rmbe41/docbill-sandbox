@@ -12,9 +12,12 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { supabase } from "@/integrations/supabase/client";
+import { getModelInfo } from "@/data/models";
 import { parsePositionsFromText, validatePositions } from "@/lib/goae-validator";
 import type { InvoiceResultData } from "@/components/InvoiceResult";
+import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import { cn } from "@/lib/utils";
+import { AlertTriangle } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
   AlertDialog,
@@ -47,6 +50,7 @@ const Index = () => {
   const { user } = useAuth();
   const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null }>({ selected_model: null, custom_rules: null });
   const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string }>({ default_model: "openrouter/free", default_rules: "" });
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"user" | "display" | "global" | undefined>(undefined);
 
   const {
     conversations,
@@ -57,6 +61,7 @@ const Index = () => {
     saveMessage,
     deleteConversation,
     updateTitle,
+    updateSourceFilename,
     fetchConversations,
   } = useConversations();
 
@@ -121,7 +126,14 @@ const Index = () => {
   );
 
   const handleSettings = useCallback(() => {
+    setSettingsInitialTab(undefined);
     setMainView("settings");
+  }, []);
+
+  const handleOpenSettingsForModel = useCallback(() => {
+    setSettingsInitialTab("user");
+    setMainView("settings");
+    setSidebarOpen(true);
   }, []);
 
   const handleHistory = useCallback(() => {
@@ -168,6 +180,10 @@ const Index = () => {
       // Save user message to DB
       if (convId) {
         await saveMessage(convId, "user", content);
+        // Store first file name for history display
+        if (files && files.length > 0) {
+          await updateSourceFilename(convId, files[0].name);
+        }
       }
 
       let filePayloads: { name: string; type: string; data: string }[] = [];
@@ -186,8 +202,13 @@ const Index = () => {
         content: m.content,
       }));
 
+      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+      const lastInvoiceResult = lastAssistant?.invoiceResult;
+      const lastServiceResult = lastAssistant?.serviceBillingResult;
+
       let assistantContent = "";
       let invoiceData: InvoiceResultData | undefined;
+      let serviceBillingData: ServiceBillingResultData | undefined;
 
       const upsertAssistant = (chunk: string) => {
         assistantContent += chunk;
@@ -196,7 +217,7 @@ const Index = () => {
           if (last?.role === "assistant") {
             return prev.map((m, i) =>
               i === prev.length - 1
-                ? { ...m, content: assistantContent, invoiceResult: invoiceData }
+                ? { ...m, content: assistantContent, invoiceResult: invoiceData, serviceBillingResult: serviceBillingData }
                 : m
             );
           }
@@ -207,6 +228,7 @@ const Index = () => {
               role: "assistant" as const,
               content: assistantContent,
               invoiceResult: invoiceData,
+              serviceBillingResult: serviceBillingData,
             },
           ];
         });
@@ -224,6 +246,8 @@ const Index = () => {
           return;
         }
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180_000); // 3 min – verhindert endloses Warten bei hängender Verbindung
         const resp = await fetch(CHAT_URL, {
           method: "POST",
           headers: {
@@ -235,8 +259,20 @@ const Index = () => {
             files: filePayloads.length > 0 ? filePayloads : undefined,
             model: userSettings.selected_model || globalSettings.default_model,
             extra_rules: [globalSettings.default_rules, userSettings.custom_rules].filter(Boolean).join("\n\n"),
+            ...(lastInvoiceResult && {
+              last_invoice_result: { pruefung: lastInvoiceResult },
+            }),
+            ...(lastServiceResult && {
+              last_service_result: {
+                vorschlaege: lastServiceResult.vorschlaege,
+                klinischerKontext: lastServiceResult.klinischerKontext,
+                fachgebiet: lastServiceResult.fachgebiet,
+              },
+            }),
           }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
 
         if (resp.status === 429) {
           toast({ title: "Rate Limit", description: "Zu viele Anfragen.", variant: "destructive" });
@@ -290,8 +326,8 @@ const Index = () => {
             try {
               const parsed = JSON.parse(jsonStr);
 
-              // Pipeline progress events
-              if (parsed.type === "pipeline_progress") {
+              // Pipeline / Service billing progress events
+              if (parsed.type === "pipeline_progress" || parsed.type === "service_billing_progress") {
                 setPipelineStep({
                   step: parsed.step,
                   totalSteps: parsed.totalSteps,
@@ -328,6 +364,21 @@ const Index = () => {
                   setFreeExhaustedErrorDetails(parsed.error ?? parsed.details ?? null);
                   setFreeExhaustedDialogOpen(true);
                 }
+                continue;
+              }
+
+              // Service billing result
+              if (parsed.type === "service_billing_result") {
+                setPipelineStep(null);
+                serviceBillingData = parsed.data as ServiceBillingResultData;
+                upsertAssistant("");
+                continue;
+              }
+
+              // Service billing error
+              if (parsed.type === "service_billing_error") {
+                setPipelineStep(null);
+                upsertAssistant(`\n\n❌ **Fehler:** ${parsed.error}`);
                 continue;
               }
 
@@ -390,13 +441,16 @@ const Index = () => {
         }
       } catch (e) {
         console.error("sendMessage error:", e);
-        const errMsg = e instanceof Error ? e.message : "Die Anfrage konnte nicht verarbeitet werden.";
+        const isAbort = e instanceof Error && e.name === "AbortError";
+        const errMsg = isAbort
+          ? "Die Verbindung hat zu lange gedauert (Timeout). Bitte erneut versuchen."
+          : (e instanceof Error ? e.message : "Die Anfrage konnte nicht verarbeitet werden.");
         toast({ title: "Fehler", description: errMsg, variant: "destructive" });
       } finally {
         setIsLoading(false);
       }
     },
-    [messages, toast, activeConversationId, createConversation, saveMessage, setActiveConversationId, userSettings, globalSettings, fetchConversations]
+    [messages, toast, activeConversationId, createConversation, saveMessage, updateSourceFilename, setActiveConversationId, userSettings, globalSettings, fetchConversations]
   );
 
   return (
@@ -469,7 +523,7 @@ const Index = () => {
           )}
           {mainView === "settings" && (
             <div className="pb-16">
-              <SettingsContent onSettingsSaved={loadSettings} />
+              <SettingsContent onSettingsSaved={loadSettings} initialTab={settingsInitialTab} />
             </div>
           )}
         </div>
@@ -483,6 +537,36 @@ const Index = () => {
           >
             <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
               <ChatInput onSend={sendMessage} isLoading={isLoading} />
+              <div className="mt-1.5 flex items-center justify-between gap-3">
+                <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 pl-2">
+                  <AlertTriangle className="w-3 h-3 shrink-0 text-muted-foreground/80" />
+                  Alle Ergebnisse müssen vor der Verwendung fachlich geprüft werden.
+                </p>
+                {(() => {
+                  const { label, isFree } = getModelInfo(userSettings.selected_model || globalSettings.default_model);
+                  return (
+                    <button
+                      type="button"
+                      onClick={handleOpenSettingsForModel}
+                      className={cn(
+                        "shrink-0 inline-flex items-center gap-1.5 text-[10px] text-muted-foreground/90 hover:text-foreground transition-colors",
+                        "px-2.5 py-1 rounded-full bg-muted/70 hover:bg-muted border border-transparent"
+                      )}
+                      title="Modell in Einstellungen ändern"
+                    >
+                      <span className="truncate max-w-[120px]">{label}</span>
+                      <span
+                        className={cn(
+                          "shrink-0 text-[9px] font-medium",
+                          isFree ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                        )}
+                      >
+                        {isFree ? "Free" : "Pay"}
+                      </span>
+                    </button>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         )}

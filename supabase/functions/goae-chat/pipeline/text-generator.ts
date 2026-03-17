@@ -10,6 +10,7 @@
  */
 
 import type { PipelineResult } from "./types.ts";
+import { fetchWithTimeout } from "../fetch-with-timeout.ts";
 import { GOAE_PARAGRAPHEN } from "../goae-paragraphen.ts";
 import {
   GOAE_ANALOGE_BEWERTUNG,
@@ -20,6 +21,9 @@ import {
   isRetryableModelStatus,
 } from "../model-resolver.ts";
 
+/** Timeout für Textgenerierung (90s) – verhindert endloses Hängen */
+const TEXT_FETCH_TIMEOUT_MS = 90000;
+
 const TEXT_SYSTEM_PROMPT = `Du bist GOÄ-DocBill, ein KI-Experte für die Analyse und Optimierung von Arztrechnungen.
 
 Du erhältst die VOLLSTÄNDIGEN ERGEBNISSE einer automatischen Rechnungsprüfung.
@@ -29,8 +33,9 @@ DEINE AUFGABE: Liefere NUR zwei kompakte Blöcke – Analyse und Fazit. KEINE Wi
 
 WICHTIG:
 - DU erfindest KEINE eigenen Prüfungen – die Ergebnisse sind determiniert
-- Erstelle KEINE Tabellen
+- Erstelle KEINE Tabellen (die strukturierte Darstellung übernimmt das Frontend)
 - Antworte IMMER auf Deutsch
+- Priorisiere Fehler (Ausschluss, Betrag, Höchstsatz) vor Warnungen. Bei Unsicherheit: explizit „manuell prüfen“ empfehlen
 
 ⚠️ DATENSCHUTZ / DSGVO:
 - Gib NIEMALS personenbezogene Daten wieder
@@ -91,7 +96,7 @@ export function buildTextGenerationPrompt(result: PipelineResult): string {
   lines.push("\n## Geprüfte Positionen\n");
   for (const pos of result.pruefung.positionen) {
     lines.push(`### Position ${pos.nr}: GOÄ ${pos.ziffer} – ${pos.bezeichnung}`);
-    lines.push(`Faktor: ${pos.faktor}× | Betrag: ${pos.betrag.toFixed(2)}€ | Berechnet: ${pos.berechneterBetrag.toFixed(2)}€ | Status: ${pos.status}`);
+    lines.push(`Faktor: ${pos.faktor}× | Betrag: ${pos.betrag.toFixed(2)}€ | Berechnet: ${pos.berechneterBetrag.toFixed(2)}€ | Prüfung: ${pos.status}`);
     if (pos.begruendung) {
       lines.push(`Begründung: ${pos.begruendung}`);
     }
@@ -122,7 +127,7 @@ export function buildTextGenerationPrompt(result: PipelineResult): string {
   const z = result.pruefung.zusammenfassung;
   lines.push("## Zusammenfassung");
   lines.push(`- Gesamt: ${z.gesamt} Positionen`);
-  lines.push(`- Korrekt: ${z.korrekt}`);
+  lines.push(`- In Ordnung: ${z.korrekt}`);
   lines.push(`- Warnungen: ${z.warnungen}`);
   lines.push(`- Fehler: ${z.fehler}`);
   lines.push(`- Rechnungssumme: ${z.rechnungsSumme.toFixed(2)}€`);
@@ -142,6 +147,7 @@ export async function generateTextStream(
   model: string,
   extraRules?: string,
   adminContext?: string,
+  userMessage?: string,
 ): Promise<ReadableStream<Uint8Array>> {
   let systemContent = TEXT_SYSTEM_PROMPT;
   if (adminContext) {
@@ -150,6 +156,9 @@ export async function generateTextStream(
   if (extraRules) {
     systemContent += `\n\n## ZUSÄTZLICHE REGELN:\n${extraRules}`;
   }
+  if (userMessage?.trim()) {
+    systemContent += `\n\n## NUTZERANWEISUNG (beachten!)\n\nDer Nutzer hat folgende Anweisung gegeben: „${userMessage.trim()}“\n\nBerücksichtige dies bei Analyse und Fazit: Priorisiere die genannten Aspekte, passe Detaillierungsgrad und Fokus entsprechend an.`;
+  }
 
   const prompt = buildTextGenerationPrompt(result);
 
@@ -157,25 +166,36 @@ export async function generateTextStream(
   let lastError = "Textgenerierung fehlgeschlagen";
 
   for (let i = 0; i < modelsToTry.length; i++) {
-    const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: modelsToTry[i],
+            messages: [
+              { role: "system", content: systemContent },
+              { role: "user", content: prompt },
+            ],
+            stream: true,
+            temperature: 0.3,
+          }),
+          timeoutMs: TEXT_FETCH_TIMEOUT_MS,
         },
-        body: JSON.stringify({
-          model: modelsToTry[i],
-          messages: [
-            { role: "system", content: systemContent },
-            { role: "user", content: prompt },
-          ],
-          stream: true,
-          temperature: 0.3,
-        }),
-      },
-    );
+      );
+    } catch (e) {
+      const isAbort = e instanceof Error && e.name === "AbortError";
+      lastError = isAbort
+        ? `Textgenerierung Timeout (${TEXT_FETCH_TIMEOUT_MS / 1000}s) – Modell ${modelsToTry[i]} antwortet nicht`
+        : (e instanceof Error ? e.message : String(e));
+      if (i === modelsToTry.length - 1) throw new Error(lastError);
+      continue;
+    }
 
     if (response.ok) {
       return response.body!;

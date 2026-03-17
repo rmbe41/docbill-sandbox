@@ -10,8 +10,10 @@ import { GOAE_KATALOG } from "./goae-catalog.ts";
 import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
 import { GOAE_ANALOGE_BEWERTUNG, GOAE_BEGRUENDUNGEN, GOAE_ABSCHNITTE } from "./goae-regeln.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
+import { runServiceBillingAsStream } from "./pipeline/service-billing-orchestrator.ts";
+import { classifyIntent } from "./intent-classifier.ts";
 import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel } from "./model-resolver.ts";
-import { loadRelevantAdminContext, buildPipelineQuery } from "./admin-context.ts";
+import { loadRelevantAdminContext, buildPipelineQuery, type LastResultContext } from "./admin-context.ts";
 
 // ---------------------------------------------------------------------------
 // System-Prompt für den regulären Chat-Modus (ohne Dokument-Upload)
@@ -20,33 +22,32 @@ import { loadRelevantAdminContext, buildPipelineQuery } from "./admin-context.ts
 const FORMATTING_RULES = `
 ## ⚠️ PFLICHT-FORMATIERUNGSREGELN (IMMER BEFOLGEN!)
 
-### STRUKTUR-PRINZIP: EINE TABELLE MIT INLINE-KORREKTUREN
+### STRUKTUR-PRINZIP: TABELLE MIT KURZEN ANMERKUNGEN
 
-Deine Antwort folgt IMMER dieser einfachen Struktur:
+Deine Antwort nutzt **echte Markdown-Tabellen**, damit sie im Frontend als Tabelle dargestellt werden.
 
-1. **EINE Haupttabelle** mit ALLEN Positionen der Rechnung — Korrekturen und Hinweise stehen DIREKT in der gleichen Zeile
-2. Danach ein kurzer **Optimierungsblock** (falls zutreffend)
-3. Am Ende eine **Zusammenfassung** in 2-3 Bullet Points
+1. **EINE Haupttabelle** mit allen Positionen — als echte Markdown-Tabelle
+2. **Optimierungsblock** (falls zutreffend) — ebenfalls als Tabelle
+3. **Zusammenfassung** — 2–3 Bullet Points
 
-### HARTE REGELN:
-- **Trennlinien**: Verwende \`---\` zwischen den 3 Blöcken
-- **Bullet Points**: Jede Aufzählung ab 2 Punkten als Liste
-- **Fettdruck**: Wichtige Begriffe, Ziffern und Beträge IMMER **fett**
-- **NIEMALS** mehr als 3 Sätze ohne visuellen Umbruch
-- **KEINE getrennten Sektionen** für "korrekt" und "fehlerhaft" — alles in EINER Tabelle
-- **KONKRETE VORSCHLÄGE PFLICHT**: Jede ⚠️ oder ❌ Anmerkung MUSS einen konkreten, kopierbaren Lösungsvorschlag enthalten — nicht nur das Problem beschreiben!
+### ❌ VERBOTEN — ANMERKUNGEN MÜSSEN KURZ BLEIBEN
+
+**NIEMALS** lange, ausufernde Anmerkungen in der Tabelle:
+- Keine mehrzeiligen Erklärungen wie „Ausschlussriskiko: Bei Bil‑Dienst‑Leistungen … → Vorschlag: …“
+- Keine verschachtelten Sätze, keine Wiederholung von GOÄ-Regeln pro Zeile
+- **Anmerkung pro Zeile: max. 1 Satz** — sonst bricht die Tabellendarstellung
 
 ### PFLICHT-TABELLENFORMAT:
 
-## 📋 Rechnungsanalyse
+## 📋 Rechnungsvorschlag
 
-| Nr. | GOÄ | Bezeichnung | Faktor | Betrag | Status | Anmerkung |
-|-----|-----|-------------|--------|--------|--------|-----------|
-| 1 | 1240 | Spaltlampe | 2,3× | 9,92€ | ✅ | Korrekt |
-| 2 | 1242 | Funduskopie | 2,3× | 6,47€ | ⚠️ | Ausschluss mit 1240 → **Vorschlag:** GOÄ 1242 entfernen, da Nebeneinanderabrechnung mit 1240 nicht zulässig. Alternativ: Nur 1240 abrechnen. |
-| 3 | 5 | Beratung | 3,0× | 30,60€ | ⚠️ | Über Schwellenwert → **Vorschlag:** „Aufgrund der überdurchschnittlichen Komplexität bei [Diagnose] und erhöhtem Zeitaufwand von ca. XX Min. ist ein Faktor von 3,0× gerechtfertigt." |
+| Nr. | GOÄ | Bezeichnung | Faktor | Betrag | Prüfung | Anmerkung |
+|-----|-----|-------------|--------|--------|---------|-----------|
+| 1 | 1240 | Spaltlampe | 2,3× | 9,92€ | ✅ | In Ordnung |
+| 2 | 1242 | Funduskopie | 2,3× | 6,47€ | ⚠️ | Ausschluss mit 1240. **Vorschlag:** 1242 streichen. |
+| 3 | 5 | Beratung | 3,0× | 30,60€ | ⚠️ | Begründung nötig. **Vorschlag:** „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.“ |
 
-**Legende:** ✅ = korrekt, ⚠️ = Korrekturbedarf, ❌ = fehlerhaft, 💡 = Optimierungstipp
+**Legende:** ✅ = in Ordnung, ⚠️ = Korrekturbedarf, ❌ = fehlerhaft, 💡 = Optimierungstipp
 
 ---
 
@@ -54,41 +55,27 @@ Deine Antwort folgt IMMER dieser einfachen Struktur:
 
 | GOÄ | Beschreibung | Potenzial |
 |-----|-------------|-----------|
-| **1202** 2,3× | Refraktionsbestimmung – empfohlen bei [klinischer Kontext] | +9,92€ |
+| **1202** 2,3× | Refraktionsbestimmung – empfohlen bei [Kontext] | +9,92€ |
 
 ---
 
 ## 📝 Zusammenfassung
 
-- **X** von **Y** Positionen korrekt
+- **X** von **Y** Positionen in Ordnung
 - **Z** Korrekturen empfohlen
 - Optimierungspotenzial: **+XX,XX €**
 
-FORMATIERUNG IST PFLICHT — halte dich IMMER an diese Struktur!
+### HARTE REGELN:
+- **Tabelle verwenden** — Markdown-Syntax mit \`|\` korrekt, jede Zeile eine Tabellenzeile
+- **Anmerkung: max. 1 Satz** — kurzer Vorschlag, kein Fließtext
+- **Fettdruck**: Ziffern, Beträge **fett**
+- **Trennlinien**: \`---\` zwischen den Blöcken
+- **KONKRETE VORSCHLÄGE**: Jede ⚠️/❌ Zeile braucht einen **Vorschlag:** in 1 Satz
 
-### KONKRETE VORSCHLÄGE — DETAILREGELN:
-
-Bei JEDER ⚠️ oder ❌ Markierung MUSST du einen **konkreten, kopierbaren Vorschlag** in der Anmerkung-Spalte liefern. Format: \`[Problem] → **Vorschlag:** „[konkreter Text]"\`
-
-**1. Steigerungsfaktor über Schwellenwert (Begründung nötig):**
-Liefere eine fertige Begründungsformulierung mit Platzhaltern:
-→ **Vorschlag:** „Aufgrund [der überdurchschnittlichen Komplexität / des erhöhten Zeitaufwands / der besonderen Schwierigkeit] bei [Diagnose/Behandlung einfügen] und einem Zeitaufwand von ca. [XX] Min. ist ein Steigerungsfaktor von [X,X]× gemäß §5 Abs. 2 GOÄ gerechtfertigt."
-
-**2. Zu pauschale/generische Begründung:**
-Schreibe die Begründung konkret um:
-→ **Vorschlag:** Statt „erhöhter Aufwand" besser: „Erhöhter diagnostischer Aufwand durch [z.B. ausgeprägte Linsentrübung mit erschwerter Funduskopie, multiple Pathologien der Netzhaut]."
-
-**3. Ausschlussziffern-Konflikt:**
-Sage konkret, welche Ziffer entfernt oder behalten werden soll und warum:
-→ **Vorschlag:** „GOÄ [XXXX] entfernen, da Nebeneinanderabrechnung mit GOÄ [YYYY] laut Ausschlusskatalog nicht zulässig. Empfehlung: [YYYY] beibehalten (höherer Betrag: XX,XX€)."
-
-**4. Fehlende/empfohlene Ziffern:**
-Nenne die exakte Ziffer mit Faktor und erwartetem Betrag:
-→ **Vorschlag:** „GOÄ [XXXX] ([Bezeichnung]) mit Faktor [X,X]× ergänzen = [XX,XX]€. Begründung: [klinischer Kontext]."
-
-**5. Falscher Betrag/Faktor:**
-Nenne den korrekten Wert:
-→ **Vorschlag:** „Korrekter Betrag bei Faktor [X,X]×: [XX,XX]€ (statt [YY,YY]€). Differenz: [±Z,ZZ]€."
+### BEGRÜNDUNGEN FÜR HÖHERE FAKTOREN (Faktor > Schwellenwert):
+- **Fachlich top Qualität**: Keine Leerformeln wie „erhöhter Zeitaufwand" ohne Konkretes. Verwende ziffer-spezifische Formulierungen (z.B. „Erhöhter diagnostischer Aufwand durch [konkrete Ursache]" bei Spaltlampe/Fundus).
+- **UI-Passform**: Begründung in max. 1 Satz (~140 Zeichen), damit sie in Tabellen und Vorschlags-Boxen sauber dargestellt wird.
+- **Zeitangabe bei Beratung**: Bei GOÄ 1–4 immer Dauer nennen (z.B. „Beratung von ca. 20 Min.").
 `;
 
 const SYSTEM_PROMPT = `${FORMATTING_RULES}
@@ -279,7 +266,7 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, files, model, extra_rules } = await req.json();
+    const { messages, files, model, extra_rules, last_invoice_result, last_service_result } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
     if (!OPENROUTER_API_KEY) {
@@ -298,14 +285,45 @@ serve(async (req) => {
     const requestedModel = model || "openrouter/free";
     const resolvedModel = resolveModel(requestedModel);
     const hasFiles = files && files.length > 0;
-    const userMessage = messages?.[messages.length - 1]?.content;
+    const userMessage = (messages?.[messages.length - 1]?.content as string) || "";
+
+    const lastResult: LastResultContext | undefined =
+      last_invoice_result || last_service_result
+        ? { last_invoice_result: last_invoice_result, last_service_result: last_service_result }
+        : undefined;
 
     const getAdminContext = async (result?: { medizinischeAnalyse?: unknown; pruefung?: unknown }) =>
-      loadRelevantAdminContext(buildPipelineQuery(userMessage, result), OPENROUTER_API_KEY);
+      loadRelevantAdminContext(
+        buildPipelineQuery(userMessage, result, lastResult),
+        OPENROUTER_API_KEY,
+      );
+
+    const { workflow: intent } = await classifyIntent(
+      {
+        userMessage,
+        hasFiles: !!hasFiles,
+        recentMessages: messages,
+      },
+      OPENROUTER_API_KEY,
+      resolvedModel,
+    );
 
     let response: Response;
 
-    if (hasFiles) {
+    if (intent === "leistungen_abrechnen") {
+      // ═══════════════════════════════════════════════════════
+      // SERVICE-BILLING: Leistungen aus Text/Dokument → GOÄ-Vorschläge
+      // ═══════════════════════════════════════════════════════
+      response = await runServiceBillingAsStream(
+        {
+          files: hasFiles ? files : undefined,
+          userMessage,
+          model: resolvedModel,
+          extraRules: extra_rules,
+        },
+        OPENROUTER_API_KEY,
+      );
+    } else if (hasFiles) {
       // ═══════════════════════════════════════════════════════
       // PIPELINE-MODUS: Strukturierte Rechnungsprüfung
       //

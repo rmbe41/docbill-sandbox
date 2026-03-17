@@ -8,7 +8,7 @@
  *     ↕ SSE-Progress an Frontend
  */
 
-import { parseDokument } from "./dokument-parser.ts";
+import { parseDokumentWithRetry } from "./dokument-parser.ts";
 import { analysiereMedizinisch } from "./medizinisches-nlp.ts";
 import { extrahiereLeistungen } from "./leistungs-extraktion.ts";
 import { mappeGoae } from "./goae-mapping.ts";
@@ -65,22 +65,23 @@ export async function runPipeline(
     await writer.write(encoder.encode(data));
   };
 
-  // Keep-alive: Send SSE comment every 12s to prevent proxy/load-balancer timeouts
+  // Keep-alive: Send SSE comment every 8s to prevent proxy/load-balancer timeouts
   // during long LLM calls (e.g. parseDokument can take 20–40s)
+  const KEEP_ALIVE_MS = 8000;
   const keepAliveInterval = setInterval(async () => {
     try {
       await writer.write(encoder.encode(": keepalive\n\n"));
     } catch {
       clearInterval(keepAliveInterval);
     }
-  }, 12000);
+  }, KEEP_ALIVE_MS);
 
   // Run the pipeline in the background, writing to the stream
   (async () => {
     try {
-      // Step 1: Dokument Parser
+      // Step 1: Dokument Parser (mit Retry bei unplausiblen Ergebnissen)
       await sendProgress(0, PIPELINE_STEPS[0].label);
-      const parsedRechnung = await parseDokument(
+      const parsedRechnung = await parseDokumentWithRetry(
         input.files,
         apiKey,
         input.model,
@@ -140,6 +141,7 @@ export async function runPipeline(
         input.model,
         input.extraRules,
         adminContext,
+        input.userMessage,
       );
 
       // Pipe the text generation stream through

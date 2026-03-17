@@ -117,6 +117,15 @@ HINWEIS: Die Dauer sollte in der Begründung angegeben werden (z.B. „Beratungs
 
 ### Operative Leistung
 „Erschwerter Zugang / verlängerte OP-Dauer von [XX] Min. aufgrund [anatomischer Besonderheiten / fortgeschrittenem Krankheitsstadium / intraoperativer Komplikation: konkret benennen]."
+
+## Kompakte Begründungen für UI (max. ~140 Zeichen)
+
+Für Tabellen und Vorschlags-Boxen: fachlich einwandfrei, aber kurz. Keine Leerformeln.
+
+- **Beratung:** „Eingehende Beratung von ca. 15–20 Min. aufgrund [Diagnose]. Faktor X× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.“
+- **Spaltlampe/Fundus:** „Erhöhter diagnostischer Aufwand durch [Diagnose] (erschwerte Darstellung). Faktor X× gerechtfertigt.“
+- **Refraktion:** „Erschwerte Refraktion bei [Diagnose]. Faktor X× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.“
+- **Operativ:** „Erschwerter Zugang/verlängerte OP bei [Diagnose]. Faktor X× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.“
 `;
 
 export const GOAE_ABSCHNITTE = `

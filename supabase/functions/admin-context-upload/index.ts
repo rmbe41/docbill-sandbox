@@ -21,6 +21,21 @@ const EMBEDDING_DIM = 1536;
 const CHUNK_SIZE = 2500;
 const CHUNK_OVERLAP = 200;
 const MAX_CHUNKS = 100;
+const EMBEDDING_TIMEOUT_MS = 60000; // 60s – verhindert endloses Hängen bei großen Chunks
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+  const { timeoutMs = 30000, ...fetchInit } = init;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...fetchInit, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function chunkText(text: string, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
   const chunks: string[] = [];
@@ -39,17 +54,21 @@ function chunkText(text: string, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP
 }
 
 async function createEmbeddings(texts: string[], apiKey: string): Promise<number[][]> {
-  const resp = await fetch("https://openrouter.ai/api/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const resp = await fetchWithTimeout(
+    "https://openrouter.ai/api/v1/embeddings",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: EMBEDDING_MODEL,
+        input: texts,
+      }),
+      timeoutMs: EMBEDDING_TIMEOUT_MS,
     },
-    body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input: texts,
-    }),
-  });
+  );
 
   if (!resp.ok) {
     const err = await resp.text();

@@ -426,44 +426,71 @@ function vorschlagAusschluss(
   return `${posLabel} entfernen und ${andereLabel} beibehalten (höherer Betrag).`;
 }
 
+/** Max. Länge für Begründungen (UI-Passform: Tabelle, Vorschlags-Box) */
+const BEGRUENDUNG_MAX_CHARS = 140;
+
 function begründungsVorschlag(
   ziffer: string,
   faktor: number,
   eintrag: KatalogEintrag,
   analyse: MedizinischeAnalyse,
 ): string {
-  const diagnose =
-    analyse.diagnosen.length > 0
-      ? analyse.diagnosen[0].text
-      : "[Diagnose einfügen]";
-
-  const context = analyse.klinischerKontext || "[klinischer Kontext]";
-
-  return (
-    `Begründungsvorschlag für GOÄ ${ziffer} (${eintrag.bezeichnung}) mit Faktor ${faktor}×: ` +
-    `"Aufgrund der überdurchschnittlichen Schwierigkeit bei ${diagnose} ` +
-    `und einem erhöhten Zeitaufwand ist ein Steigerungsfaktor von ${faktor}× ` +
-    `gemäß § 5 Abs. 2 GOÄ gerechtfertigt. ${context}."`
-  );
+  const text = begruendungNurText(ziffer, faktor, eintrag, analyse);
+  return `Begründungsvorschlag für GOÄ ${ziffer} (${eintrag.bezeichnung}) mit Faktor ${faktor}×: „${text}"`;
 }
 
-/** Extrahiert den reinen Begründungstext (ohne Präfix) für Übernahme in die Rechnung. */
+/**
+ * Fachlich hochwertige, UI-kompakte Begründung für Faktor > Schwellenwert.
+ * Ziffer-spezifische Formulierungen, max. ~140 Zeichen für Tabellendarstellung.
+ */
 function begruendungNurText(
   ziffer: string,
   faktor: number,
   eintrag: KatalogEintrag,
   analyse: MedizinischeAnalyse,
 ): string {
-  const diagnose =
+  const diagnoseRaw =
     analyse.diagnosen.length > 0
       ? analyse.diagnosen[0].text
-      : "[Diagnose einfügen]";
+      : "[Diagnose]";
+  const diagnose = diagnoseRaw.length > 50 ? diagnoseRaw.slice(0, 47) + "…" : diagnoseRaw;
+  const ctx = (analyse.klinischerKontext || "").trim().slice(0, 50);
 
-  const context = analyse.klinischerKontext || "[klinischer Kontext]";
+  const num = parseInt(ziffer.replace(/\D/g, ""), 10) || 0;
 
-  return (
-    `Aufgrund der überdurchschnittlichen Schwierigkeit bei ${diagnose} ` +
-    `und einem erhöhten Zeitaufwand ist ein Steigerungsfaktor von ${faktor}× ` +
-    `gemäß § 5 Abs. 2 GOÄ gerechtfertigt. ${context}.`
-  );
+  let text: string;
+
+  // Beratung (1–4): Zeitangabe wichtig
+  if (num >= 1 && num <= 4) {
+    text = `Eingehende Beratung von ca. 15–20 Min. aufgrund ${diagnose}. Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.`;
+  }
+  // Spaltlampe/Fundus (1240–1244, 1248–1249)
+  else if (num >= 1240 && num <= 1249) {
+    text = `Erhöhter diagnostischer Aufwand durch ${diagnose} (erschwerte Darstellung/Beurteilung). Faktor ${faktor}× gerechtfertigt.`;
+  }
+  // Refraktion (1200–1218)
+  else if (num >= 1200 && num <= 1218) {
+    text = `Erschwerte Refraktion bei ${diagnose}. Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.`;
+  }
+  // Tonometrie (1255–1257)
+  else if (num >= 1255 && num <= 1257) {
+    text = `Erschwerte Untersuchung bei ${diagnose}. Faktor ${faktor}× gerechtfertigt.`;
+  }
+  // Operative Leistungen (1275–1386)
+  else if (num >= 1275 && num <= 1386) {
+    text = `Erschwerter Zugang/verlängerte OP bei ${diagnose}. Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.`;
+  }
+  // Untersuchungen 5–8
+  else if (num >= 5 && num <= 8) {
+    text = `Erhöhter Untersuchungsumfang bei ${diagnose}. Faktor ${faktor}× gerechtfertigt.`;
+  }
+  // Standard
+  else {
+    text = `Überdurchschnittliche Schwierigkeit bei ${diagnose}. Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.`;
+  }
+
+  if (ctx.length > 5 && text.length + ctx.length < BEGRUENDUNG_MAX_CHARS - 3) {
+    text = text.replace(/\.$/, `. ${ctx}.`);
+  }
+  return text.slice(0, BEGRUENDUNG_MAX_CHARS).trim();
 }

@@ -7,6 +7,7 @@ export type Conversation = {
   title: string;
   created_at: string;
   updated_at: string;
+  source_filename: string | null;
 };
 
 export type DbMessage = {
@@ -93,6 +94,14 @@ export const useConversations = () => {
     [fetchConversations]
   );
 
+  const updateSourceFilename = useCallback(
+    async (id: string, filename: string) => {
+      await supabase.from("conversations").update({ source_filename: filename }).eq("id", id);
+      await fetchConversations();
+    },
+    [fetchConversations]
+  );
+
   return {
     conversations,
     activeConversationId,
@@ -102,6 +111,7 @@ export const useConversations = () => {
     saveMessage,
     deleteConversation,
     updateTitle,
+    updateSourceFilename,
     fetchConversations,
   };
 };

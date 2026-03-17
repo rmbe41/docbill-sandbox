@@ -5,6 +5,7 @@ import { User, FileText, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp } from "lu
 import { cn } from "@/lib/utils";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
 import InvoiceResult, { type InvoiceResultData } from "@/components/InvoiceResult";
+import ServiceBillingResult, { type ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import FileOverlay from "@/components/FileOverlay";
 import { useFeedback } from "@/hooks/useFeedback";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ export type ChatMessage = {
   content: string;
   attachments?: { name: string; type: string; previewUrl?: string }[];
   invoiceResult?: InvoiceResultData;
+  serviceBillingResult?: ServiceBillingResultData;
 };
 
 type ChatBubbleProps = {
@@ -212,7 +214,10 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
                 onExportSuccess={handleExportSuccess}
               />
             )}
-            {(message.content || (message.invoiceResult && !message.content)) && (
+            {message.serviceBillingResult && (
+              <ServiceBillingResult data={message.serviceBillingResult} />
+            )}
+            {(message.content || (message.invoiceResult && !message.content) || (message.serviceBillingResult && !message.content)) && (
               <div className="rounded-lg border border-border overflow-hidden">
                 <button
                   type="button"

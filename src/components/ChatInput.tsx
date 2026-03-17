@@ -43,9 +43,56 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
+    if (e.key === "Enter") {
+      if (!e.shiftKey) {
+        const el = textareaRef.current;
+        if (el) {
+          const start = el.selectionStart;
+          const lineStart = text.slice(0, start).lastIndexOf("\n") + 1;
+          const line = text.slice(lineStart, start);
+          const bulletMatch = line.match(/^(\s*[-*])\s/);
+          const numMatch = line.match(/^(\s*\d+)\.\s/);
+          if (bulletMatch) {
+            e.preventDefault();
+            const prefix = bulletMatch[1] + " ";
+            insertListLine(prefix);
+            return;
+          }
+          if (numMatch) {
+            e.preventDefault();
+            const n = parseInt(numMatch[1], 10) + 1;
+            insertListLine(numMatch[1].replace(/\d+/, String(n)) + ". ");
+            return;
+          }
+        }
+        e.preventDefault();
+        handleSubmit();
+        return;
+      }
+    }
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === "b") {
+        e.preventDefault();
+        wrapWithMarkup("**", "**", "fett");
+      } else if (e.key === "i") {
+        e.preventDefault();
+        wrapWithMarkup("*", "*", "kursiv");
+      } else if (e.shiftKey && e.key === "s") {
+        e.preventDefault();
+        wrapWithMarkup("~~", "~~", "durchgestrichen");
+      } else if (e.shiftKey && e.key === "C") {
+        e.preventDefault();
+        wrapWithMarkup("`", "`", "code");
+      }
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+      if (e.key === "8") {
+        e.preventDefault();
+        insertListLine("- ");
+      } else if (e.key === "7") {
+        e.preventDefault();
+        insertListLine("1. ");
+      }
     }
   };
 
@@ -55,6 +102,77 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
   };
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const clipboardData = e.clipboardData;
+    let pasted = clipboardData.getData("text/plain");
+    const html = clipboardData.getData("text/html");
+    if (html && (!pasted || !pasted.includes("\n"))) {
+      const div = document.createElement("div");
+      div.innerHTML = html;
+      const fromHtml = div.innerText || div.textContent || "";
+      if (fromHtml.length > pasted.length) pasted = fromHtml;
+    }
+    pasted = pasted.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
+    if (!pasted) return;
+    e.preventDefault();
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const newText = text.slice(0, start) + pasted + text.slice(end);
+    setText(newText);
+    const newCursor = start + pasted.length;
+    setTimeout(() => {
+      textareaRef.current?.setSelectionRange(newCursor, newCursor);
+      textareaRef.current?.focus();
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 160) + "px";
+      }
+    }, 0);
+  }, [text]);
+
+  const wrapWithMarkup = useCallback((before: string, after: string, placeholder = "Text") => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = text.slice(start, end);
+    const insert = selected || placeholder;
+    const newText = text.slice(0, start) + before + insert + after + text.slice(end);
+    setText(newText);
+    el.focus();
+    setTimeout(() => {
+      if (!textareaRef.current) return;
+      const selStart = start + before.length;
+      const selEnd = selStart + insert.length;
+      textareaRef.current.setSelectionRange(selStart, selEnd);
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 160) + "px";
+    }, 0);
+  }, [text]);
+
+  const insertListLine = useCallback((prefix: string) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const beforeCursor = text.slice(0, start);
+    const lineStart = beforeCursor.lastIndexOf("\n") + 1;
+    const isStartOfLine = lineStart === start;
+    const insert = isStartOfLine ? prefix : "\n" + prefix;
+    const newText = text.slice(0, start) + insert + text.slice(start);
+    setText(newText);
+    el.focus();
+    const newCursor = start + insert.length;
+    setTimeout(() => {
+      textareaRef.current?.setSelectionRange(newCursor, newCursor);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 160) + "px";
+      }
+    }, 0);
+  }, [text]);
 
   const filterAllowed = (fileList: FileList | File[]): File[] =>
     Array.from(fileList).filter(
@@ -147,6 +265,7 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           value={text}
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder="Beschreiben Sie die erbrachten Leistungen oder stellen Sie eine Frage zur GOÄ…"
           rows={1}
           className={cn(

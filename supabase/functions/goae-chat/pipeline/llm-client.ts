@@ -3,11 +3,15 @@
  * Nutzt OpenRouter API – sowohl für JSON-Extraktion (non-streaming)
  * als auch für Text-Generierung (streaming).
  */
+import { fetchWithTimeout } from "../fetch-with-timeout.ts";
 import {
   buildFallbackModels,
   isRetryableModelStatus,
   resolveModel,
 } from "../model-resolver.ts";
+
+/** Timeout für LLM-Aufrufe (90s) – verhindert endloses Hängen bei langsamen Providern */
+const LLM_FETCH_TIMEOUT_MS = 90000;
 
 export interface LlmCallOptions {
   apiKey: string;
@@ -18,6 +22,8 @@ export interface LlmCallOptions {
   temperature?: number;
   maxTokens?: number;
   plugins?: unknown[];
+  /** When true, use only the specified model (no fallbacks). Used for parser retries. */
+  skipFallbacks?: boolean;
 }
 
 export async function callLlm(opts: LlmCallOptions): Promise<string> {
@@ -26,7 +32,9 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
     const t = (part as { type?: string }).type;
     return t === "file" || t === "image_url";
   });
-  const modelsToTry = buildFallbackModels(opts.model, { multimodal: hasMultimodal });
+  const modelsToTry = opts.skipFallbacks
+    ? [opts.model]
+    : buildFallbackModels(opts.model, { multimodal: hasMultimodal });
   let lastError = "Unbekannter Fehler";
 
   for (let i = 0; i < modelsToTry.length; i++) {
@@ -49,14 +57,28 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
       body.plugins = opts.plugins;
     }
 
-    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${opts.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    let resp: Response;
+    try {
+      resp = await fetchWithTimeout(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${opts.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+          timeoutMs: LLM_FETCH_TIMEOUT_MS,
+        },
+      );
+    } catch (e) {
+      const isAbort = e instanceof Error && e.name === "AbortError";
+      lastError = isAbort
+        ? `LLM-Aufruf Timeout (${LLM_FETCH_TIMEOUT_MS / 1000}s) – Modell ${modelsToTry[i]} antwortet nicht`
+        : (e instanceof Error ? e.message : String(e));
+      if (i === modelsToTry.length - 1) throw new Error(lastError);
+      continue;
+    }
 
     if (resp.ok) {
       const data = await resp.json();

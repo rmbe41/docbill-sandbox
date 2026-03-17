@@ -5,25 +5,33 @@
  * User-Query (Embedding + pgvector Similarity Search).
  */
 
+import { fetchWithTimeout } from "./fetch-with-timeout.ts";
+
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
+const EMBEDDING_TIMEOUT_MS = 30000;
+const RPC_TIMEOUT_MS = 15000;
 const EMBEDDING_DIM = 1536;
-const MATCH_COUNT = 8;
-const MATCH_THRESHOLD = 0.5;
+const MATCH_COUNT = 10;
+const MATCH_THRESHOLD = 0.48;
 const MAX_ADMIN_TOKENS = 5000;
 const CHARS_PER_TOKEN = 4;
 
 async function getQueryEmbedding(query: string, apiKey: string): Promise<number[]> {
-  const resp = await fetch("https://openrouter.ai/api/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const resp = await fetchWithTimeout(
+    "https://openrouter.ai/api/v1/embeddings",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: EMBEDDING_MODEL,
+        input: query.slice(0, 8000),
+      }),
+      timeoutMs: EMBEDDING_TIMEOUT_MS,
     },
-    body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input: query.slice(0, 8000),
-    }),
-  });
+  );
 
   if (!resp.ok) {
     const err = await resp.text();
@@ -52,7 +60,7 @@ export async function loadRelevantAdminContext(
   try {
     const embedding = await getQueryEmbedding(query, apiKey);
 
-    const rpcResp = await fetch(
+    const rpcResp = await fetchWithTimeout(
       `${sbUrl}/rest/v1/rpc/match_admin_context_chunks`,
       {
         method: "POST",
@@ -66,6 +74,7 @@ export async function loadRelevantAdminContext(
           match_count: MATCH_COUNT,
           match_threshold: MATCH_THRESHOLD,
         }),
+        timeoutMs: RPC_TIMEOUT_MS,
       },
     );
 
@@ -99,9 +108,12 @@ export async function loadRelevantAdminContext(
 async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promise<string> {
   if (!sbUrl || !sbKey) return "";
   try {
-    const ctxResp = await fetch(
+    const ctxResp = await fetchWithTimeout(
       `${sbUrl}/rest/v1/admin_context_files?select=filename,content_text&order=created_at.asc`,
-      { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } },
+      {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        timeoutMs: RPC_TIMEOUT_MS,
+      },
     );
     if (!ctxResp.ok) return "";
     const ctxFiles = await ctxResp.json();
@@ -124,9 +136,21 @@ async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promi
   }
 }
 
+type PipelineQueryResult = {
+  medizinischeAnalyse?: { fachgebiet?: string; klinischerKontext?: string; diagnosen?: { text: string }[] };
+  pruefung?: { positionen?: { ziffer: string }[]; optimierungen?: { ziffer: string }[] };
+};
+
+/** Kontext aus vorherigen Ergebnissen (für Follow-up-Fragen) */
+export type LastResultContext = {
+  last_invoice_result?: { pruefung?: { positionen?: { ziffer: string }[]; optimierungen?: { ziffer: string }[] } };
+  last_service_result?: { vorschlaege?: { ziffer: string }[]; klinischerKontext?: string; fachgebiet?: string };
+};
+
 export function buildPipelineQuery(
   userMessage?: string,
-  result?: { medizinischeAnalyse?: { fachgebiet?: string; klinischerKontext?: string; diagnosen?: { text: string }[] }; pruefung?: { positionen?: { ziffer: string }[] } },
+  result?: PipelineQueryResult,
+  lastResult?: LastResultContext,
 ): string {
   const parts: string[] = [];
   if (userMessage?.trim()) parts.push(userMessage.trim());
@@ -138,9 +162,40 @@ export function buildPipelineQuery(
       parts.push("Diagnosen: " + ma.diagnosen.map((d) => d.text).join(", "));
     }
   }
+  const ziffernSet = new Set<string>();
   if (result?.pruefung?.positionen?.length) {
-    const ziffern = result.pruefung.positionen.map((p) => p.ziffer).filter(Boolean);
-    if (ziffern.length) parts.push("GOÄ-Ziffern: " + [...new Set(ziffern)].join(", "));
+    for (const p of result.pruefung.positionen) {
+      if (p.ziffer) ziffernSet.add(p.ziffer);
+    }
   }
-  return parts.join("\n");
+  if (result?.pruefung?.optimierungen?.length) {
+    for (const o of result.pruefung.optimierungen) {
+      if (o.ziffer) ziffernSet.add(o.ziffer);
+    }
+  }
+  if (lastResult?.last_invoice_result?.pruefung?.positionen?.length) {
+    for (const p of lastResult.last_invoice_result.pruefung.positionen) {
+      if (p.ziffer) ziffernSet.add(p.ziffer);
+    }
+  }
+  if (lastResult?.last_invoice_result?.pruefung?.optimierungen?.length) {
+    for (const o of lastResult.last_invoice_result.pruefung.optimierungen) {
+      if (o.ziffer) ziffernSet.add(o.ziffer);
+    }
+  }
+  if (lastResult?.last_service_result?.vorschlaege?.length) {
+    for (const v of lastResult.last_service_result.vorschlaege) {
+      if (v.ziffer) ziffernSet.add(v.ziffer);
+    }
+    if (lastResult.last_service_result.klinischerKontext) {
+      parts.push(`Kontext: ${lastResult.last_service_result.klinischerKontext}`);
+    }
+    if (lastResult.last_service_result.fachgebiet) {
+      parts.push(`Fachgebiet: ${lastResult.last_service_result.fachgebiet}`);
+    }
+  }
+  if (ziffernSet.size) parts.push("GOÄ-Ziffern: " + [...ziffernSet].join(", "));
+  parts.push("optimierung analog begründung");
+  const query = parts.join("\n");
+  return query.trim() || "GOÄ Arztrechnung Augenheilkunde";
 }

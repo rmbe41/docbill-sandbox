@@ -1,9 +1,7 @@
 import { cn } from "@/lib/utils";
-import {
-  CheckIcon,
-  X,
-  Download,
-} from "lucide-react";
+import { CheckIcon, X, Download } from "lucide-react";
+import { generateInvoicePdf } from "@/lib/pdf-invoice";
+import { SummaryCard } from "@/components/SummaryCard";
 import { useState, useCallback, useMemo, useEffect } from "react";
 
 // ── Types matching pipeline output ──
@@ -564,95 +562,15 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
 
   const handlePdfExport = useCallback(async () => {
     try {
-      const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF();
-      let y = 20;
-      const margin = 14;
-      const lineHeight = 5;
-
-      const stammdaten = data.stammdaten;
-
-      // 1. Praxis
-      if (stammdaten?.praxis) {
-        const p = stammdaten.praxis;
-        const lines: string[] = [];
-        if (p.name) lines.push(p.name);
-        if (p.adresse) lines.push(p.adresse);
-        if (p.telefon) lines.push(p.telefon);
-        if (p.email) lines.push(p.email);
-        if (p.steuernummer) lines.push(`Steuernr.: ${p.steuernummer}`);
-        if (lines.length > 0) {
-          doc.setFontSize(10);
-          for (const line of lines) doc.text(line, margin, y), (y += lineHeight);
-          y += 4;
-        }
-      }
-
-      // 2. Patient
-      if (stammdaten?.patient) {
-        const p = stammdaten.patient;
-        const lines: string[] = [];
-        if (p.name) lines.push(p.name);
-        if (p.adresse) lines.push(p.adresse);
-        if (p.geburtsdatum) lines.push(`Geb.: ${p.geburtsdatum}`);
-        if (lines.length > 0) {
-          doc.setFontSize(10);
-          for (const line of lines) doc.text(line, margin, y), (y += lineHeight);
-          y += 4;
-        }
-      }
-
-      // 3. Rechnungsnummer, Rechnungsdatum
-      if (stammdaten?.rechnungsnummer || stammdaten?.rechnungsdatum) {
-        doc.setFontSize(10);
-        const parts: string[] = [];
-        if (stammdaten.rechnungsnummer) parts.push(`Rechnungsnr.: ${stammdaten.rechnungsnummer}`);
-        if (stammdaten.rechnungsdatum) parts.push(`Datum: ${stammdaten.rechnungsdatum}`);
-        doc.text(parts.join("  |  "), margin, y);
-        y += 8;
-      }
-
-      // 4. Tabelle: Nr | GOÄ | Bezeichnung | Faktor | Betrag | Begründung (falls vorhanden)
-      const hasBegruendung = exportPositions.some((p) => p.begruendung);
-      doc.setFontSize(10);
-      doc.text("Nr", margin, y);
-      doc.text("GOÄ", margin + 12, y);
-      doc.text("Bezeichnung", margin + 28, y);
-      doc.text("Faktor", margin + 130, y);
-      doc.text("Betrag", margin + 155, y);
-      if (hasBegruendung) doc.text("Begründung", margin + 175, y);
-      y += 6;
-
-      for (const p of exportPositions) {
-        doc.text(String(p.nr), margin, y);
-        doc.text(p.ziffer, margin + 12, y);
-        doc.text(p.bezeichnung.length > 45 ? p.bezeichnung.slice(0, 44) + "…" : p.bezeichnung, margin + 28, y);
-        doc.text(`${p.faktor.toFixed(1)}×`, margin + 130, y);
-        doc.text(`${p.betrag.toFixed(2)} €`, margin + 155, y);
-        if (hasBegruendung) doc.text((p.begruendung ?? "—").slice(0, 25), margin + 175, y);
-        y += 5;
-      }
-      y += 5;
-
-      // 5. Summe
-      doc.text(`Summe: ${previewSum.toFixed(2)} €`, margin, y);
-      y += 10;
-
-      // 6. Bankverbindung
-      if (stammdaten?.bank) {
-        const b = stammdaten.bank;
-        const lines: string[] = [];
-        if (b.iban) lines.push(`IBAN: ${b.iban}`);
-        if (b.bic) lines.push(`BIC: ${b.bic}`);
-        if (b.bankName) lines.push(b.bankName);
-        if (b.kontoinhaber) lines.push(`Kontoinhaber: ${b.kontoinhaber}`);
-        if (lines.length > 0) {
-          doc.setFontSize(10);
-          for (const line of lines) doc.text(line, margin, y), (y += lineHeight);
-        }
-      }
-
-      doc.save(`Rechnung-${new Date().toISOString().slice(0, 10)}.pdf`);
+      const positions = exportPositions.map((p) => ({
+        nr: p.nr,
+        ziffer: p.ziffer,
+        bezeichnung: p.bezeichnung,
+        faktor: p.faktor,
+        betrag: p.betrag,
+        begruendung: p.begruendung,
+      }));
+      await generateInvoicePdf(positions, previewSum, data.stammdaten);
       onExportSuccess?.();
     } catch (e) {
       console.error("PDF export failed:", e);
@@ -668,7 +586,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
           <SummaryCard
             label="Pos."
             value={suggestions.length > 0 ? previewPositions.length : z.gesamt}
-            detail={suggestions.length > 0 && previewPositions.length !== z.gesamt ? "in Vorschau" : `${z.korrekt} korrekt`}
+            detail={suggestions.length > 0 && previewPositions.length !== z.gesamt ? "in Vorschau" : `${z.korrekt} in Ordnung`}
             variant="neutral"
           />
           <SummaryCard
@@ -835,7 +753,7 @@ function BetragCard({
           {formatEuro(Math.abs(delta))}
         </p>
         <p className="text-[10px] text-muted-foreground">
-          {isReduktion ? "Reduktion" : hasAccepted ? "Nach Annahme" : "Korrektur"}
+          {isReduktion ? "Reduktion" : hasAccepted ? "Nach Annahme" : "Anpassung"}
         </p>
       </div>
     );
@@ -862,46 +780,6 @@ function BetragCard({
       </p>
       <p className="text-lg font-bold text-foreground">—</p>
       <p className="text-[10px] text-muted-foreground">unverändert</p>
-    </div>
-  );
-}
-
-// ── Summary Card ──
-
-function SummaryCard({
-  label,
-  value,
-  detail,
-  variant,
-}: {
-  label: string;
-  value: number | string;
-  detail?: string;
-  variant: "neutral" | "warning" | "error" | "accent";
-}) {
-  const bgClasses = {
-    neutral: "bg-muted/50 dark:bg-muted/30",
-    warning: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800",
-    error: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800",
-    accent: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
-  }[variant];
-
-  const valueClasses = {
-    neutral: "text-foreground",
-    warning: "text-amber-700 dark:text-amber-400",
-    error: "text-red-700 dark:text-red-400",
-    accent: "text-emerald-700 dark:text-emerald-400",
-  }[variant];
-
-  return (
-    <div className={cn("rounded-lg border p-2.5", bgClasses)}>
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-        {label}
-      </p>
-      <p className={cn("text-lg font-bold", valueClasses)}>{value}</p>
-      {detail && (
-        <p className="text-[10px] text-muted-foreground">{detail}</p>
-      )}
     </div>
   );
 }
