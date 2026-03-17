@@ -21,6 +21,7 @@ export type Database = {
           content_text: string
           uploaded_by: string
           created_at: string
+          storage_path: string | null
         }
         Insert: {
           id?: string
@@ -28,6 +29,7 @@ export type Database = {
           content_text: string
           uploaded_by: string
           created_at?: string
+          storage_path?: string | null
         }
         Update: {
           id?: string
@@ -35,6 +37,7 @@ export type Database = {
           content_text?: string
           uploaded_by?: string
           created_at?: string
+          storage_path?: string | null
         }
         Relationships: []
       }

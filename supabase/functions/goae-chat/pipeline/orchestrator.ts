@@ -33,7 +33,7 @@ const PIPELINE_STEPS: { label: string }[] = [
 
 export async function runPipeline(
   input: PipelineInput,
-  adminContext: string,
+  getAdminContext: (result?: PipelineResult) => Promise<string>,
 ): Promise<Response> {
   const apiKey = Deno.env.get("OPENROUTER_API_KEY")!;
 
@@ -64,6 +64,16 @@ export async function runPipeline(
     })}\n\n`;
     await writer.write(encoder.encode(data));
   };
+
+  // Keep-alive: Send SSE comment every 12s to prevent proxy/load-balancer timeouts
+  // during long LLM calls (e.g. parseDokument can take 20–40s)
+  const keepAliveInterval = setInterval(async () => {
+    try {
+      await writer.write(encoder.encode(": keepalive\n\n"));
+    } catch {
+      clearInterval(keepAliveInterval);
+    }
+  }, 12000);
 
   // Run the pipeline in the background, writing to the stream
   (async () => {
@@ -123,6 +133,7 @@ export async function runPipeline(
 
       // Step 6: Textgenerierung (streaming)
       await sendProgress(5, PIPELINE_STEPS[5].label);
+      const adminContext = await getAdminContext(pipelineResult);
       const textStream = await generateTextStream(
         pipelineResult,
         apiKey,
@@ -139,8 +150,10 @@ export async function runPipeline(
         await writer.write(value);
       }
 
+      clearInterval(keepAliveInterval);
       await writer.close();
     } catch (error) {
+      clearInterval(keepAliveInterval);
       console.error("Pipeline error:", error);
       const errMsg =
         error instanceof Error ? error.message : "Pipeline-Fehler";
@@ -160,6 +173,8 @@ export async function runPipeline(
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no", // Prevent nginx from buffering SSE
     },
   });
 }

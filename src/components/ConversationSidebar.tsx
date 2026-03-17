@@ -60,7 +60,7 @@ const ConversationSidebar = ({
       )}
       <aside
         className={cn(
-          "fixed top-4 left-0 bottom-4 z-[100] flex flex-col shrink-0 overflow-hidden",
+          "fixed top-4 left-0 bottom-4 z-[100] flex flex-col shrink-0",
           "bg-muted/50 dark:bg-muted/20 border border-border/50",
           "rounded-r-xl shadow-lg",
           (open ? "translate-x-0" : "-translate-x-full") + " md:translate-x-0",
@@ -68,15 +68,23 @@ const ConversationSidebar = ({
           collapsed ? "w-12" : "w-40"
         )}
       >
-        {/* Logo (top) */}
-        <div className="flex items-center shrink-0 h-12 gap-0 px-0 pr-2 min-w-0">
+        {/* Logo (top) - klickbar zum Ein-/Ausklappen, exakt mit Icons ausgerichtet */}
+        <Button
+          variant="ghost"
+          className={cn(
+            "h-12 w-full flex items-center shrink-0 rounded-none hover:bg-transparent hover:opacity-80 cursor-pointer",
+            collapsed ? "justify-center px-0" : "justify-start px-0 pr-2 min-w-0 gap-0"
+          )}
+          onClick={() => setCollapsed(!collapsed)}
+          title={collapsed ? "Sidebar ausklappen" : "Sidebar einklappen"}
+        >
           <div className="w-12 min-w-[3rem] flex justify-center items-center shrink-0">
-            <img src={DocBillLogo} alt="DocBill" className="w-[22px] h-[22px]" />
+            <img src={DocBillLogo} alt="DocBill" className="w-[22px] h-[22px] block" />
           </div>
           {!collapsed && (
             <span className="text-base font-semibold text-foreground truncate min-w-0 -ml-1">DocBill</span>
           )}
-        </div>
+        </Button>
 
         {/* Menu items - Icons always in fixed 56px column, no shift */}
         <div className="flex-1 flex flex-col items-stretch justify-end gap-0.5 pb-4 pt-1">
@@ -87,9 +95,9 @@ const ConversationSidebar = ({
             title="Neuer Chat"
           >
             <div className="w-12 min-w-[3rem] flex justify-center shrink-0">
-              <Plus className={cn(ICON_CLASS, "group-hover:text-primary transition-colors")} />
+              <Plus className={cn(ICON_CLASS, "group-hover:text-accent-subtle-foreground transition-colors")} />
             </div>
-            {!collapsed && <span className="truncate text-left flex-1 pr-2 -ml-4 text-sm text-muted-foreground/60 group-hover:text-primary transition-colors">Neuer Chat</span>}
+            {!collapsed && <span className="truncate text-left flex-1 pr-2 -ml-4 text-sm text-muted-foreground/60 group-hover:text-accent-subtle-foreground transition-colors">Neuer Chat</span>}
           </Button>
           <Button
             variant="ghost"
@@ -98,9 +106,9 @@ const ConversationSidebar = ({
             title="Verlauf"
           >
             <div className="w-12 min-w-[3rem] flex justify-center shrink-0">
-              <History className={cn(ICON_CLASS, "group-hover:text-primary transition-colors")} />
+              <History className={cn(ICON_CLASS, "group-hover:text-accent-subtle-foreground transition-colors")} />
             </div>
-            {!collapsed && <span className="truncate text-left flex-1 pr-2 -ml-4 text-sm text-muted-foreground/60 group-hover:text-primary transition-colors">Verlauf</span>}
+            {!collapsed && <span className="truncate text-left flex-1 pr-2 -ml-4 text-sm text-muted-foreground/60 group-hover:text-accent-subtle-foreground transition-colors">Verlauf</span>}
           </Button>
           <Button
             variant="ghost"
@@ -109,9 +117,9 @@ const ConversationSidebar = ({
             title="Einstellungen"
           >
             <div className="w-12 min-w-[3rem] flex justify-center shrink-0">
-              <Settings className={cn(ICON_CLASS, "group-hover:text-primary transition-colors")} />
+              <Settings className={cn(ICON_CLASS, "group-hover:text-accent-subtle-foreground transition-colors")} />
             </div>
-            {!collapsed && <span className="truncate text-left flex-1 pr-2 -ml-4 text-sm text-muted-foreground/60 group-hover:text-primary transition-colors">Einstellungen</span>}
+            {!collapsed && <span className="truncate text-left flex-1 pr-2 -ml-4 text-sm text-muted-foreground/60 group-hover:text-accent-subtle-foreground transition-colors">Einstellungen</span>}
           </Button>
 
           {/* Expand/Collapse button - same position in both states */}
@@ -123,12 +131,12 @@ const ConversationSidebar = ({
           >
             <div className="w-12 min-w-[3rem] flex justify-center shrink-0">
               {collapsed ? (
-                <PanelLeft className={cn(ICON_CLASS, "group-hover:text-primary transition-colors")} />
+                <PanelLeft className={cn(ICON_CLASS, "group-hover:text-accent-subtle-foreground transition-colors")} />
               ) : (
-                <PanelLeftClose className={cn(ICON_CLASS, "group-hover:text-primary transition-colors")} />
+                <PanelLeftClose className={cn(ICON_CLASS, "group-hover:text-accent-subtle-foreground transition-colors")} />
               )}
             </div>
-            {!collapsed && <span className="truncate text-left flex-1 pr-2 -ml-4 text-sm text-muted-foreground/60 group-hover:text-primary transition-colors">Einklappen</span>}
+            {!collapsed && <span className="truncate text-left flex-1 pr-2 -ml-4 text-sm text-muted-foreground/60 group-hover:text-accent-subtle-foreground transition-colors">Einklappen</span>}
           </Button>
         </div>
       </aside>

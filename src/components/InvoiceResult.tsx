@@ -200,6 +200,9 @@ function UnifiedPositionCard({
 }) {
   const anyPending = suggestions.some((s) => (decisions[s.id] ?? "pending") === "pending");
   const anyAccepted = suggestions.some((s) => decisions[s.id] === "accepted");
+  const hasStrikeSuggestion = suggestions.some(
+    (s) => s.pruefung?.typ === "ausschluss" && (decisions[s.id] ?? "pending") === "pending",
+  );
 
   return (
     <div
@@ -209,7 +212,7 @@ function UnifiedPositionCard({
         anyAccepted && !anyPending && "bg-emerald-50/30 dark:bg-emerald-950/10",
       )}
     >
-      <div className="flex justify-between items-start gap-2">
+      <div className={cn("flex justify-between items-start gap-2", hasStrikeSuggestion && "line-through")}>
         <div>
           <span className="font-mono text-muted-foreground text-xs">{row.nr} · {row.ziffer}</span>
           {row.isPendingOpt && (
@@ -223,7 +226,7 @@ function UnifiedPositionCard({
         </div>
       </div>
       {row.begruendung && (
-        <p className="text-xs text-muted-foreground">{row.begruendung}</p>
+        <p className={cn("text-xs text-muted-foreground", hasStrikeSuggestion && "line-through")}>{row.begruendung}</p>
       )}
       {suggestions.map((s) => {
         const decision = decisions[s.id] ?? "pending";
@@ -307,6 +310,9 @@ function UnifiedPositionRow({
   const hasSuggestions = rowSuggestions.length > 0;
   const anyPending = rowSuggestions.some((s) => (decisions[s.id] ?? "pending") === "pending");
   const anyAccepted = rowSuggestions.some((s) => decisions[s.id] === "accepted");
+  const hasStrikeSuggestion = rowSuggestions.some(
+    (s) => s.pruefung?.typ === "ausschluss" && (decisions[s.id] ?? "pending") === "pending",
+  );
 
   return (
     <tr
@@ -317,20 +323,20 @@ function UnifiedPositionRow({
         rowSuggestions.some((s) => decisions[s.id] === "rejected") && !anyPending && "opacity-75",
       )}
     >
-      <td className="invoice-td text-center font-mono text-muted-foreground">{row.nr}</td>
-      <td className="invoice-td font-mono font-semibold">{row.ziffer}</td>
+      <td className={cn("invoice-td text-center font-mono text-muted-foreground", hasStrikeSuggestion && "line-through")}>{row.nr}</td>
+      <td className={cn("invoice-td font-mono font-semibold", hasStrikeSuggestion && "line-through")}>{row.ziffer}</td>
       <td className="invoice-td">
-        <div>
+        <div className={cn(hasStrikeSuggestion && "line-through")}>
           {row.isPendingOpt && (
             <span className="text-[10px] uppercase font-medium text-amber-600 dark:text-amber-400 mr-1">+ Hinzufügen</span>
           )}
           {row.bezeichnung}
         </div>
       </td>
-      <td className="invoice-td text-right font-mono">{row.faktor.toFixed(1).replace(".", ",")}×</td>
-      <td className="invoice-td text-right font-mono">{formatEuro(row.betrag)}</td>
+      <td className={cn("invoice-td text-right font-mono", hasStrikeSuggestion && "line-through")}>{row.faktor.toFixed(1).replace(".", ",")}×</td>
+      <td className={cn("invoice-td text-right font-mono", hasStrikeSuggestion && "line-through")}>{formatEuro(row.betrag)}</td>
       {hasBegruendungColumn && (
-        <td className="invoice-td text-xs text-muted-foreground max-w-[200px]">{row.begruendung ?? "—"}</td>
+        <td className={cn("invoice-td text-xs text-muted-foreground max-w-[200px]", hasStrikeSuggestion && "line-through")}>{row.begruendung ?? "—"}</td>
       )}
       {hasVorschlaegeColumn && (
       <td className="invoice-td">
@@ -446,18 +452,35 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
     });
   }, [suggestions]);
 
-  const { previewPositions, previewSum } = useMemo(() => {
+  const { previewPositions, previewSum, exportPositions } = useMemo(() => {
+    // Preview = temporäre vorgeschlagene Wahrheit: Annahme aller → genau dieses Ergebnis
     const acceptedIds = new Set(
       suggestions.filter((s) => decisions[s.id] === "accepted").map((s) => s.id),
     );
+    const pendingIds = new Set(
+      suggestions.filter((s) => (decisions[s.id] ?? "pending") === "pending").map((s) => s.id),
+    );
+    const applyIds = new Set([...acceptedIds, ...pendingIds]);
+
     const positionsToRemove = new Set<number>();
+    const positionsExcludedFromSum = new Set<number>();
     const betragOverrides = new Map<number, number>();
     const faktorOverrides = new Map<number, number>();
     const begruendungOverrides = new Map<number, string>();
-    const addedOpts: { ziffer: string; bezeichnung: string; faktor: number; betrag: number; begruendung?: string; suggestionId: string }[] = [];
+    const addedOpts: {
+      ziffer: string;
+      bezeichnung: string;
+      faktor: number;
+      betrag: number;
+      begruendung?: string;
+      suggestionId: string;
+      isPendingOpt?: boolean;
+      pendingOptSuggestion?: FlatSuggestion;
+    }[] = [];
 
     for (const s of suggestions) {
-      if (!acceptedIds.has(s.id)) continue;
+      if (!applyIds.has(s.id)) continue;
+      const isPending = pendingIds.has(s.id);
       if (s.kind === "optimierung" && s.opt) {
         addedOpts.push({
           ziffer: s.opt.ziffer,
@@ -466,10 +489,15 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
           betrag: s.opt.betrag,
           begruendung: s.opt.begruendung,
           suggestionId: s.id,
+          ...(isPending && { isPendingOpt: true, pendingOptSuggestion: s }),
         });
       } else if (s.pos && s.pruefung) {
         if (s.pruefung.typ === "ausschluss") {
-          positionsToRemove.add(s.pos.nr);
+          if (isPending) {
+            positionsExcludedFromSum.add(s.pos.nr);
+          } else {
+            positionsToRemove.add(s.pos.nr);
+          }
         } else if (s.pruefung.typ === "betrag") {
           betragOverrides.set(s.pos.nr, s.pos.berechneterBetrag);
         } else if (s.pruefung.typ === "begruendung_fehlt" && s.pruefung.begruendungVorschlag) {
@@ -512,32 +540,22 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
         betrag: o.betrag,
         ...(o.begruendung && { begruendung: o.begruendung }),
         sourceOptSuggestionId: o.suggestionId,
+        ...(o.isPendingOpt && o.pendingOptSuggestion && { isPendingOpt: true, pendingOptSuggestion: o.pendingOptSuggestion }),
       });
     }
-    const sum = out.reduce((a, p) => a + p.betrag, 0);
-    return { previewPositions: out, previewSum: sum };
+
+    const sum = out.reduce((a, p) => {
+      const posNr = p.sourcePosNr ?? -1;
+      if (positionsExcludedFromSum.has(posNr)) return a;
+      return a + p.betrag;
+    }, 0);
+    const exportPositions = out
+      .filter((p) => !positionsExcludedFromSum.has(p.sourcePosNr ?? -1))
+      .map((p, i) => ({ ...p, nr: i + 1 }));
+    return { previewPositions: out, previewSum: sum, exportPositions };
   }, [positionen, suggestions, decisions]);
 
-  const unifiedRows = useMemo(() => {
-    const rows: PreviewRow[] = [...previewPositions];
-    let nr = previewPositions.length + 1;
-    for (const s of suggestions) {
-      if (s.kind !== "optimierung" || !s.opt) continue;
-      const decision = decisions[s.id] ?? "pending";
-      if (decision !== "pending") continue;
-      rows.push({
-        nr: nr++,
-        ziffer: s.ziffer,
-        bezeichnung: s.bezeichnung,
-        faktor: s.nachherFaktor ?? s.opt.faktor,
-        betrag: s.nachherBetrag ?? s.opt.betrag,
-        begruendung: s.opt.begruendung,
-        isPendingOpt: true,
-        pendingOptSuggestion: s,
-      });
-    }
-    return rows;
-  }, [previewPositions, suggestions, decisions]);
+  const unifiedRows = useMemo(() => previewPositions, [previewPositions]);
 
   const acceptedCount = useMemo(
     () => suggestions.filter((s) => decisions[s.id] === "accepted").length,
@@ -595,7 +613,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
       }
 
       // 4. Tabelle: Nr | GOÄ | Bezeichnung | Faktor | Betrag | Begründung (falls vorhanden)
-      const hasBegruendung = previewPositions.some((p) => p.begruendung);
+      const hasBegruendung = exportPositions.some((p) => p.begruendung);
       doc.setFontSize(10);
       doc.text("Nr", margin, y);
       doc.text("GOÄ", margin + 12, y);
@@ -605,7 +623,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
       if (hasBegruendung) doc.text("Begründung", margin + 175, y);
       y += 6;
 
-      for (const p of previewPositions) {
+      for (const p of exportPositions) {
         doc.text(String(p.nr), margin, y);
         doc.text(p.ziffer, margin + 12, y);
         doc.text(p.bezeichnung.length > 45 ? p.bezeichnung.slice(0, 44) + "…" : p.bezeichnung, margin + 28, y);
@@ -639,7 +657,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
     } catch (e) {
       console.error("PDF export failed:", e);
     }
-  }, [data.stammdaten, previewPositions, previewSum, onExportSuccess]);
+  }, [data.stammdaten, exportPositions, previewSum, onExportSuccess]);
 
   return (
     <div className="invoice-result space-y-6">

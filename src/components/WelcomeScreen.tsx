@@ -48,7 +48,7 @@ const WelcomeScreen = ({ onSuggestionClick }: WelcomeScreenProps) => {
           >
             <s.icon className="w-5 h-5 text-accent flex-shrink-0" />
             <div>
-              <p className="text-sm font-medium text-foreground group-hover:text-accent transition-colors">
+              <p className="text-sm font-medium text-foreground group-hover:text-accent-subtle-foreground transition-colors">
                 {s.label}
               </p>
               <p className="text-xs text-muted-foreground line-clamp-1">

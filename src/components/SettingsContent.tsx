@@ -1,14 +1,30 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import * as pdfjsLib from "pdfjs-dist";
 import { useAuth } from "@/hooks/useAuth";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url
+).toString();
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { DEFAULT_GLOBAL_GUARDRAILS_RULES } from "@/data/default-global-rules";
-import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard } from "lucide-react";
+import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Eye, Loader2 } from "lucide-react";
+import FileOverlay from "@/components/FileOverlay";
+import TextPreviewOverlay from "@/components/TextPreviewOverlay";
+import { goaeCatalogMeta } from "@/data/goae-catalog-meta";
 import { cn } from "@/lib/utils";
 
 const DEBOUNCE_MS = 500;
@@ -16,13 +32,18 @@ const GLOBAL_RULE_SEPARATOR = "\n\n<<DOCBILL_RULE_SEPARATOR>>\n\n";
 
 const AVAILABLE_MODELS: { value: string; label: string; desc: string; isFree: boolean }[] = [
   { value: "openrouter/free", label: "OpenRouter Free Router", desc: "Wählt automatisch aus kostenlosen Modellen", isFree: true },
-  { value: "google/gemma-3n-e2b-it:free", label: "Gemma 3n 2B", desc: "Google – klein & schnell", isFree: true },
-  { value: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B", desc: "Meta – multilingual", isFree: true },
-  { value: "nvidia/nemotron-nano-12b-2-vl:free", label: "Nemotron Nano 12B VL", desc: "NVIDIA – Dokumente/Bilder", isFree: true },
+  { value: "openrouter/hunter-alpha", label: "Hunter Alpha", desc: "1T Parameter – Frontier", isFree: true },
+  { value: "openrouter/healer-alpha", label: "Healer Alpha", desc: "Omni-modal – Vision + Audio", isFree: true },
   { value: "stepfun/step-3.5-flash:free", label: "Step 3.5 Flash", desc: "StepFun – Reasoning", isFree: true },
   { value: "arcee-ai/trinity-large-preview:free", label: "Trinity Large Preview", desc: "Arcee – Frontier-Scale", isFree: true },
-  { value: "nvidia/nemotron-3-super:free", label: "Nemotron 3 Super", desc: "NVIDIA – 120B MoE", isFree: true },
+  { value: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super", desc: "NVIDIA – 120B MoE", isFree: true },
+  { value: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B", desc: "Meta – multilingual", isFree: true },
+  { value: "nvidia/nemotron-nano-12b-2-vl:free", label: "Nemotron Nano 12B VL", desc: "NVIDIA – Dokumente/Bilder", isFree: true },
   { value: "qwen/qwen3-coder-480b-a35b-instruct:free", label: "Qwen3 Coder 480B", desc: "Alibaba – Code/Agentic", isFree: true },
+  { value: "z-ai/glm-4.5-air:free", label: "GLM 4.5 Air", desc: "Z.ai – Agentic", isFree: true },
+  { value: "mistralai/mistral-small-3.1-24b-instruct:free", label: "Mistral Small 3.1 24B", desc: "Mistral – multimodal", isFree: true },
+  { value: "nvidia/nemotron-3-nano-30b-a3b:free", label: "Nemotron 3 Nano 30B", desc: "NVIDIA – effizient", isFree: true },
+  { value: "google/gemma-3n-e2b-it:free", label: "Gemma 3n 2B", desc: "Google – klein & schnell", isFree: true },
   { value: "anthropic/claude-3.5-haiku", label: "Claude 3.5 Haiku", desc: "Schnell & zuverlässig", isFree: false },
   { value: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", desc: "Starke Qualität", isFree: false },
   { value: "openai/gpt-4o-mini", label: "GPT-4o Mini", desc: "OpenAI – ausgewogen", isFree: false },
@@ -35,13 +56,25 @@ type ContextFile = {
   id: string;
   filename: string;
   created_at: string;
+  storage_path?: string | null;
 };
 
 const serializeGlobalRuleFields = (fields: string[]): string =>
   fields.map((f) => f.trim()).filter(Boolean).join(GLOBAL_RULE_SEPARATOR);
 
-const getModelLabel = (value: string): string =>
-  AVAILABLE_MODELS.find((m) => m.value === value)?.label ?? value;
+async function extractTextFromPdf(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const numPages = pdf.numPages;
+  const texts: string[] = [];
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map((item: { str?: string }) => item.str ?? "").join(" ");
+    texts.push(pageText);
+  }
+  return texts.join("\n\n");
+}
 
 const parseGlobalRuleFields = (value: string): string[] => {
   if (!value?.trim()) return [DEFAULT_GLOBAL_GUARDRAILS_RULES];
@@ -52,7 +85,11 @@ const parseGlobalRuleFields = (value: string): string[] => {
   return [value];
 };
 
-const SettingsContent = () => {
+type SettingsContentProps = {
+  onSettingsSaved?: () => void;
+};
+
+const SettingsContent = ({ onSettingsSaved }: SettingsContentProps) => {
   const { user, isAdmin } = useAuth();
   const { toast } = useToast();
 
@@ -73,7 +110,13 @@ const SettingsContent = () => {
   const rulesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
+  const [unindexedCount, setUnindexedCount] = useState<number | null>(null);
+  const [indexedFileIds, setIndexedFileIds] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<{ filename: string; step: string } | null>(null);
+  const [migrating, setMigrating] = useState(false);
+  const [previewFile, setPreviewFile] = useState<{ src: string; name: string; type: string } | null>(null);
+  const [textPreview, setTextPreview] = useState<{ filename: string; content: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelRef = useRef("");
 
@@ -108,7 +151,7 @@ const SettingsContent = () => {
       if (isAdmin) {
         const { data: files } = await supabase
           .from("admin_context_files")
-          .select("id, filename, created_at")
+          .select("id, filename, created_at, storage_path")
           .order("created_at", { ascending: false });
         if (files) setContextFiles(files);
       }
@@ -152,6 +195,29 @@ const SettingsContent = () => {
     fetchCredits();
   }, [activeTab]);
 
+  useEffect(() => {
+    if (activeTab !== "global" || !isAdmin || !user) return;
+    const fetchUnindexed = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("admin-context-upload", {
+          body: { check_unindexed: true },
+        });
+        if (error) {
+          setUnindexedCount(null);
+          setIndexedFileIds(new Set());
+          return;
+        }
+        const result = data as { unindexed?: number; indexed?: string[] };
+        setUnindexedCount(typeof result?.unindexed === "number" ? result.unindexed : 0);
+        setIndexedFileIds(new Set(Array.isArray(result?.indexed) ? result.indexed : []));
+      } catch {
+        setUnindexedCount(null);
+        setIndexedFileIds(new Set());
+      }
+    };
+    fetchUnindexed();
+  }, [activeTab, isAdmin, user]);
+
   useEffect(() => () => {
     if (rulesDebounceRef.current) clearTimeout(rulesDebounceRef.current);
   }, []);
@@ -173,8 +239,9 @@ const SettingsContent = () => {
         }
       }
       toast({ title: "Gespeichert", description: "Globale Einstellungen aktualisiert." });
+      onSettingsSaved?.();
     },
-    [globalModel, globalRules, toast]
+    [globalModel, globalRules, toast, onSettingsSaved]
   );
 
   const saveUser = useCallback(
@@ -202,36 +269,111 @@ const SettingsContent = () => {
         });
       }
       toast({ title: "Gespeichert", description: "Ihre Einstellungen wurden aktualisiert." });
+      onSettingsSaved?.();
     },
-    [user, userModel, userRules, toast]
+    [user, userModel, userRules, toast, onSettingsSaved]
   );
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
 
   const handleContextFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
     setUploading(true);
+    setUploadStatus({ filename: file.name, step: "Text wird extrahiert…" });
 
     try {
-      const text = await file.text();
-      const { error } = await supabase.from("admin_context_files").insert({
+      const isPdf = file.name.toLowerCase().endsWith(".pdf");
+      const text = isPdf ? await extractTextFromPdf(file) : await file.text();
+      if (!text.trim()) {
+        toast({ title: "Fehler", description: "Datei enthält keinen Text.", variant: "destructive" });
+        setUploading(false);
+        setUploadStatus(null);
+        return;
+      }
+
+      setUploadStatus({ filename: file.name, step: "Wird hochgeladen…" });
+
+      const body: { filename: string; content_text: string; file_base64?: string } = {
         filename: file.name,
         content_text: text,
-        uploaded_by: user.id,
+      };
+      if (isPdf) body.file_base64 = await fileToBase64(file);
+
+      const { data, error } = await supabase.functions.invoke("admin-context-upload", {
+        body,
       });
-      if (error) throw error;
+
+      if (error) {
+        throw new Error(error.message ?? "Upload fehlgeschlagen");
+      }
+      const result = data as { error?: string; file_id?: string };
+      if (result?.error) {
+        throw new Error(result.error);
+      }
 
       const { data: files } = await supabase
         .from("admin_context_files")
-        .select("id, filename, created_at")
+        .select("id, filename, created_at, storage_path")
         .order("created_at", { ascending: false });
       if (files) setContextFiles(files);
 
+      if (result?.file_id) {
+        setIndexedFileIds((prev) => new Set([...prev, result.file_id!]));
+      }
+
       toast({ title: "Hochgeladen", description: `${file.name} wurde als Kontext hinzugefügt.` });
-    } catch {
-      toast({ title: "Fehler", description: "Upload fehlgeschlagen.", variant: "destructive" });
+    } catch (err) {
+      toast({
+        title: "Fehler",
+        description: err instanceof Error ? err.message : "Upload fehlgeschlagen.",
+        variant: "destructive",
+      });
     } finally {
       setUploading(false);
+      setUploadStatus(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const migrateContextToRag = async () => {
+    if (!user) return;
+    setMigrating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("admin-context-upload", {
+        body: { migrate: true },
+      });
+
+      if (error) {
+        throw new Error(error.message ?? "Migration fehlgeschlagen");
+      }
+      const result = (data ?? {}) as { error?: string; migrated?: number };
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      toast({ title: "Migration", description: `${result?.migrated ?? 0} Datei(en) für RAG indexiert.` });
+      setUnindexedCount(0);
+      const { data: refetchData } = await supabase.functions.invoke("admin-context-upload", {
+        body: { check_unindexed: true },
+      });
+      const refetch = refetchData as { unindexed?: number; indexed?: string[] };
+      if (Array.isArray(refetch?.indexed)) {
+        setIndexedFileIds(new Set(refetch.indexed));
+      }
+    } catch (err) {
+      toast({
+        title: "Fehler",
+        description: err instanceof Error ? err.message : "Migration fehlgeschlagen.",
+        variant: "destructive",
+      });
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -242,7 +384,37 @@ const SettingsContent = () => {
       return;
     }
     setContextFiles((prev) => prev.filter((f) => f.id !== id));
+    setIndexedFileIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     toast({ title: "Gelöscht", description: `${filename} entfernt.` });
+  };
+
+  const openPreview = async (f: ContextFile) => {
+    const isPdf = f.filename.toLowerCase().endsWith(".pdf");
+    if (isPdf && f.storage_path) {
+      const { data, error } = await supabase.storage
+        .from("admin-context")
+        .createSignedUrl(f.storage_path, 3600);
+      if (error || !data?.signedUrl) {
+        toast({ title: "Fehler", description: "PDF-Vorschau konnte nicht geladen werden.", variant: "destructive" });
+        return;
+      }
+      setPreviewFile({ src: data.signedUrl, name: f.filename, type: "application/pdf" });
+      return;
+    }
+    const { data, error } = await supabase
+      .from("admin_context_files")
+      .select("content_text")
+      .eq("id", f.id)
+      .single();
+    if (error || !data?.content_text) {
+      toast({ title: "Fehler", description: "Inhalt konnte nicht geladen werden.", variant: "destructive" });
+      return;
+    }
+    setTextPreview({ filename: f.filename, content: data.content_text });
   };
 
   if (loading) {
@@ -260,7 +432,6 @@ const SettingsContent = () => {
   ];
 
   const currentModel = activeTab === "global" ? globalModel : (userModel ?? "");
-  const effectiveModel = activeTab === "global" ? globalModel : (userModel ?? globalModel);
   const currentRules = activeTab === "global" ? globalRules : (userRules ?? "");
   modelRef.current = currentModel;
 
@@ -327,17 +498,33 @@ const SettingsContent = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-      <div className="flex gap-2 flex-wrap">
+    <>
+      {previewFile && (
+        <FileOverlay
+          src={previewFile.src}
+          name={previewFile.name}
+          type={previewFile.type}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
+      {textPreview && (
+        <TextPreviewOverlay
+          filename={textPreview.filename}
+          content={textPreview.content}
+          onClose={() => setTextPreview(null)}
+        />
+      )}
+    <div className="max-w-2xl mx-auto px-4 pt-6 pb-20 space-y-10">
+      <div className="flex gap-3 flex-wrap">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+              "flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors",
               activeTab === t.key
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:text-foreground"
+                ? "bg-accent-subtle text-accent-subtle-foreground"
+                : "bg-muted text-muted-foreground hover:bg-accent-subtle/50 hover:text-accent-subtle-foreground"
             )}
           >
             <t.icon className="w-4 h-4" />
@@ -346,19 +533,18 @@ const SettingsContent = () => {
         ))}
       </div>
 
-      {activeTab === "user" && (
-        <p className="text-sm text-muted-foreground">
-          Ihre persönlichen Einstellungen überschreiben die globalen Defaults. Leer lassen = globaler Default wird verwendet.
-        </p>
-      )}
-
       {activeTab === "display" && (
-        <div className="space-y-6">
+        <div className="space-y-10">
           <p className="text-sm text-muted-foreground">
             Passen Sie Darstellung und Erscheinungsbild an.
           </p>
 
-          <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-card">
+          <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              {darkMode ? <Moon className="w-4 h-4 text-accent" /> : <Sun className="w-4 h-4 text-accent" />}
+              Erscheinungsbild
+            </h3>
+            <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-card">
             <div className="flex items-center gap-3">
               {darkMode ? <Moon className="w-5 h-5 text-accent" /> : <Sun className="w-5 h-5 text-accent" />}
               <div>
@@ -381,11 +567,13 @@ const SettingsContent = () => {
               }}
             />
           </div>
-          <div className="space-y-4">
-            <Label className="flex items-center gap-2 text-sm font-semibold">
+          </section>
+
+          <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Type className="w-4 h-4 text-accent" />
               UI-Größe: {uiScale}%
-            </Label>
+            </h3>
             <Slider
               value={[uiScale]}
               onValueChange={(v) => {
@@ -421,22 +609,22 @@ const SettingsContent = () => {
             >
               Auf Standard zurücksetzen
             </Button>
-          </div>
+          </section>
         </div>
       )}
 
       {(activeTab === "user" || activeTab === "global") && (
-        <>
-          <div className="space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-4 rounded-xl border border-border bg-muted/30">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Aktuell genutzt</p>
-                <p className="text-base font-semibold text-foreground mt-0.5">{getModelLabel(effectiveModel) || effectiveModel || "—"}</p>
-              </div>
-              {activeTab === "user" && !userModel && (
-                <p className="text-xs text-muted-foreground">Globaler Standard wird verwendet</p>
-              )}
-            </div>
+        <div className="space-y-10">
+          <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-5">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-accent" />
+              Modell & Credits
+            </h3>
+            {activeTab === "user" && (
+              <p className="text-xs text-muted-foreground -mt-1">
+                Ihre Wahl überschreibt den globalen Default. Leer lassen = globaler Default wird verwendet.
+              </p>
+            )}
             <div className="flex items-center gap-2 p-4 rounded-xl border border-border bg-muted/30">
               <CreditCard className="w-5 h-5 text-muted-foreground shrink-0" />
               <div className="min-w-0">
@@ -455,46 +643,57 @@ const SettingsContent = () => {
                 )}
               </div>
             </div>
-            <Label className="flex items-center gap-2 text-sm font-semibold">
-              <Cpu className="w-4 h-4 text-accent" />
-              KI-Modell wählen
-            </Label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {AVAILABLE_MODELS.map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => handleModelSelect(m.value)}
-                  className={cn(
-                    "relative flex flex-col text-left px-4 py-3 rounded-xl border transition-all",
-                    currentModel === m.value
-                      ? "border-accent bg-accent/5 ring-1 ring-accent"
-                      : "border-border bg-card hover:border-muted-foreground/30"
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">KI-Modell wählen</p>
+              <Select
+                value={activeTab === "user" && userModel === null ? "__global__" : currentModel || "__global__"}
+                onValueChange={(v) => {
+                  if (v === "__global__") {
+                    handleResetUserModel();
+                  } else {
+                    handleModelSelect(v);
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Modell auswählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeTab === "user" && (
+                    <SelectItem value="__global__">
+                      <span className="text-muted-foreground">Globaler Standard verwenden</span>
+                    </SelectItem>
                   )}
-                >
-                  <span
-                    className={cn(
-                      "absolute top-2 right-2 text-[10px] font-medium px-1.5 py-0.5 rounded",
-                      m.isFree ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                    )}
-                  >
-                    {m.isFree ? "Free" : "Pay"}
-                  </span>
-                  <span className="text-sm font-medium text-foreground pr-12">{m.label}</span>
-                  <span className="text-xs text-muted-foreground">{m.desc}</span>
-                </button>
-              ))}
+                  {AVAILABLE_MODELS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      <span className="font-medium">{m.label}</span>
+                      <span className={cn(
+                        "ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded",
+                        m.isFree ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                      )}>
+                        {m.isFree ? "Free" : "Pay"}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {activeTab === "user" && userModel !== null && (
+                <Button variant="ghost" size="sm" onClick={handleResetUserModel} className="text-xs">
+                  Zurücksetzen (Global verwenden)
+                </Button>
+              )}
             </div>
-            {activeTab === "user" && (
-              <Button variant="ghost" size="sm" onClick={handleResetUserModel} className="text-xs">
-                Zurücksetzen (Global verwenden)
-              </Button>
-            )}
-          </div>
+          </section>
 
-          <div className="space-y-3">
-            <Label className="text-sm font-semibold">
+          <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
+            <h3 className="text-sm font-semibold text-foreground">
               {activeTab === "global" ? "Globale Guardrails & Rules" : "Persönliche Rules (Optional)"}
-            </Label>
+            </h3>
+            {activeTab === "user" && (
+              <p className="text-xs text-muted-foreground -mt-1">
+                Ihre Regeln werden zusätzlich zu den globalen Defaults angewendet. Leer lassen = nur globale Regeln.
+              </p>
+            )}
             {activeTab === "global" && isAdmin ? (
               <div className="space-y-3">
                 {globalRuleFields.map((rule, index) => (
@@ -545,74 +744,136 @@ const SettingsContent = () => {
                 className="font-mono text-sm"
               />
             )}
-            <p className="text-xs text-muted-foreground">
-              {activeTab === "global"
-                ? "Diese Regeln gelten für alle Nutzer als Basis."
-                : "Ihre Regeln werden zusätzlich zu den globalen Defaults angewendet."}
-            </p>
+            {activeTab === "global" && (
+              <p className="text-xs text-muted-foreground">
+                Diese Regeln gelten für alle Nutzer als Basis.
+              </p>
+            )}
             {activeTab === "global" && isAdmin && (
               <p className="text-xs text-muted-foreground">
                 Admins können weiterhin jederzeit neue Regeln ergänzen oder bestehende Regeln bearbeiten.
               </p>
             )}
-          </div>
+          </section>
 
           {activeTab === "global" && isAdmin && (
-            <div className="space-y-3 pt-4 border-t border-border">
-              <Label className="flex items-center gap-2 text-sm font-semibold">
-                <Upload className="w-4 h-4 text-accent" />
-                Kontext-Dateien (Admin)
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Laden Sie Textdateien (.txt, .md, .csv) hoch, um den Wissenskontext der KI zu erweitern. Der Inhalt wird bei jeder Anfrage als zusätzlicher Kontext mitgesendet.
-              </p>
-
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="gap-2"
-                >
-                  <Upload className="w-4 h-4" />
-                  {uploading ? "Hochladen…" : "Datei hochladen"}
-                </Button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".txt,.md,.csv"
-                  className="hidden"
-                  onChange={handleContextFileUpload}
-                />
+            <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Database className="w-4 h-4 text-accent" />
+                KI Kontext
+              </h3>
+            <div className="flex items-center gap-2 p-4 rounded-xl border border-border bg-muted/30">
+                <Database className="w-5 h-5 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">GOÄ-Katalog</p>
+                  <p className="text-sm font-medium text-foreground mt-0.5">
+                    Zuletzt aktualisiert:{" "}
+                    {new Date(goaeCatalogMeta.lastFetched).toLocaleDateString("de-DE", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                    })}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {goaeCatalogMeta.zifferCount} Ziffern im Katalog · Quelle: abrechnungsstelle.com
+                  </p>
+                </div>
               </div>
 
+              <div className="border-t border-border pt-6 mt-6">
+                <div className="flex items-start justify-between gap-4 mb-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                    <Upload className="w-4 h-4 text-accent" />
+                    Kontext-Dateien (Admin)
+                  </p>
+                  <div className="flex flex-wrap gap-2 shrink-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      className="gap-2"
+                    >
+                      <Upload className="w-4 h-4" />
+                      {uploading ? "Hochladen…" : "Datei hochladen"}
+                    </Button>
+                    {(unindexedCount ?? 0) > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={migrateContextToRag}
+                        disabled={migrating}
+                        className="gap-2"
+                      >
+                        <Database className="w-4 h-4" />
+                        {migrating ? "Migration…" : "Bestehende für RAG indexieren"}
+                      </Button>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".txt,.md,.csv,.pdf"
+                      className="hidden"
+                      onChange={handleContextFileUpload}
+                    />
+                  </div>
+                </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Laden Sie Textdateien (.txt, .md, .csv) oder PDFs hoch, um den Wissenskontext der KI zu erweitern. Relevante Ausschnitte werden automatisch bei jeder Anfrage abgerufen.
+              </p>
+
+              {uploadStatus && (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-accent/10 border border-accent/20 text-sm">
+                  <Loader2 className="w-5 h-5 text-accent animate-spin shrink-0" />
+                  <div>
+                    <p className="font-medium text-foreground">{uploadStatus.filename}</p>
+                    <p className="text-xs text-muted-foreground">{uploadStatus.step}</p>
+                  </div>
+                </div>
+              )}
+
               {contextFiles.length > 0 && (
-                <div className="space-y-2">
+                <div className="space-y-1 mt-4">
                   {contextFiles.map((f) => (
-                    <div key={f.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-card">
-                      <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <div key={f.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-muted/40">
+                      <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                       <span className="text-sm flex-1 truncate">{f.filename}</span>
-                      <span className="text-xs text-muted-foreground">
+                      {indexedFileIds.has(f.id) && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 shrink-0">
+                          Aktiv
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground shrink-0">
                         {new Date(f.created_at).toLocaleDateString("de-DE")}
                       </span>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 flex-shrink-0"
+                        className="h-6 w-6 flex-shrink-0"
+                        onClick={() => openPreview(f)}
+                        title="Vorschau"
+                      >
+                        <Eye className="w-3 h-3 text-muted-foreground" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 flex-shrink-0"
                         onClick={() => deleteContextFile(f.id, f.filename)}
                       >
-                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        <Trash2 className="w-3 h-3 text-destructive" />
                       </Button>
                     </div>
                   ))}
                 </div>
               )}
-            </div>
+              </div>
+            </section>
           )}
-        </>
+        </div>
       )}
     </div>
+    </>
   );
 };
 

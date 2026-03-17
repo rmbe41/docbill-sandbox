@@ -199,9 +199,18 @@ async function main() {
     return a.ziffer.localeCompare(b.ziffer);
   });
 
-  const outPath = join(__dirname, "../src/data/goae-catalog-full.json");
+  const dataDirOut = join(__dirname, "../src/data");
+  const outPath = join(dataDirOut, "goae-catalog-full.json");
   writeFileSync(outPath, JSON.stringify(all, null, 2), "utf-8");
   console.log("\nGeschrieben:", outPath, "-", all.length, "Ziffern");
+
+  const metaPath = join(dataDirOut, "goae-catalog-meta.json");
+  const meta = {
+    lastFetched: new Date().toISOString(),
+    zifferCount: all.length,
+  };
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf-8");
+  console.log("Geschrieben:", metaPath);
 }
 
 main().catch(console.error);

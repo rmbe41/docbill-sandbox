@@ -212,7 +212,7 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
                 onExportSuccess={handleExportSuccess}
               />
             )}
-            {message.content && (
+            {(message.content || (message.invoiceResult && !message.content)) && (
               <div className="rounded-lg border border-border overflow-hidden">
                 <button
                   type="button"
@@ -228,12 +228,19 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
                 </button>
                 {explanationExpanded && (
                   <div className="px-3 pb-3 pt-0 markdown-output prose prose-sm max-w-none">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={markdownComponents}
-                    >
-                      {message.content}
-                    </ReactMarkdown>
+                    {message.content ? (
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={markdownComponents}
+                      >
+                        {message.content}
+                      </ReactMarkdown>
+                    ) : (
+                      <p className="text-muted-foreground text-sm">
+                        Die Textzusammenfassung konnte nicht geladen werden (z. B. Timeout oder Verbindungsabbruch). 
+                        Bitte erneut versuchen. Die Prüfung oben ist vollständig.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

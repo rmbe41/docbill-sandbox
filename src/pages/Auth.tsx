@@ -129,10 +129,10 @@ const Auth = () => {
             </p>
           </div>
           <ul className="text-sm text-muted-foreground space-y-1.5 mt-2">
-            <li className="flex items-center gap-2"><span className="text-accent">✔</span> GOÄ-konforme Prüfung</li>
-            <li className="flex items-center gap-2"><span className="text-accent">✔</span> Automatische Rechnungserstellung</li>
-            <li className="flex items-center gap-2"><span className="text-accent">✔</span> Umsatzpotenziale erkennen</li>
-            <li className="flex items-center gap-2"><span className="text-accent">✔</span> 6 Stunden Zeit pro Woche sparen</li>
+            <li className="flex items-center gap-2"><span className="text-accent-subtle-foreground">✔</span> GOÄ-konforme Prüfung</li>
+            <li className="flex items-center gap-2"><span className="text-accent-subtle-foreground">✔</span> Automatische Rechnungserstellung</li>
+            <li className="flex items-center gap-2"><span className="text-accent-subtle-foreground">✔</span> Umsatzpotenziale erkennen</li>
+            <li className="flex items-center gap-2"><span className="text-accent-subtle-foreground">✔</span> 6 Stunden Zeit pro Woche sparen</li>
           </ul>
           <p className="text-xs font-medium text-foreground mt-2">
             Jetzt anmelden und loslegen
@@ -204,7 +204,7 @@ const Auth = () => {
           {isLogin ? "Noch kein Konto?" : "Bereits registriert?"}{" "}
           <button
             onClick={() => setIsLogin(!isLogin)}
-            className="text-accent hover:underline font-medium"
+            className="text-accent-subtle-foreground hover:underline font-medium"
           >
             {isLogin ? "Registrieren" : "Anmelden"}
           </button>

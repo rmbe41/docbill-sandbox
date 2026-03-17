@@ -36,6 +36,7 @@ const Index = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mainView, setMainView] = useState<"chat" | "history" | "settings">("chat");
   const [freeExhaustedDialogOpen, setFreeExhaustedDialogOpen] = useState(false);
+  const [freeExhaustedErrorDetails, setFreeExhaustedErrorDetails] = useState<string | null>(null);
   const [pipelineStep, setPipelineStep] = useState<{
     step: number;
     totalSteps: number;
@@ -59,16 +60,17 @@ const Index = () => {
     fetchConversations,
   } = useConversations();
 
-  useEffect(() => {
+  const loadSettings = useCallback(async () => {
     if (!user) return;
-    const loadSettings = async () => {
-      const { data: gData } = await supabase.from("global_settings").select("*").limit(1).single();
-      if (gData) setGlobalSettings({ default_model: gData.default_model, default_rules: gData.default_rules });
-      const { data: uData } = await supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle();
-      if (uData) setUserSettings({ selected_model: uData.selected_model, custom_rules: uData.custom_rules });
-    };
-    loadSettings();
+    const { data: gData } = await supabase.from("global_settings").select("*").limit(1).single();
+    if (gData) setGlobalSettings({ default_model: gData.default_model, default_rules: gData.default_rules });
+    const { data: uData } = await supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle();
+    if (uData) setUserSettings({ selected_model: uData.selected_model, custom_rules: uData.custom_rules });
   }, [user]);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -256,6 +258,8 @@ const Index = () => {
             errMsg = resp.status === 401 ? "Nicht autorisiert. Prüfen Sie die Supabase-Konfiguration." : errMsg;
           }
           if (errBody?.code === "FREE_MODELS_EXHAUSTED") {
+            const parts = [errBody?.error, errBody?.details].filter(Boolean) as string[];
+            setFreeExhaustedErrorDetails(parts.length ? parts.join("\n\n") : null);
             setFreeExhaustedDialogOpen(true);
           } else {
             toast({ title: "Fehler", description: errMsg, variant: "destructive" });
@@ -321,8 +325,16 @@ const Index = () => {
                 setPipelineStep(null);
                 upsertAssistant(`\n\n❌ **Pipeline-Fehler:** ${parsed.error}`);
                 if (parsed.code === "FREE_MODELS_EXHAUSTED") {
+                  setFreeExhaustedErrorDetails(parsed.error ?? parsed.details ?? null);
                   setFreeExhaustedDialogOpen(true);
                 }
+                continue;
+              }
+
+              // OpenRouter mid-stream error (e.g. provider disconnect)
+              if (parsed.error) {
+                const errMsg = parsed.error?.message ?? parsed.error;
+                upsertAssistant(`\n\n❌ **Stream-Fehler:** ${typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg)}`);
                 continue;
               }
 
@@ -377,8 +389,9 @@ const Index = () => {
           await fetchConversations();
         }
       } catch (e) {
-        console.error(e);
-        toast({ title: "Fehler", description: "Die Anfrage konnte nicht verarbeitet werden.", variant: "destructive" });
+        console.error("sendMessage error:", e);
+        const errMsg = e instanceof Error ? e.message : "Die Anfrage konnte nicht verarbeitet werden.";
+        toast({ title: "Fehler", description: errMsg, variant: "destructive" });
       } finally {
         setIsLoading(false);
       }
@@ -424,7 +437,7 @@ const Index = () => {
             messages.length === 0 ? (
               <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
             ) : (
-              <div className="max-w-6xl mx-auto px-4 py-6 space-y-4 min-h-[40vh]">
+              <div className="max-w-6xl mx-auto px-4 pt-6 pb-16 space-y-4 min-h-[40vh]">
                 <ErrorBoundary>
                   {messages.map((msg) => (
                     <ChatBubble
@@ -455,10 +468,8 @@ const Index = () => {
             />
           )}
           {mainView === "settings" && (
-            <div className="flex flex-col h-full min-h-0">
-              <div className="flex-1 overflow-y-auto pb-8">
-                <SettingsContent />
-              </div>
+            <div className="pb-16">
+              <SettingsContent onSettingsSaved={loadSettings} />
             </div>
           )}
         </div>
@@ -477,13 +488,30 @@ const Index = () => {
         )}
       </div>
 
-      <AlertDialog open={freeExhaustedDialogOpen} onOpenChange={setFreeExhaustedDialogOpen}>
-        <AlertDialogContent>
+      <AlertDialog open={freeExhaustedDialogOpen} onOpenChange={(open) => {
+        setFreeExhaustedDialogOpen(open);
+        if (!open) setFreeExhaustedErrorDetails(null);
+      }}>
+        <AlertDialogContent className="max-h-[90vh] overflow-x-hidden overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle>Kostenlose Modelle nicht verfügbar</AlertDialogTitle>
-            <AlertDialogDescription>
-              Die ausgewählten kostenlosen Modelle konnten die Anfrage nicht verarbeiten.
-              Möchten Sie auf ein kostenpflichtiges Modell wechseln?
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 min-w-0">
+                <p>
+                  Die ausgewählten kostenlosen Modelle konnten die Anfrage nicht verarbeiten.
+                  Möchten Sie auf ein kostenpflichtiges Modell wechseln?
+                </p>
+                {freeExhaustedErrorDetails && (
+                  <div className="mt-2 min-w-0">
+                    <span className="text-xs font-medium">Fehlerdetails:</span>
+                    <div className="mt-1 rounded-md border border-border bg-muted/50 p-3 overflow-hidden">
+                      <pre className="text-xs overflow-auto max-h-32 whitespace-pre-wrap break-all font-mono">
+                        {freeExhaustedErrorDetails}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

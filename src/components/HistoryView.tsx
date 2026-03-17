@@ -129,9 +129,9 @@ const HistoryView = ({
   const { today, yesterday, earlier } = groupByDate(conversations);
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <ScrollArea className="flex-1">
-        <div className="max-w-2xl mx-auto px-4 py-6 pb-12">
+    <div className="flex flex-col min-h-0">
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="max-w-2xl mx-auto px-4 py-6 pb-20">
           {conversations.length === 0 ? (
             <p className="text-sm text-muted-foreground/80 text-center py-12">
               Noch keine Chats

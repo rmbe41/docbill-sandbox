@@ -5,13 +5,41 @@
 
 const DEFAULT_FREE_MODEL = "openrouter/free";
 
-const KNOWN_ALIASES: Record<string, string> = {};
+const KNOWN_ALIASES: Record<string, string> = {
+  "nvidia/nemotron-3-super:free": "nvidia/nemotron-3-super-120b-a12b:free",
+};
 
-/** Free-Modelle für Multimodal (Dokumente/Bilder) – Gemini hat oft "File data is missing". */
-const MULTIMODAL_SAFE_FALLBACKS = [
+/** Alle Free-Modelle (abgestimmt mit SettingsContent) – für robuste Fallback-Kette im Testmodus.
+ *  Llama weiter hinten, da häufig rate-limited (Venice upstream). */
+const ALL_FREE_MODELS = [
+  "openrouter/free",
+  "openrouter/hunter-alpha",
+  "openrouter/healer-alpha",
+  "stepfun/step-3.5-flash:free",
+  "arcee-ai/trinity-large-preview:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
   "nvidia/nemotron-nano-12b-2-vl:free",
+  "qwen/qwen3-coder-480b-a35b-instruct:free",
+  "z-ai/glm-4.5-air:free",
+  "mistralai/mistral-small-3.1-24b-instruct:free",
+  "nvidia/nemotron-3-nano-30b-a3b:free",
   "google/gemma-3n-e2b-it:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
+  "meta-llama/llama-3.3-70b-instruct:free", // oft rate-limited, daher hinten
+];
+
+/** Free-Modelle für Multimodal (Dokumente/Bilder) – VL-Modelle zuerst, Gemini ausgeschlossen („File data is missing“). */
+const MULTIMODAL_SAFE_FALLBACKS = [
+  "openrouter/healer-alpha",
+  "nvidia/nemotron-nano-12b-2-vl:free",
+  "stepfun/step-3.5-flash:free",
+  "arcee-ai/trinity-large-preview:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "qwen/qwen3-coder-480b-a35b-instruct:free",
+  "z-ai/glm-4.5-air:free",
+  "mistralai/mistral-small-3.1-24b-instruct:free",
+  "nvidia/nemotron-3-nano-30b-a3b:free",
+  "google/gemma-3n-e2b-it:free",
+  "meta-llama/llama-3.3-70b-instruct:free", // oft rate-limited
 ];
 
 export function resolveModel(input?: string): string {
@@ -33,12 +61,9 @@ export function buildFallbackModels(
       (m) => !m.startsWith("google/gemini")
     );
   } else {
-    candidates = [
-      primary,
-      DEFAULT_FREE_MODEL,
-      "google/gemma-3n-e2b-it:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-    ];
+    // Chat: Primary zuerst, dann alle Free-Modelle als Fallback (robust im Testmodus)
+    const freeFallbacks = ALL_FREE_MODELS.filter((m) => m !== primary);
+    candidates = [primary, ...freeFallbacks];
   }
 
   return [...new Set(candidates.filter(Boolean))];
@@ -48,7 +73,13 @@ export function isRetryableModelStatus(status: number): boolean {
   return [400, 402, 404, 408, 429, 500, 502, 503].includes(status);
 }
 
+const FREE_MODEL_IDS = new Set([
+  "openrouter/free",
+  "openrouter/hunter-alpha",
+  "openrouter/healer-alpha",
+]);
+
 export function isFreeModel(model: string): boolean {
   if (!model) return false;
-  return model === "openrouter/free" || model.includes(":free");
+  return FREE_MODEL_IDS.has(model) || model.includes(":free");
 }

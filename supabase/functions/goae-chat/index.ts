@@ -11,6 +11,7 @@ import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
 import { GOAE_ANALOGE_BEWERTUNG, GOAE_BEGRUENDUNGEN, GOAE_ABSCHNITTE } from "./goae-regeln.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
 import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel } from "./model-resolver.ts";
+import { loadRelevantAdminContext, buildPipelineQuery } from "./admin-context.ts";
 
 // ---------------------------------------------------------------------------
 // System-Prompt für den regulären Chat-Modus (ohne Dokument-Upload)
@@ -143,35 +144,8 @@ ${GOAE_ANALOGE_BEWERTUNG}
 ${GOAE_BEGRUENDUNGEN}`;
 
 // ---------------------------------------------------------------------------
-// Admin-Kontext laden
+// Admin-Kontext (RAG-basiert)
 // ---------------------------------------------------------------------------
-
-async function loadAdminContext(): Promise<string> {
-  try {
-    const sbUrl = Deno.env.get("SUPABASE_URL");
-    const sbKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!sbUrl || !sbKey) return "";
-
-    const ctxResp = await fetch(
-      `${sbUrl}/rest/v1/admin_context_files?select=filename,content_text&order=created_at.asc`,
-      { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } },
-    );
-
-    if (!ctxResp.ok) return "";
-
-    const ctxFiles = await ctxResp.json();
-    if (!ctxFiles?.length) return "";
-
-    return (
-      "\n\n## ADMIN-KONTEXT-DATEIEN:\n" +
-      ctxFiles
-        .map((f: { filename: string; content_text: string }) => `### ${f.filename}\n${f.content_text}`)
-        .join("\n\n")
-    );
-  } catch {
-    return "";
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Chat-Modus (reguläre Fragen ohne Dokument-Upload)
@@ -219,7 +193,19 @@ async function handleChatMode(
     }
 
     if (!isRetryableModelStatus(response.status) || i === modelsToTry.length - 1) {
-      return handleApiError(response);
+      const errResp = await handleApiError(response);
+      const errData = (await errResp.json()) as { error?: string };
+      const isFree = isFreeModel(model);
+      const isLastModel = i === modelsToTry.length - 1;
+      const body: Record<string, unknown> = { error: errData.error ?? "AI-Gateway Fehler" };
+      if (isFree && isLastModel) {
+        body.code = "FREE_MODELS_EXHAUSTED";
+        body.details = `Letztes versuchtes Modell: ${modelsToTry[i]}. HTTP-Status: ${response.status}.`;
+      }
+      return new Response(JSON.stringify(body), {
+        status: errResp.status,
+        headers: { "Content-Type": "application/json" },
+      });
     }
   }
 
@@ -309,10 +295,13 @@ serve(async (req) => {
       );
     }
 
-    const adminContext = await loadAdminContext();
     const requestedModel = model || "openrouter/free";
     const resolvedModel = resolveModel(requestedModel);
     const hasFiles = files && files.length > 0;
+    const userMessage = messages?.[messages.length - 1]?.content;
+
+    const getAdminContext = async (result?: { medizinischeAnalyse?: unknown; pruefung?: unknown }) =>
+      loadRelevantAdminContext(buildPipelineQuery(userMessage, result), OPENROUTER_API_KEY);
 
     let response: Response;
 
@@ -326,17 +315,18 @@ serve(async (req) => {
       response = await runPipeline(
         {
           files,
-          userMessage: messages?.[messages.length - 1]?.content,
+          userMessage,
           conversationHistory: messages,
           model: resolvedModel,
           extraRules: extra_rules,
         },
-        adminContext,
+        getAdminContext,
       );
     } else {
       // ═══════════════════════════════════════════════════════
       // CHAT-MODUS: Reguläre GOÄ-Fragen
       // ═══════════════════════════════════════════════════════
+      const adminContext = await getAdminContext();
       response = await handleChatMode(
         messages,
         resolvedModel,
