@@ -46,7 +46,15 @@ const Index = () => {
     label: string;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const abortRequestedRef = useRef(false);
   const { toast } = useToast();
+
+  const handleStop = useCallback(() => {
+    abortRequestedRef.current = true;
+    abortControllerRef.current?.abort();
+    setIsLoading(false);
+  }, []);
   const { user } = useAuth();
   const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null }>({ selected_model: null, custom_rules: null });
   const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string }>({ default_model: "openrouter/free", default_rules: "" });
@@ -246,7 +254,9 @@ const Index = () => {
           return;
         }
 
+        abortRequestedRef.current = false;
         const controller = new AbortController();
+        abortControllerRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 180_000); // 3 min – verhindert endloses Warten bei hängender Verbindung
         const resp = await fetch(CHAT_URL, {
           method: "POST",
@@ -265,6 +275,7 @@ const Index = () => {
             ...(lastServiceResult && {
               last_service_result: {
                 vorschlaege: lastServiceResult.vorschlaege,
+                optimierungen: lastServiceResult.optimierungen,
                 klinischerKontext: lastServiceResult.klinischerKontext,
                 fachgebiet: lastServiceResult.fachgebiet,
               },
@@ -273,6 +284,7 @@ const Index = () => {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
+        abortControllerRef.current = null;
 
         if (resp.status === 429) {
           toast({ title: "Rate Limit", description: "Zu viele Anfragen.", variant: "destructive" });
@@ -442,11 +454,16 @@ const Index = () => {
       } catch (e) {
         console.error("sendMessage error:", e);
         const isAbort = e instanceof Error && e.name === "AbortError";
-        const errMsg = isAbort
-          ? "Die Verbindung hat zu lange gedauert (Timeout). Bitte erneut versuchen."
-          : (e instanceof Error ? e.message : "Die Anfrage konnte nicht verarbeitet werden.");
-        toast({ title: "Fehler", description: errMsg, variant: "destructive" });
+        if (isAbort && abortRequestedRef.current) {
+          // User aborted – keine Notification
+        } else {
+          const errMsg = isAbort
+            ? "Die Verbindung hat zu lange gedauert (Timeout). Bitte erneut versuchen."
+            : (e instanceof Error ? e.message : "Die Anfrage konnte nicht verarbeitet werden.");
+          toast({ title: "Fehler", description: errMsg, variant: "destructive" });
+        }
       } finally {
+        abortControllerRef.current = null;
         setIsLoading(false);
       }
     },
@@ -536,9 +553,9 @@ const Index = () => {
             )}
           >
             <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
-              <ChatInput onSend={sendMessage} isLoading={isLoading} />
+              <ChatInput onSend={sendMessage} isLoading={isLoading} onStop={handleStop} />
               <div className="mt-1.5 flex items-center justify-between gap-3">
-                <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 pl-2">
+                <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 px-2.5 py-1 rounded-full bg-muted">
                   <AlertTriangle className="w-3 h-3 shrink-0 text-muted-foreground/80" />
                   Alle Ergebnisse müssen vor der Verwendung fachlich geprüft werden.
                 </p>
@@ -550,7 +567,7 @@ const Index = () => {
                       onClick={handleOpenSettingsForModel}
                       className={cn(
                         "shrink-0 inline-flex items-center gap-1.5 text-[10px] text-muted-foreground/90 hover:text-foreground transition-colors",
-                        "px-2.5 py-1 rounded-full bg-muted/70 hover:bg-muted border border-transparent"
+                        "px-2.5 py-1 rounded-full bg-muted hover:bg-muted/90 border border-transparent"
                       )}
                       title="Modell in Einstellungen ändern"
                     >

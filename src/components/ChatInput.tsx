@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from "react";
-import { Send, Paperclip, X, Eye } from "lucide-react";
+import { Send, Square, Paperclip, X, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useDraft } from "@/hooks/useDraft";
@@ -8,6 +8,7 @@ import FileOverlay from "@/components/FileOverlay";
 type ChatInputProps = {
   onSend: (message: string, files?: File[]) => void;
   isLoading: boolean;
+  onStop?: () => void;
 };
 
 const ALLOWED_TYPES = [
@@ -17,7 +18,7 @@ const ALLOWED_TYPES = [
 
 const ALLOWED_EXT = /\.(jpe?g|png|gif|bmp|tiff?|heic|pdf)$/i;
 
-const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
+const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
   const { text, setText, files, addFiles, removeFile, clearDraft } = useDraft();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -275,14 +276,27 @@ const ChatInput = ({ onSend, isLoading }: ChatInputProps) => {
           )}
         />
 
-        <Button
-          onClick={handleSubmit}
-          disabled={isLoading || (!text.trim() && files.length === 0)}
-          size="icon"
-          className="flex-shrink-0 rounded-full h-10 w-10 sm:h-11 sm:w-11"
-        >
-          <Send className="w-4 h-4 sm:w-5 sm:h-5" />
-        </Button>
+        {isLoading && onStop ? (
+          <Button
+            onClick={onStop}
+            size="icon"
+            variant="outline"
+            className="flex-shrink-0 rounded-full h-10 w-10 sm:h-11 sm:w-11 text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            title="Analyse stoppen"
+            aria-label="Analyse stoppen"
+          >
+            <Square className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            onClick={handleSubmit}
+            disabled={isLoading || (!text.trim() && files.length === 0)}
+            size="icon"
+            className="flex-shrink-0 rounded-full h-10 w-10 sm:h-11 sm:w-11"
+          >
+            <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+          </Button>
+        )}
       </div>
     </div>
     </div>

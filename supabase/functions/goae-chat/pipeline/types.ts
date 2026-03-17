@@ -73,7 +73,7 @@ export interface Diagnose {
 
 export interface Behandlung {
   text: string;
-  typ: "untersuchung" | "therapie" | "beratung" | "operation" | "diagnostik";
+  typ: "untersuchung" | "therapie" | "beratung" | "operation" | "diagnostik" | "sachkosten";
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +182,12 @@ export interface PipelineResult {
   mappings: GoaeMappingResult;
   pruefung: RegelpruefungErgebnis;
 }
+
+// ---------------------------------------------------------------------------
+// Service Billing – Optimierungsziele
+// ---------------------------------------------------------------------------
+
+export type OptimizeFor = "korrekt" | "maximaler_umsatz" | "gute_begruendungen";
 
 // ---------------------------------------------------------------------------
 // Progress-Events (für SSE an Frontend)

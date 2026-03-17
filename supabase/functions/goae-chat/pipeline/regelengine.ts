@@ -255,6 +255,8 @@ export function pruefeRechnung(
         schwere: "fehler",
         nachricht: `Faktor ${pos.faktor}× überschreitet den Höchstsatz von ${eintrag.hoechstfaktor}×. Ohne § 2-Vereinbarung nicht zulässig.`,
         vorschlag: `Faktor auf maximal ${eintrag.hoechstfaktor}× reduzieren oder § 2-Vereinbarung dokumentieren.`,
+        begruendungVorschlag:
+          "§ 2-Vereinbarung: Schriftliche Vereinbarung mit Patient/in über Gebühren über dem Höchstsatz. Dokumentation: Zeitpunkt, Umfang und Zustimmung erforderlich.",
       });
     }
 
@@ -493,4 +495,113 @@ function begruendungNurText(
     text = text.replace(/\.$/, `. ${ctx}.`);
   }
   return text.slice(0, BEGRUENDUNG_MAX_CHARS).trim();
+}
+
+// ---------- Service Billing Adapter ----------
+
+/**
+ * Erstellt eine Begründung für eine GOÄ-Position (Faktor > Schwellenwert).
+ * Für Service Billing: Nutzung der ziffer-spezifischen Templates.
+ */
+export function erstelleBegruendungVorschlag(
+  ziffer: string,
+  faktor: number,
+  analyse: MedizinischeAnalyse,
+  katalogText: string,
+): string {
+  const katalog = getKatalog(katalogText);
+  const eintrag = katalog.get(ziffer);
+  if (!eintrag) {
+    return `Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ begründen.`;
+  }
+  return begruendungNurText(ziffer, faktor, eintrag, analyse);
+}
+
+/**
+ * Prüft Service-Billing-Vorschläge (GoaeZuordnung[]) gegen GOÄ-Regeln.
+ * Gibt Ausschlüsse, Begründungsvorschläge und Compliance-Infos zurück.
+ */
+export function pruefeServiceBillingVorschlaege(
+  zuordnungen: GoaeZuordnung[],
+  analyse: MedizinischeAnalyse,
+  katalogText: string,
+): {
+  geprueftePositionen: Map<string, GeprueftePosition>;
+  excludedZiffern: Set<string>;
+  begruendungVorschlaege: Map<string, string>;
+  zusammenfassung: RegelpruefungErgebnis["zusammenfassung"];
+} {
+  const katalog = getKatalog(katalogText);
+  const PUNKTWERT_LOCAL = 0.0582873;
+
+  // Synthetische Rechnung aus Zuordnungen
+  const positionen: { nr: number; ziffer: string; bezeichnung: string; faktor: number; betrag: number }[] = [];
+  let nr = 1;
+  for (const z of zuordnungen) {
+    const eintrag = katalog.get(z.ziffer);
+    const faktor = eintrag?.schwellenfaktor ?? 2.3;
+    const punkte = eintrag?.punkte ?? 0;
+    const betrag = punkte > 0 ? round2(punkte * PUNKTWERT_LOCAL * faktor) : 0;
+    positionen.push({
+      nr: nr++,
+      ziffer: z.ziffer,
+      bezeichnung: z.bezeichnung,
+      faktor,
+      betrag,
+    });
+  }
+
+  const rechnung: ParsedRechnung = {
+    positionen: positionen.map((p) => ({
+      ...p,
+      anzahl: 1,
+    })),
+    diagnosen: analyse.diagnosen.map((d) => d.text),
+    rawText: analyse.klinischerKontext || "",
+  };
+
+  const mappings: GoaeMappingResult = { zuordnungen, fehlendeMappings: [] };
+  const pruefung = pruefeRechnung(rechnung, analyse, mappings, katalogText);
+
+  // Ausschluss: welche Positionen wurden ausgeschlossen (niedrigerer Betrag)
+  const ausschlussExcluded = new Set<number>();
+  for (const pos of rechnung.positionen) {
+    const eintrag = katalog.get(pos.ziffer);
+    if (!eintrag) continue;
+    const expandedAusschl = expandAusschluesse(eintrag.ausschlussziffern);
+    for (const andere of rechnung.positionen) {
+      if (andere.nr === pos.nr) continue;
+      if (expandedAusschl.includes(andere.ziffer)) {
+        const toExclude = pos.betrag <= andere.betrag ? pos.nr : andere.nr;
+        ausschlussExcluded.add(toExclude);
+      }
+    }
+  }
+
+  const excludedZiffern = new Set<string>();
+  for (const p of rechnung.positionen) {
+    if (ausschlussExcluded.has(p.nr)) excludedZiffern.add(p.ziffer);
+  }
+
+  const geprueftePositionen = new Map<string, GeprueftePosition>();
+  for (const gp of pruefung.positionen) {
+    geprueftePositionen.set(gp.ziffer, gp);
+  }
+
+  const begruendungVorschlaege = new Map<string, string>();
+  for (const gp of pruefung.positionen) {
+    const begruendungPruefung = gp.pruefungen.find(
+      (p) => p.typ === "begruendung_fehlt" || p.typ === "faktor_erhoehung_empfohlen",
+    );
+    if (begruendungPruefung?.begruendungVorschlag) {
+      begruendungVorschlaege.set(gp.ziffer, begruendungPruefung.begruendungVorschlag);
+    }
+  }
+
+  return {
+    geprueftePositionen,
+    excludedZiffern,
+    begruendungVorschlaege,
+    zusammenfassung: pruefung.zusammenfassung,
+  };
 }

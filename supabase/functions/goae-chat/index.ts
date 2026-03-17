@@ -11,6 +11,7 @@ import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
 import { GOAE_ANALOGE_BEWERTUNG, GOAE_BEGRUENDUNGEN, GOAE_ABSCHNITTE } from "./goae-regeln.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
 import { runServiceBillingAsStream } from "./pipeline/service-billing-orchestrator.ts";
+import { extrahiereOptimizeFor } from "./pipeline/input-parser.ts";
 import { classifyIntent } from "./intent-classifier.ts";
 import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel } from "./model-resolver.ts";
 import { loadRelevantAdminContext, buildPipelineQuery, type LastResultContext } from "./admin-context.ts";
@@ -41,13 +42,12 @@ Deine Antwort nutzt **echte Markdown-Tabellen**, damit sie im Frontend als Tabel
 
 ## 📋 Rechnungsvorschlag
 
-| Nr. | GOÄ | Bezeichnung | Faktor | Betrag | Prüfung | Anmerkung |
-|-----|-----|-------------|--------|--------|---------|-----------|
-| 1 | 1240 | Spaltlampe | 2,3× | 9,92€ | ✅ | In Ordnung |
-| 2 | 1242 | Funduskopie | 2,3× | 6,47€ | ⚠️ | Ausschluss mit 1240. **Vorschlag:** 1242 streichen. |
-| 3 | 5 | Beratung | 3,0× | 30,60€ | ⚠️ | Begründung nötig. **Vorschlag:** „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.“ |
+| Nr. | GOÄ | Bezeichnung | Faktor | Betrag | Anmerkung |
+|-----|-----|-------------|--------|--------|-----------|
+| 1 | 1240 | Spaltlampe | 2,3× | 9,92€ | Standardfaktor |
+| 2 | 1242 | Funduskopie | 2,3× | 6,47€ | Ausschluss mit 1240 – nur eine abrechnen |
+| 3 | 5 | Beratung | 3,0× | 30,60€ | Begründung nötig. **Vorschlag:** „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.“ |
 
-**Legende:** ✅ = in Ordnung, ⚠️ = Korrekturbedarf, ❌ = fehlerhaft, 💡 = Optimierungstipp
 
 ---
 
@@ -70,9 +70,11 @@ Deine Antwort nutzt **echte Markdown-Tabellen**, damit sie im Frontend als Tabel
 - **Anmerkung: max. 1 Satz** — kurzer Vorschlag, kein Fließtext
 - **Fettdruck**: Ziffern, Beträge **fett**
 - **Trennlinien**: \`---\` zwischen den Blöcken
-- **KONKRETE VORSCHLÄGE**: Jede ⚠️/❌ Zeile braucht einen **Vorschlag:** in 1 Satz
+- **KONKRETE VORSCHLÄGE**: Bei Hinweisen (Ausschluss, Begründung nötig) immer einen **Vorschlag:** in 1 Satz
+- **BEGRÜNDUNGSVORSCHLAG PFLICHT**: Bei Faktor > Schwellenwert (z.B. 3,0× statt 2,3×) immer einen übernehmbaren Begründungsvorschlag in der Anmerkung angeben
 
-### BEGRÜNDUNGEN FÜR HÖHERE FAKTOREN (Faktor > Schwellenwert):
+### BEGRÜNDUNGEN FÜR HÖHERE FAKTOREN (Faktor > Schwellenwert) – PFLICHT:
+- **Jede Position mit Faktor > Schwellenwert** (z.B. > 2,3× bei ärztlichen Leistungen, > 1,8× bei technischen) **MUSS** in der Anmerkung einen **Begründungsvorschlag** enthalten. Format: „Begründung nötig. **Vorschlag:** „[konkreter Begründungstext]""
 - **Fachlich top Qualität**: Keine Leerformeln wie „erhöhter Zeitaufwand" ohne Konkretes. Verwende ziffer-spezifische Formulierungen (z.B. „Erhöhter diagnostischer Aufwand durch [konkrete Ursache]" bei Spaltlampe/Fundus).
 - **UI-Passform**: Begründung in max. 1 Satz (~140 Zeichen), damit sie in Tabellen und Vorschlags-Boxen sauber dargestellt wird.
 - **Zeitangabe bei Beratung**: Bei GOÄ 1–4 immer Dauer nennen (z.B. „Beratung von ca. 20 Min.").
@@ -320,6 +322,7 @@ serve(async (req) => {
           userMessage,
           model: resolvedModel,
           extraRules: extra_rules,
+          optimizeFor: extrahiereOptimizeFor(userMessage),
         },
         OPENROUTER_API_KEY,
       );

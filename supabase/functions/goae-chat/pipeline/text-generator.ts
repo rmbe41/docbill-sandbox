@@ -51,6 +51,8 @@ WICHTIG:
 
 NUR 2–4 Bullet-Punkte mit \`- \`. Konkrete Handlungsempfehlungen in einem Satz pro Bullet. KEINE Wiederholung der Vorschläge aus der strukturierten Ansicht.
 
+**PFLICHT bei Faktor > Schwellenwert:** Bei jeder Erwähnung eines Steigerungsfaktors über dem Schwellenwert (z.B. 3,0× statt 2,3×) IMMER einen Begründungsvorschlag nennen – z.B. „Begründung ergänzen: [konkreter Vorschlag]".
+
 **Beispiel:**
 \`\`\`
 ### 🔍 Analyse
@@ -61,7 +63,7 @@ Der medizinische Kontext betrifft einen Patienten in der Augenheilkunde mit vere
 
 - GOÄ 1256 entfernen (Ausschluss mit 1257).
 - GOÄ 1257 beibehalten (höherer Betrag).
-- Begründung für Steigerungsfaktor ergänzen.
+- Begründung für Steigerungsfaktor ergänzen: „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt."
 \`\`\`
 
 DEIN KONTEXTWISSEN:

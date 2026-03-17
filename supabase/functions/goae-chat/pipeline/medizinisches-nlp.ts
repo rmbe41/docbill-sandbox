@@ -36,6 +36,14 @@ Antworte AUSSCHLIESSLICH mit einem JSON-Objekt:
     {
       "text": "Intravitreale Injektion (IVOM) mit Anti-VEGF",
       "typ": "therapie"
+    },
+    {
+      "text": "Bevacizumab/Avastin Fertigspritze",
+      "typ": "sachkosten"
+    },
+    {
+      "text": "Steriles OP Set",
+      "typ": "sachkosten"
     }
   ],
   "klinischerKontext": "Patient mit feuchter AMD unter Anti-VEGF-Therapie, Kontrolluntersuchung mit OCT und ggf. Re-Injektion.",
@@ -44,7 +52,12 @@ Antworte AUSSCHLIESSLICH mit einem JSON-Objekt:
 
 REGELN:
 - "sicherheit": "gesichert" | "verdacht" | "ausschluss"
-- "typ": "untersuchung" | "therapie" | "beratung" | "operation" | "diagnostik"
+- "typ": "untersuchung" | "therapie" | "beratung" | "operation" | "diagnostik" | "sachkosten"
+- "sachkosten": Nutze typ "sachkosten" für Materialien/Medikamente die separat abrechenbar sind, z.B.:
+  - Steriles OP Set, OP-Set, Einmalset
+  - Bevacizumab, Avastin, Aflibercept, Eylea, Lucentis (Fertigspritze/Injektion)
+  - Anti-VEGF-Medikament, intravitreales Medikament (als Sachkosten)
+  - Ähnliche Material- oder Medikamentenkosten
 - Leite den klinischen Kontext aus den Diagnosen UND den abgerechneten Leistungen ab
 - Erkenne implizite Behandlungen (z.B. GOÄ 1240 = Spaltlampenuntersuchung)
 - Benenne das Fachgebiet basierend auf den verwendeten GOÄ-Ziffern`;
