@@ -79,6 +79,20 @@ export async function runPipeline(
   // Run the pipeline in the background, writing to the stream
   (async () => {
     try {
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
+        body: JSON.stringify({
+          sessionId: "518e10",
+          location: "orchestrator.ts:pipeline_start",
+          message: "Pipeline started",
+          data: { fileCount: input.files?.length ?? 0 },
+          timestamp: Date.now(),
+          hypothesisId: "B",
+        }),
+      }).catch(() => {});
+      // #endregion
       // Step 1: Dokument Parser (mit Retry bei unplausiblen Ergebnissen)
       await sendProgress(0, PIPELINE_STEPS[0].label);
       const parsedRechnung = await parseDokumentWithRetry(
@@ -154,9 +168,37 @@ export async function runPipeline(
 
       clearInterval(keepAliveInterval);
       await writer.close();
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
+        body: JSON.stringify({
+          sessionId: "518e10",
+          location: "orchestrator.ts:pipeline_ok",
+          message: "Pipeline completed successfully",
+          data: {},
+          timestamp: Date.now(),
+          hypothesisId: "B",
+        }),
+      }).catch(() => {});
+      // #endregion
     } catch (error) {
       clearInterval(keepAliveInterval);
       console.error("Pipeline error:", error);
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
+        body: JSON.stringify({
+          sessionId: "518e10",
+          location: "orchestrator.ts:pipeline_error",
+          message: "Pipeline error",
+          data: { error: error instanceof Error ? error.message : String(error) },
+          timestamp: Date.now(),
+          hypothesisId: "B,D",
+        }),
+      }).catch(() => {});
+      // #endregion
       const errMsg =
         error instanceof Error ? error.message : "Pipeline-Fehler";
       const looksLikeModelFailure = /fehlgeschlagen|Kein Modell|nicht verfügbar/i.test(errMsg);

@@ -38,6 +38,11 @@ CREATE POLICY "Anyone can read global settings"
 DROP POLICY IF EXISTS "Anyone can update global settings" ON public.global_settings;
 DROP POLICY IF EXISTS "Only admins can update global settings" ON public.global_settings;
 
+DROP POLICY IF EXISTS "Users can read own settings" ON public.user_settings;
+DROP POLICY IF EXISTS "Users can insert own settings" ON public.user_settings;
+DROP POLICY IF EXISTS "Users can update own settings" ON public.user_settings;
+DROP POLICY IF EXISTS "Users can delete own settings" ON public.user_settings;
+
 CREATE POLICY "Users can read own settings"
   ON public.user_settings FOR SELECT
   TO authenticated
@@ -73,10 +78,18 @@ CREATE TABLE IF NOT EXISTS public.conversations (
 
 ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can read own conversations" ON public.conversations;
+DROP POLICY IF EXISTS "Users can insert own conversations" ON public.conversations;
+DROP POLICY IF EXISTS "Users can update own conversations" ON public.conversations;
+DROP POLICY IF EXISTS "Users can delete own conversations" ON public.conversations;
 CREATE POLICY "Users can read own conversations" ON public.conversations FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own conversations" ON public.conversations FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own conversations" ON public.conversations FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Users can delete own conversations" ON public.conversations FOR DELETE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can read own messages" ON public.messages;
+DROP POLICY IF EXISTS "Users can insert own messages" ON public.messages;
+DROP POLICY IF EXISTS "Users can delete own messages" ON public.messages;
 
 CREATE TABLE IF NOT EXISTS public.messages (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -123,6 +136,7 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
 
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can read own role" ON public.user_roles;
 CREATE POLICY "Users can read own role"
   ON public.user_roles FOR SELECT
   TO authenticated
@@ -153,6 +167,9 @@ CREATE TABLE IF NOT EXISTS public.admin_context_files (
 
 ALTER TABLE public.admin_context_files ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Authenticated users can read context files" ON public.admin_context_files;
+DROP POLICY IF EXISTS "Only admins can insert context files" ON public.admin_context_files;
+DROP POLICY IF EXISTS "Only admins can delete context files" ON public.admin_context_files;
 CREATE POLICY "Authenticated users can read context files"
   ON public.admin_context_files FOR SELECT
   TO authenticated

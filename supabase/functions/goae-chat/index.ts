@@ -310,6 +310,21 @@ serve(async (req) => {
       resolvedModel,
     );
 
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
+      body: JSON.stringify({
+        sessionId: "518e10",
+        location: "goae-chat/index.ts:intent",
+        message: "Intent classified",
+        data: { intent, hasFiles, userMessageLen: userMessage?.length ?? 0 },
+        timestamp: Date.now(),
+        hypothesisId: "A",
+      }),
+    }).catch(() => {});
+    // #endregion
+
     let response: Response;
 
     if (intent === "leistungen_abrechnen") {
@@ -356,6 +371,22 @@ serve(async (req) => {
         OPENROUTER_API_KEY,
       );
     }
+
+    // #region agent log
+    const bodySize = response.body ? "stream" : "null";
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
+      body: JSON.stringify({
+        sessionId: "518e10",
+        location: "goae-chat/index.ts:response",
+        message: "Response ready",
+        data: { status: response.status, hasBody: !!response.body, bodySize },
+        timestamp: Date.now(),
+        hypothesisId: "B",
+      }),
+    }).catch(() => {});
+    // #endregion
 
     // Add CORS headers to the response
     const headers = new Headers(response.headers);

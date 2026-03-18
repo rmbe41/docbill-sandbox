@@ -409,6 +409,20 @@ export async function runServiceBillingAsStream(
 
   (async () => {
     try {
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
+        body: JSON.stringify({
+          sessionId: "518e10",
+          location: "service-billing-orchestrator.ts:start",
+          message: "Service billing started",
+          data: { hasFiles: !!(input.files?.length) },
+          timestamp: Date.now(),
+          hypothesisId: "A,B",
+        }),
+      }).catch(() => {});
+      // #endregion
       await sendProgress(0, SERVICE_BILLING_STEPS[0].label);
       const result = await runServiceBillingPipeline(input, apiKey);
       await sendProgress(SERVICE_BILLING_STEPS.length - 1, SERVICE_BILLING_STEPS[SERVICE_BILLING_STEPS.length - 1].label);
@@ -425,8 +439,36 @@ export async function runServiceBillingAsStream(
       })}\n\n`));
 
       await writer.close();
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
+        body: JSON.stringify({
+          sessionId: "518e10",
+          location: "service-billing-orchestrator.ts:ok",
+          message: "Service billing completed",
+          data: { vorschlaegeCount: result.vorschlaege?.length ?? 0 },
+          timestamp: Date.now(),
+          hypothesisId: "B",
+        }),
+      }).catch(() => {});
+      // #endregion
     } catch (error) {
       console.error("Service billing error:", error);
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
+        body: JSON.stringify({
+          sessionId: "518e10",
+          location: "service-billing-orchestrator.ts:error",
+          message: "Service billing error",
+          data: { error: error instanceof Error ? error.message : String(error) },
+          timestamp: Date.now(),
+          hypothesisId: "B,D",
+        }),
+      }).catch(() => {});
+      // #endregion
       const errMsg = error instanceof Error ? error.message : "Service-Billing-Fehler";
       const data = `data: ${JSON.stringify({ type: "service_billing_error", error: errMsg })}\n\n`;
       await writer.write(encoder.encode(data));

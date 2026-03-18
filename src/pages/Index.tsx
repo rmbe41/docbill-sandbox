@@ -259,6 +259,9 @@ const Index = () => {
         const controller = new AbortController();
         abortControllerRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 180_000); // 3 min – verhindert endloses Warten bei hängender Verbindung
+        // #region agent log
+        fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:fetch_start',message:'Chat fetch start',data:{hasFiles:filePayloads.length>0,fileCount:filePayloads.length},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
         const resp = await fetch(CHAT_URL, {
           method: "POST",
           headers: {
@@ -286,6 +289,10 @@ const Index = () => {
         });
         clearTimeout(timeoutId);
         abortControllerRef.current = null;
+
+        // #region agent log
+        fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:resp_received',message:'Response received',data:{status:resp.status,ok:resp.ok,hasBody:!!resp.body},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
 
         if (resp.status === 429) {
           toast({ title: "Rate Limit", description: "Zu viele Anfragen.", variant: "destructive" });
@@ -321,10 +328,19 @@ const Index = () => {
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let textBuffer = "";
+        let firstChunkReceived = false;
+        let eventCount = 0;
+        const eventTypes: string[] = [];
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (!firstChunkReceived) {
+            firstChunkReceived = true;
+            // #region agent log
+            fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:first_chunk',message:'First stream chunk',data:{chunkLen:value?.length},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+            // #endregion
+          }
           textBuffer += decoder.decode(value, { stream: true });
 
           let newlineIndex: number;
@@ -338,6 +354,9 @@ const Index = () => {
             if (jsonStr === "[DONE]") break;
             try {
               const parsed = JSON.parse(jsonStr);
+              eventCount++;
+              const evType = parsed.type ?? (parsed.choices ? 'openai_content' : 'unknown');
+              if (eventTypes.length < 20) eventTypes.push(evType);
 
               // Pipeline / Service billing progress events
               if (parsed.type === "pipeline_progress" || parsed.type === "service_billing_progress") {
@@ -414,6 +433,10 @@ const Index = () => {
 
         setPipelineStep(null);
 
+        // #region agent log
+        fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:stream_done',message:'Stream done',data:{eventCount,eventTypes,assistantContentLen:assistantContent.length},timestamp:Date.now(),hypothesisId:'C,D'})}).catch(()=>{});
+        // #endregion
+
         // Post-response validation: parse GOÄ positions and validate deterministically
         if (assistantContent) {
           const positions = parsePositionsFromText(assistantContent);
@@ -454,6 +477,9 @@ const Index = () => {
         }
       } catch (e) {
         console.error("sendMessage error:", e);
+        // #region agent log
+        fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:sendMessage_catch',message:'sendMessage error',data:{error:e instanceof Error?e.message:String(e),name:e instanceof Error?e.name:undefined},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         const isAbort = e instanceof Error && e.name === "AbortError";
         if (isAbort && abortRequestedRef.current) {
           // User aborted – keine Notification
