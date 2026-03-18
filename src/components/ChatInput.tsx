@@ -34,6 +34,7 @@ const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
   }, []);
 
   const handleSubmit = () => {
+    if (isLoading) return;
     const trimmed = text.trim();
     if (!trimmed && files.length === 0) return;
     onSend(trimmed, files.length > 0 ? files : undefined);
@@ -280,8 +281,8 @@ const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
           <Button
             onClick={onStop}
             size="icon"
-            variant="outline"
-            className="flex-shrink-0 rounded-full h-10 w-10 sm:h-11 sm:w-11 text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            variant="ghost"
+            className="flex-shrink-0 rounded-full h-10 w-10 sm:h-11 sm:w-11 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
             title="Analyse stoppen"
             aria-label="Analyse stoppen"
           >

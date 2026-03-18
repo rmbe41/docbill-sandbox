@@ -53,6 +53,7 @@ const Index = () => {
   const handleStop = useCallback(() => {
     abortRequestedRef.current = true;
     abortControllerRef.current?.abort();
+    setPipelineStep(null);
     setIsLoading(false);
   }, []);
   const { user } = useAuth();
