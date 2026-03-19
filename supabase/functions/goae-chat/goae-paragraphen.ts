@@ -50,3 +50,20 @@ WICHTIG: Dies ist die Rechtsgrundlage für analoge Bewertungen. Im Abrechnungste
 (3) Überschreitet eine Gebühr den Schwellenwert (2,3× bzw. 1,8× bzw. 1,15×), ist dies auf die einzelne Leistung bezogen für den Zahlungspflichtigen verständlich und nachvollziehbar schriftlich zu begründen.
 (4) Bei Analogbewertung (§ 6 Abs. 2): Die Leistung ist verständlich zu beschreiben und mit dem Hinweis „entsprechend" sowie der Nummer und der Bezeichnung der als gleichwertig erachteten Leistung zu versehen.
 `;
+
+/** Kompakte Variante für einfache Engine: nur § 5, § 6 Abs. 2, § 12 Abs. 3 */
+export const GOAE_PARAGRAPHEN_KOMPAKT = `
+# GOÄ-Paragraphen – Kernregeln
+
+## § 5 Bemessung der Gebühren
+(1) Gebührensatz = Punktzahl × Punktwert (0,0582873 €). Rahmen: 1,0× bis 3,5×.
+(2) Schwellenwert 2,3× – darüber nur bei Besonderheiten (Schwierigkeit, Zeitaufwand, Umstände).
+(3) Abschnitte A, E, O: 1,0–2,5× (Schwelle 1,8×).
+(4) Abschnitt M (Labor): 1,0–1,3× (Schwelle 1,15×).
+
+## § 6 Abs. 2 Analogbewertung
+Leistungen nicht im Verzeichnis: „entsprechend" oder „analog" mit Nummer und Bezeichnung der gleichwertigen Leistung.
+
+## § 12 Abs. 3 Begründung
+Überschreitung des Schwellenwerts (2,3× bzw. 1,8× bzw. 1,15×): verständliche, nachvollziehbare schriftliche Begründung erforderlich.
+`;

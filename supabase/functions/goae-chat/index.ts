@@ -10,10 +10,11 @@ import { GOAE_KATALOG } from "./goae-catalog.ts";
 import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
 import { GOAE_ANALOGE_BEWERTUNG, GOAE_BEGRUENDUNGEN, GOAE_ABSCHNITTE } from "./goae-regeln.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
+import { runSimplePipeline } from "./pipeline/simple-orchestrator.ts";
 import { runServiceBillingAsStream } from "./pipeline/service-billing-orchestrator.ts";
 import { extrahiereOptimizeFor } from "./pipeline/input-parser.ts";
 import { classifyIntent } from "./intent-classifier.ts";
-import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel } from "./model-resolver.ts";
+import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel, getReasoningConfigForStream } from "./model-resolver.ts";
 import { loadRelevantAdminContext, buildPipelineQuery, type LastResultContext } from "./admin-context.ts";
 
 // ---------------------------------------------------------------------------
@@ -158,7 +159,14 @@ async function handleChatMode(
   }
 
   const modelsToTry = buildFallbackModels(model);
+  const reasoningConfig = getReasoningConfigForStream(model);
   for (let i = 0; i < modelsToTry.length; i++) {
+    const body: Record<string, unknown> = {
+      model: modelsToTry[i],
+      messages: apiMessages,
+      stream: true,
+    };
+    if (reasoningConfig) body.reasoning = reasoningConfig;
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
@@ -167,11 +175,7 @@ async function handleChatMode(
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: modelsToTry[i],
-          messages: apiMessages,
-          stream: true,
-        }),
+        body: JSON.stringify(body),
       },
     );
 
@@ -268,7 +272,7 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, files, model, extra_rules, last_invoice_result, last_service_result } = await req.json();
+    const { messages, files, model, extra_rules, engine_type, last_invoice_result, last_service_result } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
     if (!OPENROUTER_API_KEY) {
@@ -310,21 +314,6 @@ serve(async (req) => {
       resolvedModel,
     );
 
-    // #region agent log
-    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
-      body: JSON.stringify({
-        sessionId: "518e10",
-        location: "goae-chat/index.ts:intent",
-        message: "Intent classified",
-        data: { intent, hasFiles, userMessageLen: userMessage?.length ?? 0 },
-        timestamp: Date.now(),
-        hypothesisId: "A",
-      }),
-    }).catch(() => {});
-    // #endregion
-
     let response: Response;
 
     if (intent === "leistungen_abrechnen") {
@@ -342,22 +331,39 @@ serve(async (req) => {
         OPENROUTER_API_KEY,
       );
     } else if (hasFiles) {
-      // ═══════════════════════════════════════════════════════
-      // PIPELINE-MODUS: Strukturierte Rechnungsprüfung
-      //
-      //   Rechnung → Parser → NLP → Extraktion →
-      //   Mapping → Regelengine → Textgenerierung
-      // ═══════════════════════════════════════════════════════
-      response = await runPipeline(
-        {
-          files,
-          userMessage,
-          conversationHistory: messages,
-          model: resolvedModel,
-          extraRules: extra_rules,
-        },
-        getAdminContext,
-      );
+      const useSimpleEngine = engine_type === "simple";
+      if (useSimpleEngine) {
+        // ═══════════════════════════════════════════════════════
+        // EINFACHE ENGINE: 2 Schritte (Parser → kombinierter LLM-Call)
+        // ═══════════════════════════════════════════════════════
+        response = await runSimplePipeline(
+          {
+            files,
+            userMessage,
+            conversationHistory: messages,
+            model: resolvedModel,
+            extraRules: extra_rules,
+          },
+          () => getAdminContext(),
+        );
+      } else {
+        // ═══════════════════════════════════════════════════════
+        // KOMPLEXE 6-SCHRITT-ENGINE: Strukturierte Rechnungsprüfung
+        //
+        //   Rechnung → Parser → NLP → Extraktion →
+        //   Mapping → Regelengine → Textgenerierung
+        // ═══════════════════════════════════════════════════════
+        response = await runPipeline(
+          {
+            files,
+            userMessage,
+            conversationHistory: messages,
+            model: resolvedModel,
+            extraRules: extra_rules,
+          },
+          getAdminContext,
+        );
+      }
     } else {
       // ═══════════════════════════════════════════════════════
       // CHAT-MODUS: Reguläre GOÄ-Fragen
@@ -371,22 +377,6 @@ serve(async (req) => {
         OPENROUTER_API_KEY,
       );
     }
-
-    // #region agent log
-    const bodySize = response.body ? "stream" : "null";
-    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "518e10" },
-      body: JSON.stringify({
-        sessionId: "518e10",
-        location: "goae-chat/index.ts:response",
-        message: "Response ready",
-        data: { status: response.status, hasBody: !!response.body, bodySize },
-        timestamp: Date.now(),
-        hypothesisId: "B",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     // Add CORS headers to the response
     const headers = new Headers(response.headers);

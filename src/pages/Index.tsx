@@ -12,12 +12,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { supabase } from "@/integrations/supabase/client";
-import { getModelInfo } from "@/data/models";
-import { parsePositionsFromText, validatePositions } from "@/lib/goae-validator";
+import { getModelInfo, AVAILABLE_MODELS } from "@/data/models";
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import { cn } from "@/lib/utils";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronDown } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
   AlertDialog,
@@ -29,6 +28,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 
@@ -57,9 +65,10 @@ const Index = () => {
     setIsLoading(false);
   }, []);
   const { user } = useAuth();
-  const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null }>({ selected_model: null, custom_rules: null });
-  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string }>({ default_model: "openrouter/free", default_rules: "" });
+  const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null; engine_type: string | null }>({ selected_model: null, custom_rules: null, engine_type: null });
+  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "complex" });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"user" | "display" | "global" | undefined>(undefined);
+  const [sessionModelOverride, setSessionModelOverride] = useState<string | null>(null);
 
   const {
     conversations,
@@ -77,14 +86,58 @@ const Index = () => {
   const loadSettings = useCallback(async () => {
     if (!user) return;
     const { data: gData } = await supabase.from("global_settings").select("*").limit(1).single();
-    if (gData) setGlobalSettings({ default_model: gData.default_model, default_rules: gData.default_rules });
+    if (gData) setGlobalSettings({
+      default_model: gData.default_model,
+      default_rules: gData.default_rules,
+      default_engine: (gData as { default_engine?: string }).default_engine ?? "complex",
+    });
     const { data: uData } = await supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle();
-    if (uData) setUserSettings({ selected_model: uData.selected_model, custom_rules: uData.custom_rules });
+    if (uData) setUserSettings({
+      selected_model: uData.selected_model,
+      custom_rules: uData.custom_rules,
+      engine_type: (uData as { engine_type?: string | null }).engine_type ?? null,
+    });
   }, [user]);
 
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
+
+  const effectiveModel = sessionModelOverride ?? userSettings.selected_model ?? globalSettings.default_model;
+
+  const saveUserModel = useCallback(
+    async (model: string | null) => {
+      if (!user) {
+        setSessionModelOverride(model);
+        return;
+      }
+      const { data: existing } = await supabase
+        .from("user_settings")
+        .select("id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const payload = { selected_model: model, updated_at: new Date().toISOString() };
+      if (existing) {
+        await supabase.from("user_settings").update(payload).eq("id", existing.id);
+      } else {
+        await supabase.from("user_settings").insert({ user_id: user.id, selected_model: model });
+      }
+      setUserSettings((prev) => ({ ...prev, selected_model: model }));
+      toast({ title: "Gespeichert", description: "Modell wurde aktualisiert." });
+    },
+    [user, toast]
+  );
+
+  const handleModelSelect = useCallback(
+    (value: string) => {
+      if (value === "__global__") {
+        saveUserModel(null);
+      } else {
+        saveUserModel(value);
+      }
+    },
+    [saveUserModel]
+  );
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -137,12 +190,6 @@ const Index = () => {
   const handleSettings = useCallback(() => {
     setSettingsInitialTab(undefined);
     setMainView("settings");
-  }, []);
-
-  const handleOpenSettingsForModel = useCallback(() => {
-    setSettingsInitialTab("user");
-    setMainView("settings");
-    setSidebarOpen(true);
   }, []);
 
   const handleHistory = useCallback(() => {
@@ -259,9 +306,6 @@ const Index = () => {
         const controller = new AbortController();
         abortControllerRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 180_000); // 3 min – verhindert endloses Warten bei hängender Verbindung
-        // #region agent log
-        fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:fetch_start',message:'Chat fetch start',data:{hasFiles:filePayloads.length>0,fileCount:filePayloads.length},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         const resp = await fetch(CHAT_URL, {
           method: "POST",
           headers: {
@@ -271,7 +315,8 @@ const Index = () => {
           body: JSON.stringify({
             messages: apiMessages,
             files: filePayloads.length > 0 ? filePayloads : undefined,
-            model: userSettings.selected_model || globalSettings.default_model,
+            model: effectiveModel,
+            engine_type: userSettings.engine_type ?? globalSettings.default_engine,
             extra_rules: [globalSettings.default_rules, userSettings.custom_rules].filter(Boolean).join("\n\n"),
             ...(lastInvoiceResult && {
               last_invoice_result: { pruefung: lastInvoiceResult },
@@ -290,9 +335,6 @@ const Index = () => {
         clearTimeout(timeoutId);
         abortControllerRef.current = null;
 
-        // #region agent log
-        fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:resp_received',message:'Response received',data:{status:resp.status,ok:resp.ok,hasBody:!!resp.body},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
 
         if (resp.status === 429) {
           toast({ title: "Rate Limit", description: "Zu viele Anfragen.", variant: "destructive" });
@@ -328,19 +370,10 @@ const Index = () => {
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let textBuffer = "";
-        let firstChunkReceived = false;
-        let eventCount = 0;
-        const eventTypes: string[] = [];
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (!firstChunkReceived) {
-            firstChunkReceived = true;
-            // #region agent log
-            fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:first_chunk',message:'First stream chunk',data:{chunkLen:value?.length},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-            // #endregion
-          }
           textBuffer += decoder.decode(value, { stream: true });
 
           let newlineIndex: number;
@@ -354,17 +387,19 @@ const Index = () => {
             if (jsonStr === "[DONE]") break;
             try {
               const parsed = JSON.parse(jsonStr);
-              eventCount++;
-              const evType = parsed.type ?? (parsed.choices ? 'openai_content' : 'unknown');
-              if (eventTypes.length < 20) eventTypes.push(evType);
 
               // Pipeline / Service billing progress events
               if (parsed.type === "pipeline_progress" || parsed.type === "service_billing_progress") {
+                const step = parsed.step ?? 1;
+                const total = parsed.totalSteps ?? 6;
                 setPipelineStep({
-                  step: parsed.step,
-                  totalSteps: parsed.totalSteps,
+                  step,
+                  totalSteps: total,
                   label: parsed.label,
                 });
+                // #region agent log
+                fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d48d1e'},body:JSON.stringify({sessionId:'d48d1e',location:'Index.tsx:progress_received',message:'Progress event received',data:{step,totalSteps:total,label:parsed.label},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+                // #endregion
                 continue;
               }
 
@@ -433,34 +468,6 @@ const Index = () => {
 
         setPipelineStep(null);
 
-        // #region agent log
-        fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:stream_done',message:'Stream done',data:{eventCount,eventTypes,assistantContentLen:assistantContent.length},timestamp:Date.now(),hypothesisId:'C,D'})}).catch(()=>{});
-        // #endregion
-
-        // Post-response validation: parse GOÄ positions and validate deterministically
-        if (assistantContent) {
-          const positions = parsePositionsFromText(assistantContent);
-          if (positions.length > 0) {
-            const validationResults = validatePositions(positions);
-            if (validationResults.length > 0) {
-              const warnings = validationResults
-                .map((r) => `- ${r.severity === "error" ? "❌" : "⚠️"} ${r.message}`)
-                .join("\n");
-              const validationNote = `\n\n---\n\n## 🔍 Automatische Validierung\n\n${warnings}`;
-              assistantContent += validationNote;
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant") {
-                  return prev.map((m, i) =>
-                    i === prev.length - 1 ? { ...m, content: assistantContent } : m
-                  );
-                }
-                return prev;
-              });
-            }
-          }
-        }
-
         // Save assistant message to DB and update message id for feedback
         if (convId && assistantContent) {
           const savedId = await saveMessage(convId, "assistant", assistantContent);
@@ -494,7 +501,7 @@ const Index = () => {
         setIsLoading(false);
       }
     },
-    [messages, toast, activeConversationId, createConversation, saveMessage, updateSourceFilename, setActiveConversationId, userSettings, globalSettings, fetchConversations]
+    [messages, toast, activeConversationId, createConversation, saveMessage, updateSourceFilename, setActiveConversationId, userSettings, globalSettings, fetchConversations, effectiveModel]
   );
 
   return (
@@ -586,30 +593,76 @@ const Index = () => {
                   <AlertTriangle className="w-3 h-3 shrink-0 text-muted-foreground/80" />
                   Alle Ergebnisse müssen vor der Verwendung fachlich geprüft werden.
                 </p>
-                {(() => {
-                  const { label, isFree } = getModelInfo(userSettings.selected_model || globalSettings.default_model);
-                  return (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      onClick={handleOpenSettingsForModel}
                       className={cn(
                         "shrink-0 inline-flex items-center gap-1.5 text-[10px] text-muted-foreground/90 hover:text-foreground transition-colors",
                         "px-2.5 py-1 rounded-full bg-muted hover:bg-muted/90 border border-transparent"
                       )}
-                      title="Modell in Einstellungen ändern"
+                      title="Modell auswählen"
                     >
-                      <span className="truncate max-w-[120px]">{label}</span>
-                      <span
-                        className={cn(
-                          "shrink-0 text-[9px] font-medium",
-                          isFree ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
-                        )}
-                      >
-                        {isFree ? "Free" : "Pay"}
-                      </span>
+                      {(() => {
+                        const { label, isFree, pricePerInvoice } = getModelInfo(effectiveModel);
+                        const pillText = isFree ? "Free" : pricePerInvoice ?? "Pay";
+                        return (
+                          <>
+                            <span className="truncate max-w-[120px]">{label}</span>
+                            <span
+                              className={cn(
+                                "shrink-0 text-[9px] font-medium",
+                                isFree && "text-emerald-600 dark:text-emerald-400",
+                                pricePerInvoice === "~0.05€" && "text-slate-600 dark:text-slate-400",
+                                pricePerInvoice === "~0.15€" && "text-amber-600 dark:text-amber-400",
+                                pricePerInvoice === "~0.40€" && "text-rose-600 dark:text-rose-400",
+                                !isFree && !pricePerInvoice && "text-amber-600 dark:text-amber-400"
+                              )}
+                            >
+                              {pillText}
+                            </span>
+                            <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
+                          </>
+                        );
+                      })()}
                     </button>
-                  );
-                })()}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="max-h-[280px] overflow-y-auto w-64">
+                    <DropdownMenuRadioGroup
+                      value={
+                        (user && userSettings.selected_model === null) || (!user && sessionModelOverride === null)
+                          ? "__global__"
+                          : effectiveModel
+                      }
+                      onValueChange={handleModelSelect}
+                    >
+                      <DropdownMenuLabel className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider py-1">
+                        Modell
+                      </DropdownMenuLabel>
+                      <DropdownMenuRadioItem value="__global__">
+                        <span className="text-muted-foreground">Globaler Standard</span>
+                      </DropdownMenuRadioItem>
+                      <DropdownMenuSeparator />
+                      {AVAILABLE_MODELS.map((m) => (
+                        <DropdownMenuRadioItem key={m.value} value={m.value} className="flex items-center gap-2">
+                          <span className="font-medium truncate min-w-0">{m.label}</span>
+                          <span
+                            className={cn(
+                              "text-[9px] font-medium px-1.5 py-0.5 rounded shrink-0",
+                              m.isFree && "text-emerald-600 dark:text-emerald-400",
+                              !m.isFree && m.pricePerInvoice === "~0.05€" && "text-slate-600 dark:text-slate-400",
+                              !m.isFree && m.pricePerInvoice === "~0.15€" && "text-amber-600 dark:text-amber-400",
+                              !m.isFree && m.pricePerInvoice === "~0.40€" && "text-rose-600 dark:text-rose-400",
+                              !m.isFree && !m.pricePerInvoice && "text-amber-600 dark:text-amber-400"
+                            )}
+                          >
+                            {m.isFree ? "Free" : m.pricePerInvoice ?? "Pay"}
+                          </span>
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           </div>

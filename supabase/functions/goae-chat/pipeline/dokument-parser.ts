@@ -98,9 +98,10 @@ export async function parseDokument(
   }
 
   const hasPdf = files.some((f) => (f.type || "").includes("pdf"));
-  const plugins = hasPdf
-    ? [{ id: "file-parser", pdf: { engine: "mistral-ocr" } }]
-    : undefined;
+  const plugins: unknown[] = [{ id: "response-healing" }];
+  if (hasPdf) {
+    plugins.push({ id: "file-parser", pdf: { engine: "mistral-ocr" } });
+  }
 
   const raw = await callLlm({
     apiKey,
@@ -184,9 +185,10 @@ export async function parseBehandlungsbericht(
   }
 
   const hasPdf = files.some((f) => (f.type || "").includes("pdf"));
-  const plugins = hasPdf
-    ? [{ id: "file-parser", pdf: { engine: "mistral-ocr" } }]
-    : undefined;
+  const plugins: unknown[] = [{ id: "response-healing" }];
+  if (hasPdf) {
+    plugins.push({ id: "file-parser", pdf: { engine: "mistral-ocr" } });
+  }
 
   const raw = await callLlm({
     apiKey,

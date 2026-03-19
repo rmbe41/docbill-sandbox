@@ -1,4 +1,32 @@
 // GOÄ-Katalog extracted to keep the main file clean
+
+import type { ParsedRechnung } from "./pipeline/types.ts";
+
+/** Expandiert Bereich wie "1210-1213" zu ["1210","1211","1212","1213"] */
+function expandRange(part: string): string[] {
+  const m = part.trim().match(/^(\d+)-(\d+)$/);
+  if (!m) return [part.trim()];
+  const lo = parseInt(m[1], 10);
+  const hi = parseInt(m[2], 10);
+  const out: string[] = [];
+  for (let i = lo; i <= hi; i++) out.push(String(i));
+  return out;
+}
+
+/** Extrahiert Ausschlussziffern aus Katalogzeile (z.B. "Ausschl: 5,6,1210-1213,1242") */
+function parseAusschl(line: string): string[] {
+  const match = line.match(/Ausschl:\s*([^|]+)/);
+  if (!match) return [];
+  const parts = match[1].split(/[,;]/).map((p) => p.trim()).filter(Boolean);
+  const out: string[] = [];
+  for (const p of parts) {
+    for (const z of expandRange(p)) {
+      if (z && /^[\dA]/.test(z)) out.push(z);
+    }
+  }
+  return out;
+}
+
 export const GOAE_KATALOG = `
 # GOÄ-Ziffernkatalog 2026 – Kompaktreferenz
 ## Punktwert: 0,0582873 € (aktuell)
@@ -183,3 +211,70 @@ export const GOAE_KATALOG = `
 9. Intravitreale Injektionen (IVOM): Nr. 1386 (Injektion) + ggf. Nr. 1249 (Kontrolle)
 10. Photodynamische Therapie: Nr. 1365 analog
 `;
+
+/** Baut einen reduzierten Katalog nur mit relevanten Ziffern (Positionen + Ausschlüsse + Grundleistungen 1–8). */
+export function buildRelevantCatalog(parsed: ParsedRechnung): string {
+  const want = new Set<string>(["1", "2", "3", "4", "5", "6", "7", "8"]);
+  for (const p of parsed.positionen) {
+    if (p.ziffer) want.add(String(p.ziffer).trim());
+  }
+
+  const lines = GOAE_KATALOG.split("\n");
+  const zifferToLine = new Map<string, string>();
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const parts = trimmed.split("|");
+    if (parts.length < 5) continue;
+    const ziffer = parts[0].trim();
+    if (!ziffer || !/^[\dA]/.test(ziffer)) continue;
+    zifferToLine.set(ziffer, line);
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const z of [...want]) {
+      const line = zifferToLine.get(z);
+      if (!line) continue;
+      for (const a of parseAusschl(line)) {
+        if (!want.has(a)) {
+          want.add(a);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  const headerLines: string[] = [];
+  const dataLines: string[] = [];
+  let inHeader = true;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#") || trimmed.startsWith("##")) {
+      if (inHeader) headerLines.push(line);
+      else continue;
+    } else if (trimmed.startsWith("- ") && inHeader) {
+      headerLines.push(line);
+    } else {
+      inHeader = false;
+      const parts = trimmed.split("|");
+      const ziffer = parts[0]?.trim();
+      if (ziffer && want.has(ziffer)) dataLines.push(line);
+    }
+  }
+
+  return [
+    ...headerLines,
+    "",
+    "## Relevante Ziffern für diese Rechnung",
+    ...dataLines,
+    "",
+    "## Wichtige GOÄ-Abrechnungsregeln",
+    "1. Ausschlussziffern beachten",
+    "2. Steigerungsbegründung über Schwellenwert erforderlich",
+    "3. Zielleistungsprinzip: Teilschritte nicht separat",
+    "4. Analogbewertung: analoge Ziffer mit Begründung",
+  ].join("\n");
+}

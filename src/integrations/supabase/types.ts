@@ -70,18 +70,21 @@ export type Database = {
       }
       global_settings: {
         Row: {
+          default_engine: string
           default_model: string
           default_rules: string
           id: string
           updated_at: string
         }
         Insert: {
+          default_engine?: string
           default_model?: string
           default_rules?: string
           id?: string
           updated_at?: string
         }
         Update: {
+          default_engine?: string
           default_model?: string
           default_rules?: string
           id?: string
@@ -145,6 +148,7 @@ export type Database = {
       user_settings: {
         Row: {
           custom_rules: string | null
+          engine_type: string | null
           id: string
           praxis_stammdaten: Record<string, unknown> | null
           selected_model: string | null
@@ -153,6 +157,7 @@ export type Database = {
         }
         Insert: {
           custom_rules?: string | null
+          engine_type?: string | null
           id?: string
           praxis_stammdaten?: Record<string, unknown> | null
           selected_model?: string | null
@@ -161,6 +166,7 @@ export type Database = {
         }
         Update: {
           custom_rules?: string | null
+          engine_type?: string | null
           id?: string
           praxis_stammdaten?: Record<string, unknown> | null
           selected_model?: string | null

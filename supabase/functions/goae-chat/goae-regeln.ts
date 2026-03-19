@@ -199,3 +199,13 @@ Für Augenärzte relevant: Nr. 5000 (Röntgen Schädel), Nr. 5090 (CT Kopf), Nr.
 
 ## P: Sektionsleistungen (Ziffern 6000–6018)
 `;
+
+/** Kompakte Abschnittsübersicht für einfache Engine: nur Gebührenrahmen */
+export const GOAE_ABSCHNITTE_KOMPAKT = `
+# GOÄ-Abschnitte – Gebührenrahmen
+
+A: 1,0–2,5× (Schwelle 1,8×) | B: 1,0–3,5× (Schwelle 2,3×) | C: 1,0–3,5× bzw. 2,5× techn.
+D: Anästhesie | E: 1,0–2,5× (Schwelle 1,8×) | F–H: 1,0–3,5×
+I (Augenheilkunde 1200–1386): 1,0–3,5× (Schwelle 2,3×), Tonometrie 1255–1257: 1,8×
+J–N: 1,0–3,5× | M (Labor): 1,0–1,3× (Schwelle 1,15×) | O: 1,0–2,5× (Schwelle 1,8×)
+`;

@@ -19,6 +19,7 @@ import {
 import {
   buildFallbackModels,
   isRetryableModelStatus,
+  getReasoningConfigForStream,
 } from "../model-resolver.ts";
 
 /** Timeout für Textgenerierung (90s) – verhindert endloses Hängen */
@@ -165,10 +166,21 @@ export async function generateTextStream(
   const prompt = buildTextGenerationPrompt(result);
 
   const modelsToTry = buildFallbackModels(model);
+  const reasoningConfig = getReasoningConfigForStream(model);
   let lastError = "Textgenerierung fehlgeschlagen";
 
   for (let i = 0; i < modelsToTry.length; i++) {
     let response: Response;
+    const reqBody: Record<string, unknown> = {
+      model: modelsToTry[i],
+      messages: [
+        { role: "system", content: systemContent },
+        { role: "user", content: prompt },
+      ],
+      stream: true,
+      temperature: 0.3,
+    };
+    if (reasoningConfig) reqBody.reasoning = reasoningConfig;
     try {
       response = await fetchWithTimeout(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -178,15 +190,7 @@ export async function generateTextStream(
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            model: modelsToTry[i],
-            messages: [
-              { role: "system", content: systemContent },
-              { role: "user", content: prompt },
-            ],
-            stream: true,
-            temperature: 0.3,
-          }),
+          body: JSON.stringify(reqBody),
           timeoutMs: TEXT_FETCH_TIMEOUT_MS,
         },
       );

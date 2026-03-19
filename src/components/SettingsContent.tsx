@@ -95,9 +95,11 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
     return document.documentElement.classList.contains("dark");
   });
   const [globalModel, setGlobalModel] = useState("openrouter/free");
+  const [globalEngine, setGlobalEngine] = useState<"simple" | "complex">("complex");
   const [globalRules, setGlobalRules] = useState("");
   const [globalRuleFields, setGlobalRuleFields] = useState<string[]>([DEFAULT_GLOBAL_GUARDRAILS_RULES]);
   const [userModel, setUserModel] = useState<string | null>(null);
+  const [userEngine, setUserEngine] = useState<"simple" | "complex" | null>(null);
   const [userRules, setUserRules] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const rulesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,6 +137,7 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
         .single();
       if (gData) {
         setGlobalModel(gData.default_model);
+        setGlobalEngine((gData as { default_engine?: string }).default_engine === "simple" ? "simple" : "complex");
         setGlobalRules(gData.default_rules);
         setGlobalRuleFields(parseGlobalRuleFields(gData.default_rules));
       }
@@ -145,6 +148,8 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
         .maybeSingle();
       if (uData) {
         setUserModel(uData.selected_model);
+        const eng = (uData as { engine_type?: string | null }).engine_type;
+        setUserEngine(eng === "simple" ? "simple" : eng === "complex" ? "complex" : null);
         setUserRules(uData.custom_rules);
         const ps = (uData as { praxis_stammdaten?: PraxisStammdaten }).praxis_stammdaten as PraxisStammdaten | undefined;
         setPraxisStammdaten(ps && typeof ps === "object" ? ps : {});
@@ -224,13 +229,15 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
   }, []);
 
   const saveGlobal = useCallback(
-    async (model?: string, rules?: string) => {
+    async (model?: string, rules?: string, engine?: "simple" | "complex") => {
       const m = model ?? globalModel;
       const r = rules ?? globalRules;
+      const e = engine ?? globalEngine;
       const { data: existing } = await supabase.from("global_settings").select("id").limit(1).single();
       if (existing) {
         const { error } = await supabase.from("global_settings").update({
           default_model: m,
+          default_engine: e,
           default_rules: r,
           updated_at: new Date().toISOString(),
         }).eq("id", existing.id);
@@ -242,14 +249,15 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
       toast({ title: "Gespeichert", description: "Globale Einstellungen aktualisiert." });
       onSettingsSaved?.();
     },
-    [globalModel, globalRules, toast, onSettingsSaved]
+    [globalModel, globalEngine, globalRules, toast, onSettingsSaved]
   );
 
   const saveUser = useCallback(
-    async (model?: string | null, rules?: string | null) => {
+    async (model?: string | null, rules?: string | null, engine?: "simple" | "complex" | null) => {
       if (!user) return;
       const m = model !== undefined ? model : userModel;
       const r = rules !== undefined ? rules : userRules;
+      const e = engine !== undefined ? engine : userEngine;
       const { data: existing } = await supabase
         .from("user_settings")
         .select("id")
@@ -260,6 +268,7 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
         await supabase.from("user_settings").update({
           selected_model: m,
           custom_rules: r,
+          engine_type: e,
           updated_at: new Date().toISOString(),
         }).eq("id", existing.id);
       } else {
@@ -267,12 +276,13 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
           user_id: user.id,
           selected_model: m,
           custom_rules: r,
+          engine_type: e,
         });
       }
       toast({ title: "Gespeichert", description: "Ihre Einstellungen wurden aktualisiert." });
       onSettingsSaved?.();
     },
-    [user, userModel, userRules, toast, onSettingsSaved]
+    [user, userModel, userRules, userEngine, toast, onSettingsSaved]
   );
 
   const savePraxisStammdaten = useCallback(
@@ -459,6 +469,7 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
   ];
 
   const currentModel = activeTab === "global" ? globalModel : (userModel ?? "");
+  const currentEngine = activeTab === "global" ? globalEngine : (userEngine ?? globalEngine);
   const currentRules = activeTab === "global" ? globalRules : (userRules ?? "");
   modelRef.current = currentModel;
 
@@ -487,7 +498,23 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
 
   const handleResetUserModel = () => {
     setUserModel(null);
-    saveUser(null, userRules);
+    saveUser(null, userRules, userEngine);
+  };
+
+  const handleEngineSelect = (value: string) => {
+    const eng = value === "simple" ? "simple" : "complex";
+    if (activeTab === "global") {
+      setGlobalEngine(eng);
+      saveGlobal(globalModel, serializeGlobalRuleFields(globalRuleFields), eng);
+    } else {
+      setUserEngine(eng);
+      saveUser(userModel, userRules, eng);
+    }
+  };
+
+  const handleResetUserEngine = () => {
+    setUserEngine(null);
+    saveUser(userModel, userRules, null);
   };
 
   const handleResetGlobalRulesToDefault = () => {
@@ -870,9 +897,13 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
                       <span className="font-medium">{m.label}</span>
                       <span className={cn(
                         "ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded",
-                        m.isFree ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                        m.isFree && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+                        !m.isFree && m.pricePerInvoice === "~0.05€" && "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
+                        !m.isFree && m.pricePerInvoice === "~0.15€" && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+                        !m.isFree && m.pricePerInvoice === "~0.40€" && "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
+                        !m.isFree && !m.pricePerInvoice && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                       )}>
-                        {m.isFree ? "Free" : "Pay"}
+                        {m.isFree ? "Free" : m.pricePerInvoice ?? "Pay"}
                       </span>
                     </SelectItem>
                   ))}
@@ -880,6 +911,44 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
               </Select>
               {activeTab === "user" && userModel !== null && (
                 <Button variant="ghost" size="sm" onClick={handleResetUserModel} className="text-xs">
+                  Zurücksetzen (Global verwenden)
+                </Button>
+              )}
+            </div>
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Engine wählen</p>
+              <p className="text-xs text-muted-foreground -mt-1">
+                Einfache Engine: schneller, 2 Schritte. Komplexe Engine: präziser, 6 Schritte mit strukturierter Ausgabe.
+              </p>
+              <Select
+                value={activeTab === "user" && userEngine === null ? "__global__" : currentEngine}
+                onValueChange={(v) => {
+                  if (v === "__global__") {
+                    handleResetUserEngine();
+                  } else {
+                    handleEngineSelect(v);
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Engine auswählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeTab === "user" && (
+                    <SelectItem value="__global__">
+                      <span className="text-muted-foreground">Globaler Standard verwenden</span>
+                    </SelectItem>
+                  )}
+                  <SelectItem value="simple">
+                    <span className="font-medium">Einfache Engine</span>
+                  </SelectItem>
+                  <SelectItem value="complex">
+                    <span className="font-medium">Komplexe (6-Schritt) Engine</span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              {activeTab === "user" && userEngine !== null && (
+                <Button variant="ghost" size="sm" onClick={handleResetUserEngine} className="text-xs">
                   Zurücksetzen (Global verwenden)
                 </Button>
               )}

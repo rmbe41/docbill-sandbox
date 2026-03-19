@@ -7,6 +7,7 @@ const DEFAULT_FREE_MODEL = "openrouter/free";
 
 const KNOWN_ALIASES: Record<string, string> = {
   "nvidia/nemotron-3-super:free": "nvidia/nemotron-3-super-120b-a12b:free",
+  "nvidia/nemotron-nano-12b-2-vl:free": "nvidia/nemotron-nano-12b-v2-vl:free",
 };
 
 /** Alle Free-Modelle (abgestimmt mit SettingsContent) – für robuste Fallback-Kette im Testmodus.
@@ -18,7 +19,7 @@ const ALL_FREE_MODELS = [
   "stepfun/step-3.5-flash:free",
   "arcee-ai/trinity-large-preview:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
-  "nvidia/nemotron-nano-12b-2-vl:free",
+  "nvidia/nemotron-nano-12b-v2-vl:free",
   "qwen/qwen3-coder-480b-a35b-instruct:free",
   "z-ai/glm-4.5-air:free",
   "mistralai/mistral-small-3.1-24b-instruct:free",
@@ -30,7 +31,7 @@ const ALL_FREE_MODELS = [
 /** Free-Modelle für Multimodal (Dokumente/Bilder) – VL-Modelle zuerst, Gemini ausgeschlossen („File data is missing“). */
 const MULTIMODAL_SAFE_FALLBACKS = [
   "openrouter/healer-alpha",
-  "nvidia/nemotron-nano-12b-2-vl:free",
+  "nvidia/nemotron-nano-12b-v2-vl:free",
   "stepfun/step-3.5-flash:free",
   "arcee-ai/trinity-large-preview:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
@@ -57,9 +58,14 @@ export function buildFallbackModels(
 
   let candidates: string[];
   if (multimodal) {
-    candidates = [primary, ...MULTIMODAL_SAFE_FALLBACKS].filter(
-      (m) => !m.startsWith("google/gemini")
-    );
+    // Nutzer-Modell immer zuerst versuchen (auch Gemini). Fallbacks ohne Gemini
+    // (historisch: „File data is missing“ bei einigen Gemini-Varianten).
+    candidates = [
+      primary,
+      ...MULTIMODAL_SAFE_FALLBACKS.filter(
+        (m) => m !== primary && !m.startsWith("google/gemini"),
+      ),
+    ];
   } else {
     // Chat: Primary zuerst, dann alle Free-Modelle als Fallback (robust im Testmodus)
     const freeFallbacks = ALL_FREE_MODELS.filter((m) => m !== primary);
@@ -82,4 +88,10 @@ const FREE_MODEL_IDS = new Set([
 export function isFreeModel(model: string): boolean {
   if (!model) return false;
   return FREE_MODEL_IDS.has(model) || model.includes(":free");
+}
+
+/** Reasoning-Tokens im Stream können leere Antworten oder Hänger verursachen.
+ *  exclude: true sorgt dafür, dass nur die finale Antwort in delta.content ankommt. */
+export function getReasoningConfigForStream(_model?: string): { exclude: boolean } {
+  return { exclude: true };
 }
