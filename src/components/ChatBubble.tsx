@@ -55,7 +55,8 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
   const [decisions, setDecisions] = useState<Record<string, string>>({});
   const [inquiryOpen, setInquiryOpen] = useState(false);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
-  const [explanationExpanded, setExplanationExpanded] = useState(true);
+  const hasResultButNoContent = (message.invoiceResult || message.serviceBillingResult) && !message.content;
+  const [explanationExpanded, setExplanationExpanded] = useState(!hasResultButNoContent);
   const { sendFeedback, isExpertMode } = useFeedback();
   const decisionsRef = useRef(decisions);
   decisionsRef.current = decisions;
@@ -242,8 +243,8 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
                       </ReactMarkdown>
                     ) : (
                       <p className="text-muted-foreground text-sm">
-                        Die Textzusammenfassung konnte nicht geladen werden (z. B. Timeout oder Verbindungsabbruch). 
-                        Bitte erneut versuchen. Die Prüfung oben ist vollständig.
+                        Die detaillierte Erklärung konnte nicht geladen werden (z. B. Timeout). 
+                        Die Prüfung oben ist vollständig – bei Bedarf die Anfrage erneut senden.
                       </p>
                     )}
                   </div>

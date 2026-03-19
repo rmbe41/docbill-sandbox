@@ -12,10 +12,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { supabase } from "@/integrations/supabase/client";
-import { getModelInfo, AVAILABLE_MODELS } from "@/data/models";
+import { getModelInfo, AVAILABLE_MODELS, MODEL_TAG_LABELS, MODEL_TAG_TOOLTIPS, type ModelTag } from "@/data/models";
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AlertTriangle, ChevronDown } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
@@ -305,7 +306,7 @@ const Index = () => {
         abortRequestedRef.current = false;
         const controller = new AbortController();
         abortControllerRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 180_000); // 3 min – verhindert endloses Warten bei hängender Verbindung
+        const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5 min – Pipeline + Textgenerierung können lange dauern
         const resp = await fetch(CHAT_URL, {
           method: "POST",
           headers: {
@@ -589,7 +590,7 @@ const Index = () => {
             <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
               <ChatInput onSend={sendMessage} isLoading={isLoading} onStop={handleStop} />
               <div className="mt-1.5 flex items-center justify-between gap-3">
-                <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 px-2.5 py-1 rounded-full bg-muted">
+                <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 px-2.5 py-1 rounded-md bg-muted">
                   <AlertTriangle className="w-3 h-3 shrink-0 text-muted-foreground/80" />
                   Alle Ergebnisse müssen vor der Verwendung fachlich geprüft werden.
                 </p>
@@ -599,7 +600,7 @@ const Index = () => {
                       type="button"
                       className={cn(
                         "shrink-0 inline-flex items-center gap-1.5 text-[10px] text-muted-foreground/90 hover:text-foreground transition-colors",
-                        "px-2.5 py-1 rounded-full bg-muted hover:bg-muted/90 border border-transparent"
+                        "px-2.5 py-1 rounded-md bg-muted hover:bg-muted/90 border border-transparent"
                       )}
                       title="Modell auswählen"
                     >
@@ -644,20 +645,45 @@ const Index = () => {
                       </DropdownMenuRadioItem>
                       <DropdownMenuSeparator />
                       {AVAILABLE_MODELS.map((m) => (
-                        <DropdownMenuRadioItem key={m.value} value={m.value} className="flex items-center gap-2">
-                          <span className="font-medium truncate min-w-0">{m.label}</span>
-                          <span
-                            className={cn(
-                              "text-[9px] font-medium px-1.5 py-0.5 rounded shrink-0",
-                              m.isFree && "text-emerald-600 dark:text-emerald-400",
-                              !m.isFree && m.pricePerInvoice === "~0.05€" && "text-slate-600 dark:text-slate-400",
-                              !m.isFree && m.pricePerInvoice === "~0.15€" && "text-amber-600 dark:text-amber-400",
-                              !m.isFree && m.pricePerInvoice === "~0.40€" && "text-rose-600 dark:text-rose-400",
-                              !m.isFree && !m.pricePerInvoice && "text-amber-600 dark:text-amber-400"
+                        <DropdownMenuRadioItem key={m.value} value={m.value} className="min-w-0">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex items-center justify-between gap-2 min-w-0 w-full cursor-pointer">
+                                <span className="font-medium truncate">{m.label}</span>
+                                <span className={cn(
+                                  "text-[9px] font-medium px-1.5 py-0.5 rounded shrink-0",
+                                  m.isFree && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+                                  !m.isFree && m.pricePerInvoice === "~0.05€" && "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
+                                  !m.isFree && m.pricePerInvoice === "~0.15€" && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+                                  !m.isFree && m.pricePerInvoice === "~0.40€" && "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
+                                  !m.isFree && !m.pricePerInvoice && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                                )}>
+                                  {m.isFree ? "Free" : m.pricePerInvoice ?? "Pay"}
+                                </span>
+                              </div>
+                            </TooltipTrigger>
+                            {m.tags && m.tags.length > 0 ? (
+                              <TooltipContent side="left" align="start" sideOffset={8} collisionPadding={16} className="max-w-[280px] z-[100]">
+                                <div className="space-y-2 text-sm">
+                                  {m.tags.map((tag: ModelTag) => (
+                                    <div key={tag}>
+                                      <span className="font-medium">{MODEL_TAG_LABELS[tag]}:</span>{" "}
+                                      {MODEL_TAG_TOOLTIPS[tag]}
+                                    </div>
+                                  ))}
+                                </div>
+                              </TooltipContent>
+                            ) : (
+                              <TooltipContent side="left" align="start" sideOffset={8} collisionPadding={16} className="max-w-[280px] z-[100]">
+                                <div className="space-y-2 text-sm">
+                                  <div>
+                                    <span className="font-medium">Nur Text:</span>{" "}
+                                    Keine Dokument- oder Bildverarbeitung. Für reine Chat-Anfragen ohne Upload geeignet.
+                                  </div>
+                                </div>
+                              </TooltipContent>
                             )}
-                          >
-                            {m.isFree ? "Free" : m.pricePerInvoice ?? "Pay"}
-                          </span>
+                          </Tooltip>
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>

@@ -21,12 +21,13 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { DEFAULT_GLOBAL_GUARDRAILS_RULES } from "@/data/default-global-rules";
-import { AVAILABLE_MODELS } from "@/data/models";
+import { AVAILABLE_MODELS, MODEL_TAG_LABELS, MODEL_TAG_TOOLTIPS, type ModelTag } from "@/data/models";
 import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Eye, Loader2, Building2 } from "lucide-react";
 import FileOverlay from "@/components/FileOverlay";
 import TextPreviewOverlay from "@/components/TextPreviewOverlay";
 import { goaeCatalogMeta } from "@/data/goae-catalog-meta";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const DEBOUNCE_MS = 500;
 const GLOBAL_RULE_SEPARATOR = "\n\n<<DOCBILL_RULE_SEPARATOR>>\n\n";
@@ -894,17 +895,44 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
                   )}
                   {AVAILABLE_MODELS.map((m) => (
                     <SelectItem key={m.value} value={m.value}>
-                      <span className="font-medium">{m.label}</span>
-                      <span className={cn(
-                        "ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded",
-                        m.isFree && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-                        !m.isFree && m.pricePerInvoice === "~0.05€" && "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
-                        !m.isFree && m.pricePerInvoice === "~0.15€" && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-                        !m.isFree && m.pricePerInvoice === "~0.40€" && "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
-                        !m.isFree && !m.pricePerInvoice && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                      )}>
-                        {m.isFree ? "Free" : m.pricePerInvoice ?? "Pay"}
-                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center justify-between gap-2 min-w-0 w-full">
+                            <span className="font-medium truncate">{m.label}</span>
+                            <span className={cn(
+                              "text-[9px] font-medium px-1.5 py-0.5 rounded shrink-0",
+                              m.isFree && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+                              !m.isFree && m.pricePerInvoice === "~0.05€" && "bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
+                              !m.isFree && m.pricePerInvoice === "~0.15€" && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+                              !m.isFree && m.pricePerInvoice === "~0.40€" && "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
+                              !m.isFree && !m.pricePerInvoice && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                            )}>
+                              {m.isFree ? "Free" : m.pricePerInvoice ?? "Pay"}
+                            </span>
+                          </div>
+                        </TooltipTrigger>
+                        {m.tags && m.tags.length > 0 ? (
+                          <TooltipContent side="left" align="start" sideOffset={8} collisionPadding={16} className="max-w-[280px] z-[100]">
+                            <div className="space-y-2 text-sm">
+                              {m.tags.map((tag: ModelTag) => (
+                                <div key={tag}>
+                                  <span className="font-medium">{MODEL_TAG_LABELS[tag]}:</span>{" "}
+                                  {MODEL_TAG_TOOLTIPS[tag]}
+                                </div>
+                              ))}
+                            </div>
+                          </TooltipContent>
+                        ) : (
+                          <TooltipContent side="left" align="start" sideOffset={8} collisionPadding={16} className="max-w-[280px] z-[100]">
+                            <div className="space-y-2 text-sm">
+                              <div>
+                                <span className="font-medium">Nur Text:</span>{" "}
+                                Keine Dokument- oder Bildverarbeitung. Für reine Chat-Anfragen ohne Upload geeignet.
+                              </div>
+                            </div>
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
                     </SelectItem>
                   ))}
                 </SelectContent>

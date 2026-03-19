@@ -8,9 +8,9 @@ alwaysApply: true
 
 ## Änderungen selbst ausführen
 
-- Führe Befehle wie `supabase db push`, `supabase functions deploy` selbst aus, statt "Nächste Schritte" zu listen
+- Führe Befehle wie `supabase db push`, `npm run supabase:deploy` selbst aus, statt "Nächste Schritte" zu listen
 - Gib keine manuellen Anweisungen wie "Migration im SQL Editor ausführen" oder "Edge Function deployen"
-- Wenn du Migrations oder Edge Functions erstellst/änderst: führe die zugehörigen Deploy-Befehle direkt aus
+- Wenn du Migrations oder Edge Functions erstellst/änderst: führe die zugehörigen Deploy-Befehle direkt aus (Edge Functions: `npm run supabase:deploy`)
 - Sage Bescheid, wenn alles geklappt hat – mit konkretem Ergebnis und wo deployed wurde
 
 ## Localhost beibehalten
