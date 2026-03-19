@@ -1,8 +1,21 @@
 import { cn } from "@/lib/utils";
 import { CheckIcon, X, Download } from "lucide-react";
-import { generateInvoicePdf } from "@/lib/pdf-invoice";
+import { generateInvoicePdf, type PdfStammdaten } from "@/lib/pdf-invoice";
 import { SummaryCard } from "@/components/SummaryCard";
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { usePraxisStammdaten } from "@/hooks/usePraxisStammdaten";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 
 // ── Types matching pipeline output ──
 
@@ -420,6 +433,24 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
   const optimierungen = data?.optimierungen ?? [];
   const z = data?.zusammenfassung ?? DEFAULT_ZUSAMMENFASSUNG;
   const suggestions = useMemo(() => buildSuggestions(data), [data]);
+  const { praxisStammdaten } = usePraxisStammdaten();
+
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [patientName, setPatientName] = useState("");
+  const [patientAdresse, setPatientAdresse] = useState("");
+  const [patientGeburtsdatum, setPatientGeburtsdatum] = useState("");
+  const [rechnungsnummer, setRechnungsnummer] = useState(data?.stammdaten?.rechnungsnummer ?? "");
+  const [rechnungsdatum, setRechnungsdatum] = useState(
+    () => data?.stammdaten?.rechnungsdatum ?? new Date().toISOString().slice(0, 10)
+  );
+  const hasSyncedStammdaten = useRef(false);
+  useEffect(() => {
+    if (data?.stammdaten && !hasSyncedStammdaten.current) {
+      hasSyncedStammdaten.current = true;
+      if (data.stammdaten.rechnungsnummer) setRechnungsnummer(data.stammdaten.rechnungsnummer);
+      if (data.stammdaten.rechnungsdatum) setRechnungsdatum(data.stammdaten.rechnungsdatum);
+    }
+  }, [data?.stammdaten]);
 
   const [decisions, setDecisions] = useState<Record<string, SuggestionDecision>>(() => {
     const init: Record<string, SuggestionDecision> = {};
@@ -562,6 +593,19 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
 
   const handlePdfExport = useCallback(async () => {
     try {
+      const stammdaten: PdfStammdaten = {
+        ...(praxisStammdaten ?? {}),
+        patient:
+          patientName || patientAdresse || patientGeburtsdatum
+            ? {
+                name: patientName || undefined,
+                adresse: patientAdresse || undefined,
+                geburtsdatum: patientGeburtsdatum || undefined,
+              }
+            : undefined,
+        rechnungsnummer: rechnungsnummer || undefined,
+        rechnungsdatum: rechnungsdatum || undefined,
+      };
       const positions = exportPositions.map((p) => ({
         nr: p.nr,
         ziffer: p.ziffer,
@@ -570,12 +614,23 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
         betrag: p.betrag,
         begruendung: p.begruendung,
       }));
-      await generateInvoicePdf(positions, previewSum, data.stammdaten);
+      await generateInvoicePdf(positions, previewSum, stammdaten);
+      setExportModalOpen(false);
       onExportSuccess?.();
     } catch (e) {
       console.error("PDF export failed:", e);
     }
-  }, [data.stammdaten, exportPositions, previewSum, onExportSuccess]);
+  }, [
+    praxisStammdaten,
+    patientName,
+    patientAdresse,
+    patientGeburtsdatum,
+    rechnungsnummer,
+    rechnungsdatum,
+    exportPositions,
+    previewSum,
+    onExportSuccess,
+  ]);
 
   return (
     <div className="invoice-result space-y-6">
@@ -640,7 +695,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
             )}
             <button
               type="button"
-              onClick={handlePdfExport}
+              onClick={() => setExportModalOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-muted hover:bg-muted/80 transition-colors"
               title="Als PDF exportieren"
             >
@@ -705,6 +760,81 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
           <strong className="text-foreground">{formatEuro(previewSum)}</strong>
         </div>
       </section>
+
+      <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rechnung als PDF exportieren</DialogTitle>
+            <DialogDescription>
+              Patientendaten manuell eingeben. Praxis & Bank aus Einstellungen werden übernommen.
+              {(!praxisStammdaten?.praxis?.name || !praxisStammdaten?.bank?.iban) && (
+                <span className="block mt-2 text-amber-600 dark:text-amber-400">
+                  Praxis- und Bankdaten in den Einstellungen hinterlegen, damit die Rechnung vollständig ist.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="export-patient-name">Patient Name</Label>
+              <Input
+                id="export-patient-name"
+                placeholder="Max Mustermann"
+                value={patientName}
+                onChange={(e) => setPatientName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="export-patient-adresse">Patient Adresse</Label>
+              <Textarea
+                id="export-patient-adresse"
+                placeholder="Patientenstr. 1, 12345 Stadt"
+                value={patientAdresse}
+                onChange={(e) => setPatientAdresse(e.target.value)}
+                rows={2}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="export-patient-geburtsdatum">Geburtsdatum</Label>
+              <Input
+                id="export-patient-geburtsdatum"
+                placeholder="01.01.1980"
+                value={patientGeburtsdatum}
+                onChange={(e) => setPatientGeburtsdatum(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="export-rechnungsnummer">Rechnungsnummer</Label>
+                <Input
+                  id="export-rechnungsnummer"
+                  placeholder="RE-2025-001"
+                  value={rechnungsnummer}
+                  onChange={(e) => setRechnungsnummer(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="export-rechnungsdatum">Rechnungsdatum</Label>
+                <Input
+                  id="export-rechnungsdatum"
+                  type="date"
+                  value={rechnungsdatum}
+                  onChange={(e) => setRechnungsdatum(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportModalOpen(false)}>
+              Abbrechen
+            </Button>
+            <Button onClick={handlePdfExport}>
+              <Download className="w-4 h-4 mr-2" />
+              PDF herunterladen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

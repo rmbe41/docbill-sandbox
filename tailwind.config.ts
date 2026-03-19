@@ -90,12 +90,17 @@ export default {
           "0%, 80%, 100%": { transform: "scale(0.6)", opacity: "0.4" },
           "40%": { transform: "scale(1)", opacity: "1" },
         },
+        "logo-working": {
+          "0%, 100%": { transform: "scale(1)" },
+          "50%": { transform: "scale(1.2)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-in": "fade-in 0.3s ease-out",
         "pulse-dot": "pulse-dot 1.4s infinite ease-in-out",
+        "logo-working": "logo-working 1.8s ease-in-out infinite",
       },
     },
   },

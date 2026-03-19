@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import AppHeader from "@/components/AppHeader";
 import ChatBubble, { type ChatMessage } from "@/components/ChatBubble";
 import ChatInput from "@/components/ChatInput";
-import TypingIndicator from "@/components/TypingIndicator";
+import AnalysisStopwatch from "@/components/AnalysisStopwatch";
 import PipelineProgress from "@/components/PipelineProgress";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import ConversationSidebar from "@/components/ConversationSidebar";
@@ -39,7 +39,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
+const CHAT_URL = import.meta.env.DEV
+  ? `/api/supabase/functions/v1/goae-chat`
+  : `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
 
 const Index = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -54,6 +56,7 @@ const Index = () => {
     totalSteps: number;
     label: string;
   } | null>(null);
+  const [analysisStartTime, setAnalysisStartTime] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const abortRequestedRef = useRef(false);
@@ -67,7 +70,7 @@ const Index = () => {
   }, []);
   const { user } = useAuth();
   const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null; engine_type: string | null }>({ selected_model: null, custom_rules: null, engine_type: null });
-  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "complex" });
+  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "simple" });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"user" | "display" | "global" | undefined>(undefined);
   const [sessionModelOverride, setSessionModelOverride] = useState<string | null>(null);
 
@@ -90,7 +93,7 @@ const Index = () => {
     if (gData) setGlobalSettings({
       default_model: gData.default_model,
       default_rules: gData.default_rules,
-      default_engine: (gData as { default_engine?: string }).default_engine ?? "complex",
+      default_engine: (gData as { default_engine?: string }).default_engine ?? "simple",
     });
     const { data: uData } = await supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle();
     if (uData) setUserSettings({
@@ -307,6 +310,8 @@ const Index = () => {
         const controller = new AbortController();
         abortControllerRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5 min – Pipeline + Textgenerierung können lange dauern
+        const startTime = Date.now();
+        setAnalysisStartTime(startTime);
         const resp = await fetch(CHAT_URL, {
           method: "POST",
           headers: {
@@ -467,6 +472,17 @@ const Index = () => {
           }
         }
 
+        const analysisTimeSeconds = (Date.now() - startTime) / 1000;
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant") {
+            return prev.map((m, i) =>
+              i === prev.length - 1 ? { ...m, analysisTimeSeconds } : m
+            );
+          }
+          return prev;
+        });
+
         setPipelineStep(null);
 
         // Save assistant message to DB and update message id for feedback
@@ -492,13 +508,17 @@ const Index = () => {
         if (isAbort && abortRequestedRef.current) {
           // User aborted – keine Notification
         } else {
+          const rawMsg = e instanceof Error ? e.message : String(e);
           const errMsg = isAbort
             ? "Die Verbindung hat zu lange gedauert (Timeout). Bitte erneut versuchen."
-            : (e instanceof Error ? e.message : "Die Anfrage konnte nicht verarbeitet werden.");
+            : /failed to fetch|networkerror|load failed/i.test(rawMsg)
+              ? "Netzwerkfehler: Verbindung zum Server nicht möglich. Prüfen Sie Ihre Internetverbindung und ob die App korrekt konfiguriert ist."
+              : rawMsg || "Die Anfrage konnte nicht verarbeitet werden.";
           toast({ title: "Fehler", description: errMsg, variant: "destructive" });
         }
       } finally {
         abortControllerRef.current = null;
+        setAnalysisStartTime(null);
         setIsLoading(false);
       }
     },
@@ -552,14 +572,18 @@ const Index = () => {
                       conversationId={activeConversationId}
                     />
                   ))}
-                  {isLoading && pipelineStep && (
-                    <PipelineProgress
-                      step={pipelineStep.step}
-                      totalSteps={pipelineStep.totalSteps}
-                      label={pipelineStep.label}
-                    />
+                  {isLoading && analysisStartTime != null && (
+                    pipelineStep ? (
+                      <PipelineProgress
+                        step={pipelineStep.step}
+                        totalSteps={pipelineStep.totalSteps}
+                        label={pipelineStep.label}
+                        startTime={analysisStartTime}
+                      />
+                    ) : (
+                      <AnalysisStopwatch startTime={analysisStartTime} />
+                    )
                   )}
-                  {isLoading && !pipelineStep && <TypingIndicator />}
                 </ErrorBoundary>
               </div>
             )

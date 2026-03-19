@@ -1,10 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeaders } from "jsr:@supabase/supabase-js@2/cors";
 
 import { GOAE_KATALOG } from "./goae-catalog.ts";
 import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
@@ -268,19 +263,22 @@ async function handleApiError(response: Response): Promise<Response> {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response("ok", { status: 200, headers: corsHeaders });
   }
 
   try {
     const { messages, files, model, extra_rules, engine_type, last_invoice_result, last_service_result } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    if (!OPENROUTER_API_KEY) {
+    const keyExists = typeof OPENROUTER_API_KEY === "string";
+    const keyNonEmpty = keyExists && OPENROUTER_API_KEY.trim().length > 0;
+    if (!keyNonEmpty) {
+      console.error("[goae-chat] OPENROUTER_API_KEY:", keyExists ? "leer" : "nicht gesetzt");
+      const hint = keyExists
+        ? "OPENROUTER_API_KEY ist leer. Bitte Wert im Supabase Dashboard prüfen."
+        : "OPENROUTER_API_KEY fehlt. Mit CLI setzen: supabase secrets set OPENROUTER_API_KEY=sk-or-v1-...";
       return new Response(
-        JSON.stringify({
-          error:
-            "OPENROUTER_API_KEY fehlt. Supabase Dashboard → Project Settings → Edge Functions → Secrets → OPENROUTER_API_KEY hinzufügen.",
-        }),
+        JSON.stringify({ error: hint }),
         {
           status: 503,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -304,15 +302,19 @@ serve(async (req) => {
         OPENROUTER_API_KEY,
       );
 
-    const { workflow: intent } = await classifyIntent(
-      {
-        userMessage,
-        hasFiles: !!hasFiles,
-        recentMessages: messages,
-      },
-      OPENROUTER_API_KEY,
-      resolvedModel,
-    );
+    // Fast path: Bei Dateien + kurzer/leerer Nachricht → Rechnung prüfen (spart ~10–20s LLM-Call)
+    const msg = (userMessage || "").toLowerCase().trim();
+    const needsClassifier =
+      !hasFiles ||
+      (msg.length > 60 && /abrechnen|was kann|leistung|durchgeführt|erbracht/.test(msg) && !/prüfen|rechnung|kontroll/.test(msg));
+
+    const { workflow: intent } = needsClassifier
+      ? await classifyIntent(
+          { userMessage, hasFiles: !!hasFiles, recentMessages: messages },
+          OPENROUTER_API_KEY,
+          resolvedModel,
+        )
+      : { workflow: "rechnung_pruefen" as const, confidence: "hoch" as const };
 
     let response: Response;
 

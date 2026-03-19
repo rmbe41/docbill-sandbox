@@ -22,6 +22,7 @@ export type ChatMessage = {
   attachments?: { name: string; type: string; previewUrl?: string }[];
   invoiceResult?: InvoiceResultData;
   serviceBillingResult?: ServiceBillingResultData;
+  analysisTimeSeconds?: number;
 };
 
 type ChatBubbleProps = {
@@ -255,8 +256,10 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
         )}
         </div>
 
-        {showFeedback && (
-          <div className="flex items-center gap-1">
+        {(showFeedback || (!isUser && message.analysisTimeSeconds != null)) && (
+          <div className="flex items-center justify-between w-full">
+            {showFeedback ? (
+            <div className="flex items-center gap-1">
             <Button
               variant="ghost"
               size="icon"
@@ -320,6 +323,13 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
                 </button>
               </PopoverContent>
             </Popover>
+          </div>
+            ) : <div className="flex-1" />}
+            {!isUser && message.analysisTimeSeconds != null && (
+              <span className="text-[10px] text-muted-foreground">
+                {message.analysisTimeSeconds.toFixed(1).replace(".", ",")} s
+              </span>
+            )}
           </div>
         )}
       </div>

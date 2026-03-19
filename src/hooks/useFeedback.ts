@@ -1,7 +1,9 @@
 import { useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-const FEEDBACK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/feedback`;
+const FEEDBACK_URL = import.meta.env.DEV
+  ? `/api/supabase/functions/v1/feedback`
+  : `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/feedback`;
 const HISTORY_KEY = "docbill_feedback_history";
 const HISTORY_LIMIT = 10;
 const EXPERT_THRESHOLD = 10;

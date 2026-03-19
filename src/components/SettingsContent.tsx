@@ -170,11 +170,14 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
   useEffect(() => {
     if (activeTab !== "user" && activeTab !== "global") return;
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const creditsUrl = import.meta.env.DEV
+      ? `/api/supabase/functions/v1/goae-credits`
+      : `${supabaseUrl}/functions/v1/goae-credits`;
     const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
     if (!supabaseUrl || !supabaseKey) return;
     const fetchCredits = async () => {
       try {
-        const r = await fetch(`${supabaseUrl}/functions/v1/goae-credits`, {
+        const r = await fetch(creditsUrl, {
           headers: { Authorization: `Bearer ${supabaseKey}` },
         });
         let data: { total_credits?: number; total_usage?: number; remaining?: number; error?: string } = {};

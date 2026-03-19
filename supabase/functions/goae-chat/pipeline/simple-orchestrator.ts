@@ -116,6 +116,7 @@ export async function runSimplePipeline(
 ): Promise<Response> {
   const apiKey = Deno.env.get("OPENROUTER_API_KEY")!;
 
+  const encoder = new TextEncoder();
   return createPipelineStream(
     SIMPLE_PIPELINE_STEPS,
     async (writer, sendProgress) => {

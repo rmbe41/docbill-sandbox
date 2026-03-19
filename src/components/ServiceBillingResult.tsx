@@ -479,7 +479,12 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
           <DialogHeader>
             <DialogTitle>Rechnung als PDF exportieren</DialogTitle>
             <DialogDescription>
-              Patient und Rechnungsdaten eingeben. Praxis & Bank aus Einstellungen werden übernommen.
+              Patientendaten manuell eingeben. Praxis & Bank aus Einstellungen werden übernommen.
+              {(!praxisStammdaten?.praxis?.name || !praxisStammdaten?.bank?.iban) && (
+                <span className="block mt-2 text-amber-600 dark:text-amber-400">
+                  Praxis- und Bankdaten in den Einstellungen hinterlegen, damit die Rechnung vollständig ist.
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
