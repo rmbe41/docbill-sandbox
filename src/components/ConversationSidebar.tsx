@@ -112,7 +112,7 @@ const ConversationSidebar = ({
             )}
           </Button>
 
-          <div className={cn("pt-2 px-1", collapsed && "flex justify-center px-0")}>
+          <div className={cn("pt-1 px-0.5 pb-0.5", collapsed && "flex justify-center px-0")}>
             <UserProfileMenu collapsed={collapsed} onInlineSettings={handleSettings} onAfterNavigate={onClose} />
           </div>
         </div>

@@ -46,17 +46,17 @@ const UserProfileMenu = ({ collapsed, onInlineSettings, onAfterNavigate }: Props
         <Button
           variant="ghost"
           className={cn(
-            "rounded-lg shrink-0 pointer-events-auto hover:bg-muted/60",
-            collapsed ? "h-10 w-10 p-0 mx-auto" : "h-10 w-full justify-start px-2 gap-2",
+            "rounded-md shrink-0 pointer-events-auto hover:bg-muted/50 text-muted-foreground hover:text-foreground",
+            collapsed ? "h-8 w-8 p-0 mx-auto" : "h-8 w-full justify-start px-1.5 gap-1.5 min-w-0",
           )}
           title="Profil"
         >
-          <Avatar className={cn("shrink-0", collapsed ? "h-8 w-8" : "h-8 w-8")}>
+          <Avatar className="h-[22px] w-[22px] shrink-0">
             <AvatarImage src={avatarUrl} alt={user.email ?? ""} />
-            <AvatarFallback className="text-xs bg-muted">{getInitials(user.email)}</AvatarFallback>
+            <AvatarFallback className="text-[9px] leading-none bg-muted">{getInitials(user.email)}</AvatarFallback>
           </Avatar>
           {!collapsed && (
-            <span className="truncate text-left text-sm text-muted-foreground/90 min-w-0 flex-1">
+            <span className="truncate text-left text-[11px] leading-tight text-muted-foreground/85 min-w-0 flex-1">
               {user.email}
             </span>
           )}

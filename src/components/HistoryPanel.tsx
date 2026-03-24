@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Trash2, Pencil, FileText, Loader2, ListOrdered, CircleCheck, XCircle, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,18 @@ import { cn } from "@/lib/utils";
 import type { Conversation } from "@/hooks/useConversations";
 import type { BackgroundJobRow, ConversationRunInfo } from "@/hooks/useBackgroundJobQueue";
 import { isToday, isYesterday } from "date-fns";
+
+const SIDEBAR_CHAT_PAGE = 10;
+
+function dayKey(d: Date) {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function sidebarChatDayLabel(d: Date): string {
+  if (isToday(d)) return "Heute";
+  if (isYesterday(d)) return "Gestern";
+  return new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "short" }).format(d);
+}
 
 function groupByDate(conversations: Conversation[]) {
   const today: Conversation[] = [];
@@ -49,7 +61,37 @@ const HistoryPanel = ({
 }: HistoryPanelProps) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [sidebarChatsExpanded, setSidebarChatsExpanded] = useState(false);
   const compact = layout === "sidebar";
+
+  const sortedChatsForSidebar = useMemo(() => {
+    if (!compact) return [];
+    return [...conversations].sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    );
+  }, [compact, conversations]);
+
+  const visibleSidebarChats = useMemo(() => {
+    if (!compact) return [];
+    const cap = sidebarChatsExpanded ? sortedChatsForSidebar.length : SIDEBAR_CHAT_PAGE;
+    return sortedChatsForSidebar.slice(0, cap);
+  }, [compact, sortedChatsForSidebar, sidebarChatsExpanded]);
+
+  const sidebarChatItems = useMemo(() => {
+    if (!compact) return [] as Array<{ kind: "day"; label: string } | { kind: "conv"; conv: Conversation }>;
+    const items: Array<{ kind: "day"; label: string } | { kind: "conv"; conv: Conversation }> = [];
+    let prevKey: string | null = null;
+    for (const conv of visibleSidebarChats) {
+      const d = new Date(conv.updated_at);
+      const k = dayKey(d);
+      if (k !== prevKey) {
+        items.push({ kind: "day", label: sidebarChatDayLabel(d) });
+        prevKey = k;
+      }
+      items.push({ kind: "conv", conv });
+    }
+    return items;
+  }, [compact, visibleSidebarChats]);
 
   const startEdit = (conv: Conversation) => {
     setEditingId(conv.id);
@@ -139,6 +181,82 @@ const HistoryPanel = ({
     ? "text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mb-2 pl-0.5"
     : "text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60 mb-3 pl-1";
 
+  const sidebarDayLabelClass =
+    "px-2 pt-2 pb-1 first:pt-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/55";
+
+  const ConversationRow = ({ conv }: { conv: Conversation }) => (
+    <div
+      className={cn(
+        "group flex items-center gap-2 cursor-pointer text-sm transition-colors",
+        compact ? "px-2 py-2" : "gap-3 px-3 py-2.5",
+        activeId === conv.id
+          ? "bg-muted/80 text-foreground"
+          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+      )}
+      onClick={() => editingId !== conv.id && onSelect(conv.id)}
+    >
+      <div className="flex-1 min-w-0">
+        {editingId === conv.id ? (
+          <Input
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={saveEdit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveEdit();
+              if (e.key === "Escape") cancelEdit();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className={cn("text-sm", compact ? "h-7" : "h-8")}
+            autoFocus
+          />
+        ) : (
+          <div className="min-w-0 flex-1">
+            <p className={cn("truncate font-medium", compact ? "text-xs" : "text-sm")}>{conv.title}</p>
+            {conv.source_filename && (
+              <p className="truncate text-[10px] sm:text-xs text-muted-foreground/80 mt-0.5 flex items-center gap-1">
+                <FileText className="w-3 h-3 flex-shrink-0" />
+                {conv.source_filename}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+      {editingId !== conv.id && (
+        <div
+          className={cn(
+            "flex items-center gap-0.5 flex-shrink-0",
+            compact ? "opacity-100" : "opacity-0 group-hover:opacity-100 transition-opacity",
+          )}
+        >
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("hover:bg-transparent", compact ? "h-7 w-7" : "h-8 w-8")}
+            onClick={(e) => {
+              e.stopPropagation();
+              startEdit(conv);
+            }}
+            title="Umbenennen"
+          >
+            <Pencil className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("hover:bg-transparent", compact ? "h-7 w-7" : "h-8 w-8")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(conv.id);
+            }}
+            title="Löschen"
+          >
+            <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-destructive" />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
   const Section = ({ label, items }: { label: string; items: Conversation[] }) =>
     items.length === 0 ? null : (
       <div className={cn(compact ? "mb-4 last:mb-0" : "mb-8 last:mb-0")}>
@@ -150,77 +268,7 @@ const HistoryPanel = ({
           )}
         >
           {items.map((conv) => (
-            <div
-              key={conv.id}
-              className={cn(
-                "group flex items-center gap-2 cursor-pointer text-sm transition-colors",
-                compact ? "px-2 py-2" : "gap-3 px-3 py-2.5",
-                activeId === conv.id
-                  ? "bg-muted/80 text-foreground"
-                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-              )}
-              onClick={() => editingId !== conv.id && onSelect(conv.id)}
-            >
-              <div className="flex-1 min-w-0">
-                {editingId === conv.id ? (
-                  <Input
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={saveEdit}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") saveEdit();
-                      if (e.key === "Escape") cancelEdit();
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className={cn("text-sm", compact ? "h-7" : "h-8")}
-                    autoFocus
-                  />
-                ) : (
-                  <div className="min-w-0 flex-1">
-                    <p className={cn("truncate font-medium", compact ? "text-xs" : "text-sm")}>{conv.title}</p>
-                    {conv.source_filename && (
-                      <p className="truncate text-[10px] sm:text-xs text-muted-foreground/80 mt-0.5 flex items-center gap-1">
-                        <FileText className="w-3 h-3 flex-shrink-0" />
-                        {conv.source_filename}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-              {editingId !== conv.id && (
-                <div
-                  className={cn(
-                    "flex items-center gap-0.5 flex-shrink-0",
-                    compact ? "opacity-100" : "opacity-0 group-hover:opacity-100 transition-opacity",
-                  )}
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn("hover:bg-transparent", compact ? "h-7 w-7" : "h-8 w-8")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startEdit(conv);
-                    }}
-                    title="Umbenennen"
-                  >
-                    <Pencil className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn("hover:bg-transparent", compact ? "h-7 w-7" : "h-8 w-8")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(conv.id);
-                    }}
-                    title="Löschen"
-                  >
-                    <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-destructive" />
-                  </Button>
-                </div>
-              )}
-            </div>
+            <ConversationRow key={conv.id} conv={conv} />
           ))}
         </div>
       </div>
@@ -269,7 +317,7 @@ const HistoryPanel = ({
                 </p>
               )}
               {compact && (
-                <p className="text-[10px] font-medium text-muted-foreground/80 px-0.5">Zuletzt fertig</p>
+                <p className="text-[10px] font-medium text-muted-foreground/80 px-0.5">Abgeschlossen</p>
               )}
               <div className="space-y-1.5">{recentDone.map((j) => <JobRow key={j.id} job={j} variant="done" />)}</div>
             </div>
@@ -285,9 +333,32 @@ const HistoryPanel = ({
       )}
 
       <div>
-        <p className={cn(sectionLabel, "mb-2")}>{compact ? "Verlauf" : "Alle Gespräche"}</p>
+        <p className={cn(sectionLabel, "mb-2")}>{compact ? "Chats" : "Alle Gespräche"}</p>
         {conversations.length === 0 ? (
           <p className="text-xs text-muted-foreground/80 text-center py-8">Noch keine Chats</p>
+        ) : compact ? (
+          <>
+            <div className="rounded-lg divide-y divide-border/50 border border-border/30 bg-muted/10 dark:bg-muted/5 overflow-hidden">
+              {sidebarChatItems.map((item, idx) =>
+                item.kind === "day" ? (
+                  <div key={`day-${idx}`} className={sidebarDayLabelClass}>
+                    {item.label}
+                  </div>
+                ) : (
+                  <ConversationRow key={item.conv.id} conv={item.conv} />
+                ),
+              )}
+            </div>
+            {sortedChatsForSidebar.length > SIDEBAR_CHAT_PAGE && !sidebarChatsExpanded && (
+              <button
+                type="button"
+                className="mt-2 w-full py-1.5 text-center text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/45 transition-colors"
+                onClick={() => setSidebarChatsExpanded(true)}
+              >
+                … mehr anzeigen
+              </button>
+            )}
+          </>
         ) : (
           <>
             <Section label="Heute" items={today} />

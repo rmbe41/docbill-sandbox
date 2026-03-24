@@ -20,16 +20,19 @@ const AgentsSidebar = ({ onNew, className, ...panelProps }: Props) => {
         className,
       )}
     >
-      <div className="p-2 border-b border-border/40 shrink-0">
+      <div className="px-2 py-1.5 border-b border-border/30 shrink-0">
         <Button
           type="button"
-          variant="default"
+          variant="ghost"
           size="sm"
-          className="w-full gap-2 justify-center rounded-lg"
+          className={cn(
+            "group w-full h-8 gap-1.5 justify-center rounded-md border border-border/25 bg-transparent font-normal text-xs text-muted-foreground shadow-none",
+            "hover:bg-muted/60 hover:text-foreground hover:border-border/45",
+          )}
           onClick={onNew}
           title="Neuer Chat"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="h-3.5 w-3.5 opacity-60 group-hover:opacity-100" />
           Neuer Chat
         </Button>
       </div>

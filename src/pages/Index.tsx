@@ -463,9 +463,18 @@ const Index = () => {
 
       <Sheet open={agentsSheetOpen} onOpenChange={setAgentsSheetOpen}>
         <SheetContent side="right" className="w-full sm:max-w-sm p-0 flex flex-col gap-0 [&>button]:top-3">
-          <div className="p-3 border-b border-border shrink-0">
-            <Button type="button" className="w-full gap-2" onClick={handleNewConversation}>
-              <Plus className="w-4 h-4" />
+          <div className="px-3 py-2 border-b border-border/30 shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "group w-full h-8 gap-1.5 justify-center rounded-md border border-border/25 bg-transparent font-normal text-xs text-muted-foreground shadow-none",
+                "hover:bg-muted/60 hover:text-foreground hover:border-border/45",
+              )}
+              onClick={handleNewConversation}
+            >
+              <Plus className="h-3.5 w-3.5 opacity-60 group-hover:opacity-100" />
               Neuer Chat
             </Button>
           </div>
