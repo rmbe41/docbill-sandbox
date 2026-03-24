@@ -14,6 +14,62 @@ export type Database = {
   }
   public: {
     Tables: {
+      background_jobs: {
+        Row: {
+          id: string
+          user_id: string
+          conversation_id: string
+          status: string
+          sort_order: number
+          payload: Json
+          error: string | null
+          progress_label: string | null
+          progress_step: number | null
+          progress_total: number | null
+          created_at: string
+          started_at: string | null
+          finished_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          conversation_id: string
+          status?: string
+          sort_order?: number
+          payload?: Json
+          error?: string | null
+          progress_label?: string | null
+          progress_step?: number | null
+          progress_total?: number | null
+          created_at?: string
+          started_at?: string | null
+          finished_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          conversation_id?: string
+          status?: string
+          sort_order?: number
+          payload?: Json
+          error?: string | null
+          progress_label?: string | null
+          progress_step?: number | null
+          progress_total?: number | null
+          created_at?: string
+          started_at?: string | null
+          finished_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "background_jobs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       admin_context_files: {
         Row: {
           id: string

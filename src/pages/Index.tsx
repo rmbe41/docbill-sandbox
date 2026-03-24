@@ -6,15 +6,19 @@ import AnalysisStopwatch from "@/components/AnalysisStopwatch";
 import PipelineProgress from "@/components/PipelineProgress";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import ConversationSidebar from "@/components/ConversationSidebar";
-import HistoryView from "@/components/HistoryView";
+import AgentsSidebar from "@/components/AgentsSidebar";
+import HistoryPanel from "@/components/HistoryPanel";
 import SettingsContent from "@/components/SettingsContent";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
+import { useBackgroundJobQueue } from "@/hooks/useBackgroundJobQueue";
 import { supabase } from "@/integrations/supabase/client";
 import { getModelInfo, AVAILABLE_MODELS, MODEL_TAG_LABELS, MODEL_TAG_TOOLTIPS, type ModelTag } from "@/data/models";
-import type { InvoiceResultData } from "@/components/InvoiceResult";
-import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AlertTriangle, ChevronDown } from "lucide-react";
@@ -39,35 +43,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const CHAT_URL = import.meta.env.DEV
-  ? `/api/supabase/functions/v1/goae-chat`
-  : `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/goae-chat`;
-
 const Index = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [mainView, setMainView] = useState<"chat" | "history" | "settings">("chat");
+  const [mainView, setMainView] = useState<"chat" | "settings">("chat");
+  const [agentsSheetOpen, setAgentsSheetOpen] = useState(false);
   const [freeExhaustedDialogOpen, setFreeExhaustedDialogOpen] = useState(false);
   const [freeExhaustedErrorDetails, setFreeExhaustedErrorDetails] = useState<string | null>(null);
-  const [pipelineStep, setPipelineStep] = useState<{
-    step: number;
-    totalSteps: number;
-    label: string;
-  } | null>(null);
-  const [analysisStartTime, setAnalysisStartTime] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const abortRequestedRef = useRef(false);
   const { toast } = useToast();
-
-  const handleStop = useCallback(() => {
-    abortRequestedRef.current = true;
-    abortControllerRef.current?.abort();
-    setPipelineStep(null);
-    setIsLoading(false);
-  }, []);
   const { user } = useAuth();
   const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null; engine_type: string | null }>({ selected_model: null, custom_rules: null, engine_type: null });
   const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "simple" });
@@ -109,6 +94,52 @@ const Index = () => {
 
   const effectiveModel = sessionModelOverride ?? userSettings.selected_model ?? globalSettings.default_model;
 
+  const onFreeModelsExhausted = useCallback((details: string | null) => {
+    setFreeExhaustedErrorDetails(details);
+    setFreeExhaustedDialogOpen(true);
+  }, []);
+
+  const {
+    jobs,
+    runStates,
+    enqueueSend,
+    activeRunInfo,
+    isConversationBusy,
+    stopBackgroundForActiveConversation,
+    cancelQueuedJob,
+    mergeMessagesWithLiveStream,
+  } = useBackgroundJobQueue({
+    user,
+    toast,
+    activeConversationId,
+    setActiveConversationId,
+    createConversation,
+    saveMessage,
+    loadMessages,
+    updateSourceFilename,
+    fetchConversations,
+    userSettings,
+    globalSettings,
+    effectiveModel,
+    setMessages,
+    onFreeModelsExhausted,
+  });
+
+  const isChatBusy = isConversationBusy(activeConversationId);
+  const pipelineStep = activeRunInfo?.pipelineStep ?? null;
+  const analysisStartTime = activeRunInfo?.analysisStartTime ?? null;
+
+  const handleStop = useCallback(() => {
+    void stopBackgroundForActiveConversation();
+  }, [stopBackgroundForActiveConversation]);
+
+  const sendMessage = useCallback(
+    async (content: string, files?: File[]) => {
+      await enqueueSend(content, files);
+    },
+    [enqueueSend],
+  );
+
   const saveUserModel = useCallback(
     async (model: string | null) => {
       if (!user) {
@@ -147,32 +178,29 @@ const Index = () => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading, pipelineStep]);
+  }, [messages, isChatBusy, pipelineStep]);
 
-  // Load messages when selecting a conversation (from HistoryView)
+  // Load messages when selecting a conversation (from Agents-/History-Panel)
   const handleSelectConversation = useCallback(
     async (id: string) => {
       setActiveConversationId(id);
       setSidebarOpen(false);
+      setAgentsSheetOpen(false);
       setMainView("chat");
-      const dbMessages = await loadMessages(id);
-      setMessages(
-        dbMessages.map((m) => ({
-          id: m.id,
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        }))
-      );
+      const merged = await mergeMessagesWithLiveStream(id);
+      setMessages(merged);
     },
-    [loadMessages, setActiveConversationId]
+    [mergeMessagesWithLiveStream, setActiveConversationId]
   );
 
   const handleNewConversation = useCallback(() => {
     setActiveConversationId(null);
     setMessages([]);
     setSidebarOpen(false);
+    setAgentsSheetOpen(false);
     setMainView("chat");
-  }, [setActiveConversationId]);
+    void fetchConversations();
+  }, [setActiveConversationId, fetchConversations]);
 
   const handleDeleteConversation = useCallback(
     async (id: string) => {
@@ -196,341 +224,21 @@ const Index = () => {
     setMainView("settings");
   }, []);
 
-  const handleHistory = useCallback(() => {
-    setMainView("history");
-  }, []);
-
-
-  const fileToBase64 = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string).split(",")[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-  const sendMessage = useCallback(
-    async (content: string, files?: File[]) => {
-      const attachments = files?.map((f) => ({
-        name: f.name,
-        type: f.type,
-        previewUrl:
-          f.type.startsWith("image/") || f.type === "application/pdf"
-            ? URL.createObjectURL(f)
-            : undefined,
-      }));
-      const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "user",
-        content,
-        attachments,
-      };
-
-      setMessages((prev) => [...prev, userMsg]);
-      setIsLoading(true);
-
-      // Ensure we have a conversation
-      let convId = activeConversationId;
-      if (!convId) {
-        const title = content.slice(0, 60) || "Neues Gespräch";
-        convId = await createConversation(title);
-        if (convId) setActiveConversationId(convId);
-      }
-
-      // Save user message to DB
-      if (convId) {
-        await saveMessage(convId, "user", content);
-        // Store first file name for history display
-        if (files && files.length > 0) {
-          await updateSourceFilename(convId, files[0].name);
-        }
-      }
-
-      let filePayloads: { name: string; type: string; data: string }[] = [];
-      if (files && files.length > 0) {
-        filePayloads = await Promise.all(
-          files.map(async (f) => ({
-            name: f.name,
-            type: f.type,
-            data: await fileToBase64(f),
-          }))
-        );
-      }
-
-      const apiMessages = [...messages, userMsg].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-      const lastInvoiceResult = lastAssistant?.invoiceResult;
-      const lastServiceResult = lastAssistant?.serviceBillingResult;
-
-      let assistantContent = "";
-      let invoiceData: InvoiceResultData | undefined;
-      let serviceBillingData: ServiceBillingResultData | undefined;
-
-      const upsertAssistant = (chunk: string) => {
-        assistantContent += chunk;
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.role === "assistant") {
-            return prev.map((m, i) =>
-              i === prev.length - 1
-                ? { ...m, content: assistantContent, invoiceResult: invoiceData, serviceBillingResult: serviceBillingData }
-                : m
-            );
-          }
-          return [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: "assistant" as const,
-              content: assistantContent,
-              invoiceResult: invoiceData,
-              serviceBillingResult: serviceBillingData,
-            },
-          ];
-        });
-      };
-
-      try {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-        if (!supabaseUrl || !supabaseKey) {
-          setTimeout(() => {
-            upsertAssistant("⚠️ **Backend nicht verbunden.**");
-            setIsLoading(false);
-          }, 1500);
-          return;
-        }
-
-        abortRequestedRef.current = false;
-        const controller = new AbortController();
-        abortControllerRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5 min – Pipeline + Textgenerierung können lange dauern
-        const startTime = Date.now();
-        setAnalysisStartTime(startTime);
-        const resp = await fetch(CHAT_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${supabaseKey}`,
-          },
-          body: JSON.stringify({
-            messages: apiMessages,
-            files: filePayloads.length > 0 ? filePayloads : undefined,
-            model: effectiveModel,
-            engine_type: userSettings.engine_type ?? globalSettings.default_engine,
-            extra_rules: [globalSettings.default_rules, userSettings.custom_rules].filter(Boolean).join("\n\n"),
-            ...(lastInvoiceResult && {
-              last_invoice_result: { pruefung: lastInvoiceResult },
-            }),
-            ...(lastServiceResult && {
-              last_service_result: {
-                vorschlaege: lastServiceResult.vorschlaege,
-                optimierungen: lastServiceResult.optimierungen,
-                klinischerKontext: lastServiceResult.klinischerKontext,
-                fachgebiet: lastServiceResult.fachgebiet,
-              },
-            }),
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        abortControllerRef.current = null;
-
-
-        if (resp.status === 429) {
-          toast({ title: "Rate Limit", description: "Zu viele Anfragen.", variant: "destructive" });
-          setIsLoading(false);
-          return;
-        }
-        if (resp.status === 402) {
-          toast({ title: "Credits erschöpft", description: "Bitte laden Sie Ihre Credits auf oder wählen Sie ein kostenloses Modell (Einstellungen).", variant: "destructive" });
-          setIsLoading(false);
-          return;
-        }
-        if (!resp.ok) {
-          let errMsg = "Die Anfrage konnte nicht verarbeitet werden.";
-          let errBody: { error?: string; code?: string } = {};
-          try {
-            errBody = await resp.json();
-            if (errBody?.error) errMsg = errBody.error;
-          } catch {
-            errMsg = resp.status === 401 ? "Nicht autorisiert. Prüfen Sie die Supabase-Konfiguration." : errMsg;
-          }
-          if (errBody?.code === "FREE_MODELS_EXHAUSTED") {
-            const parts = [errBody?.error, errBody?.details].filter(Boolean) as string[];
-            setFreeExhaustedErrorDetails(parts.length ? parts.join("\n\n") : null);
-            setFreeExhaustedDialogOpen(true);
-          } else {
-            toast({ title: "Fehler", description: errMsg, variant: "destructive" });
-          }
-          setIsLoading(false);
-          return;
-        }
-        if (!resp.body) throw new Error("Stream failed");
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let textBuffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          textBuffer += decoder.decode(value, { stream: true });
-
-          let newlineIndex: number;
-          while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-            let line = textBuffer.slice(0, newlineIndex);
-            textBuffer = textBuffer.slice(newlineIndex + 1);
-            if (line.endsWith("\r")) line = line.slice(0, -1);
-            if (line.startsWith(":") || line.trim() === "") continue;
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6).trim();
-            if (jsonStr === "[DONE]") break;
-            try {
-              const parsed = JSON.parse(jsonStr);
-
-              // Pipeline / Service billing progress events
-              if (parsed.type === "pipeline_progress" || parsed.type === "service_billing_progress") {
-                const step = parsed.step ?? 1;
-                const total = parsed.totalSteps ?? 6;
-                setPipelineStep({
-                  step,
-                  totalSteps: total,
-                  label: parsed.label,
-                });
-                // #region agent log
-                fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d48d1e'},body:JSON.stringify({sessionId:'d48d1e',location:'Index.tsx:progress_received',message:'Progress event received',data:{step,totalSteps:total,label:parsed.label},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-                // #endregion
-                continue;
-              }
-
-              // Pipeline result (structured data → render InvoiceResult component)
-              // Support both formats: { pruefung, stammdaten } and legacy (data = pruefung directly)
-              if (parsed.type === "pipeline_result") {
-                setPipelineStep(null);
-                const raw = parsed.data as { pruefung?: InvoiceResultData; stammdaten?: InvoiceResultData["stammdaten"] } | InvoiceResultData;
-                const pruefung = "pruefung" in raw && raw.pruefung ? raw.pruefung : (raw as InvoiceResultData);
-                const stammdaten = "stammdaten" in raw ? raw.stammdaten : undefined;
-                invoiceData = {
-                  positionen: pruefung?.positionen ?? [],
-                  optimierungen: pruefung?.optimierungen ?? [],
-                  zusammenfassung: pruefung?.zusammenfassung ?? {
-                    gesamt: 0, korrekt: 0, warnungen: 0, fehler: 0,
-                    rechnungsSumme: 0, korrigierteSumme: 0, optimierungsPotenzial: 0,
-                  },
-                  ...(stammdaten && { stammdaten }),
-                };
-                upsertAssistant("");
-                continue;
-              }
-
-              // Pipeline error
-              if (parsed.type === "pipeline_error") {
-                setPipelineStep(null);
-                upsertAssistant(`\n\n❌ **Pipeline-Fehler:** ${parsed.error}`);
-                if (parsed.code === "FREE_MODELS_EXHAUSTED") {
-                  setFreeExhaustedErrorDetails(parsed.error ?? parsed.details ?? null);
-                  setFreeExhaustedDialogOpen(true);
-                }
-                continue;
-              }
-
-              // Service billing result
-              if (parsed.type === "service_billing_result") {
-                setPipelineStep(null);
-                serviceBillingData = parsed.data as ServiceBillingResultData;
-                upsertAssistant("");
-                continue;
-              }
-
-              // Service billing error
-              if (parsed.type === "service_billing_error") {
-                setPipelineStep(null);
-                upsertAssistant(`\n\n❌ **Fehler:** ${parsed.error}`);
-                continue;
-              }
-
-              // OpenRouter mid-stream error (e.g. provider disconnect)
-              if (parsed.error) {
-                const errMsg = parsed.error?.message ?? parsed.error;
-                upsertAssistant(`\n\n❌ **Stream-Fehler:** ${typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg)}`);
-                continue;
-              }
-
-              // Standard OpenRouter streaming content
-              const c = parsed.choices?.[0]?.delta?.content as string | undefined;
-              if (c) upsertAssistant(c);
-            } catch {
-              textBuffer = line + "\n" + textBuffer;
-              break;
-            }
-          }
-        }
-
-        const analysisTimeSeconds = (Date.now() - startTime) / 1000;
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.role === "assistant") {
-            return prev.map((m, i) =>
-              i === prev.length - 1 ? { ...m, analysisTimeSeconds } : m
-            );
-          }
-          return prev;
-        });
-
-        setPipelineStep(null);
-
-        // Save assistant message to DB and update message id for feedback
-        if (convId && assistantContent) {
-          const savedId = await saveMessage(convId, "assistant", assistantContent);
-          if (savedId) {
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last?.role === "assistant") {
-                return prev.map((m, i) => (i === prev.length - 1 ? { ...m, id: savedId } : m));
-              }
-              return prev;
-            });
-          }
-          await fetchConversations();
-        }
-      } catch (e) {
-        console.error("sendMessage error:", e);
-        // #region agent log
-        fetch('http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'518e10'},body:JSON.stringify({sessionId:'518e10',location:'Index.tsx:sendMessage_catch',message:'sendMessage error',data:{error:e instanceof Error?e.message:String(e),name:e instanceof Error?e.name:undefined},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
-        const isAbort = e instanceof Error && e.name === "AbortError";
-        if (isAbort && abortRequestedRef.current) {
-          // User aborted – keine Notification
-        } else {
-          const rawMsg = e instanceof Error ? e.message : String(e);
-          const errMsg = isAbort
-            ? "Die Verbindung hat zu lange gedauert (Timeout). Bitte erneut versuchen."
-            : /failed to fetch|networkerror|load failed/i.test(rawMsg)
-              ? "Netzwerkfehler: Verbindung zum Server nicht möglich. Prüfen Sie Ihre Internetverbindung und ob die App korrekt konfiguriert ist."
-              : rawMsg || "Die Anfrage konnte nicht verarbeitet werden.";
-          toast({ title: "Fehler", description: errMsg, variant: "destructive" });
-        }
-      } finally {
-        abortControllerRef.current = null;
-        setAnalysisStartTime(null);
-        setIsLoading(false);
-      }
-    },
-    [messages, toast, activeConversationId, createConversation, saveMessage, updateSourceFilename, setActiveConversationId, userSettings, globalSettings, fetchConversations, effectiveModel]
-  );
+  const historyPanelProps = {
+    conversations,
+    activeId: activeConversationId,
+    onSelect: (id: string) => void handleSelectConversation(id),
+    onDelete: handleDeleteConversation,
+    onRename: handleRenameConversation,
+    jobs,
+    runStates,
+    onCancelQueuedJob: cancelQueuedJob,
+  };
 
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar: fixed overlay, expands over content */}
       <ConversationSidebar
-        onNew={handleNewConversation}
-        onHistory={handleHistory}
         onSettings={handleSettings}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -541,12 +249,13 @@ const Index = () => {
       <div
         className={cn(
           "flex-1 flex flex-col min-w-0 relative transition-[margin] duration-200 ease-in-out",
-          sidebarCollapsed ? "md:ml-12" : "md:ml-40"
+          sidebarCollapsed ? "md:ml-12 md:mr-64" : "md:ml-40 md:mr-64",
         )}
       >
-        <header className="absolute top-0 right-0 left-0 z-50">
+        <header className="absolute top-0 right-0 left-0 z-50 md:right-64">
           <AppHeader
             onToggleSidebar={() => setSidebarOpen((v) => !v)}
+            onOpenAgentsSheet={() => setAgentsSheetOpen(true)}
             viewType={mainView}
             onBack={mainView !== "chat" ? () => setMainView("chat") : undefined}
           />
@@ -572,7 +281,7 @@ const Index = () => {
                       conversationId={activeConversationId}
                     />
                   ))}
-                  {isLoading && analysisStartTime != null && (
+                  {isChatBusy && analysisStartTime != null && (
                     pipelineStep ? (
                       <PipelineProgress
                         step={pipelineStep.step}
@@ -588,15 +297,6 @@ const Index = () => {
               </div>
             )
           )}
-          {mainView === "history" && (
-            <HistoryView
-              conversations={conversations}
-              activeId={activeConversationId}
-              onSelect={handleSelectConversation}
-              onDelete={handleDeleteConversation}
-              onRename={handleRenameConversation}
-            />
-          )}
           {mainView === "settings" && (
             <div className="pb-16">
               <SettingsContent onSettingsSaved={loadSettings} initialTab={settingsInitialTab} />
@@ -607,12 +307,12 @@ const Index = () => {
         {mainView === "chat" && (
           <div
             className={cn(
-              "fixed bottom-0 left-0 right-0 z-50 pointer-events-none transition-[left] duration-200 ease-in-out",
-              sidebarCollapsed ? "md:left-12" : "md:left-40"
+              "fixed bottom-0 left-0 right-0 z-50 pointer-events-none transition-[left,right] duration-200 ease-in-out",
+              sidebarCollapsed ? "md:left-12 md:right-64" : "md:left-40 md:right-64",
             )}
           >
             <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
-              <ChatInput onSend={sendMessage} isLoading={isLoading} onStop={handleStop} />
+              <ChatInput onSend={sendMessage} isLoading={isChatBusy} onStop={handleStop} />
               <div className="mt-1.5 flex items-center justify-between gap-3">
                 <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 px-2.5 py-1 rounded-md bg-muted">
                   <AlertTriangle className="w-3 h-3 shrink-0 text-muted-foreground/80" />
@@ -758,6 +458,24 @@ const Index = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AgentsSidebar onNew={handleNewConversation} {...historyPanelProps} />
+
+      <Sheet open={agentsSheetOpen} onOpenChange={setAgentsSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-sm p-0 flex flex-col gap-0 [&>button]:top-3">
+          <div className="p-3 border-b border-border shrink-0">
+            <Button type="button" className="w-full gap-2" onClick={handleNewConversation}>
+              <Plus className="w-4 h-4" />
+              Neuer Chat
+            </Button>
+          </div>
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-2 pb-20">
+              <HistoryPanel {...historyPanelProps} layout="sidebar" />
+            </div>
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };
