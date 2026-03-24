@@ -1,4 +1,4 @@
-import { LogOut, Menu, Settings, ArrowLeft, PanelRight } from "lucide-react";
+import { LogOut, Menu, Settings, ArrowLeft, PanelRight, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type ViewType = "chat" | "settings";
+type ViewType = "chat" | "settings" | "profile";
 
 type Props = {
   onToggleSidebar?: () => void;
@@ -20,6 +20,8 @@ type Props = {
   onOpenAgentsSheet?: () => void;
   viewType?: ViewType;
   onBack?: () => void;
+  /** Mobile: Profil im Hauptbereich wie Einstellungen in der App */
+  onOpenProfile?: () => void;
 };
 
 function getInitials(email: string | undefined): string {
@@ -29,7 +31,7 @@ function getInitials(email: string | undefined): string {
   return part.slice(0, 1).toUpperCase();
 }
 
-const AppHeader = ({ onToggleSidebar, onOpenAgentsSheet, viewType = "chat", onBack }: Props) => {
+const AppHeader = ({ onToggleSidebar, onOpenAgentsSheet, viewType = "chat", onBack, onOpenProfile }: Props) => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const avatarUrl = user?.user_metadata?.avatar_url as string | undefined;
@@ -52,6 +54,9 @@ const AppHeader = ({ onToggleSidebar, onOpenAgentsSheet, viewType = "chat", onBa
             </Button>
             {viewType === "settings" && (
               <h1 className="text-base font-semibold text-foreground truncate">Einstellungen</h1>
+            )}
+            {viewType === "profile" && (
+              <h1 className="text-base font-semibold text-foreground truncate">Profil & Konto</h1>
             )}
           </>
         ) : (
@@ -103,6 +108,14 @@ const AppHeader = ({ onToggleSidebar, onOpenAgentsSheet, viewType = "chat", onBa
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => {
+                  onOpenProfile?.();
+                }}
+              >
+                <User className="w-4 h-4 mr-2" />
+                Profil & Konto
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate("/settings")}>
                 <Settings className="w-4 h-4 mr-2" />
                 Einstellungen

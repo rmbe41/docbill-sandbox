@@ -1,7 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import AppHeader from "@/components/AppHeader";
 import ChatBubble, { type ChatMessage } from "@/components/ChatBubble";
-import ChatInput from "@/components/ChatInput";
+import ChatInput, {
+  CHAT_COMPOSER_DOCK_BELOW_CARD,
+  CHAT_COMPOSER_DOCK_BOTTOM_PAD,
+  CHAT_COMPOSER_DOCK_TOP_PAD,
+  CHAT_COMPOSER_OUTER_HEIGHT_CLASS,
+  type ChatInputHandle,
+} from "@/components/ChatInput";
+import { KeyboardShortcutsReference } from "@/components/KeyboardShortcutsReference";
 import AnalysisStopwatch from "@/components/AnalysisStopwatch";
 import PipelineProgress from "@/components/PipelineProgress";
 import WelcomeScreen from "@/components/WelcomeScreen";
@@ -9,6 +17,7 @@ import ConversationSidebar from "@/components/ConversationSidebar";
 import AgentsSidebar from "@/components/AgentsSidebar";
 import HistoryPanel from "@/components/HistoryPanel";
 import SettingsContent from "@/components/SettingsContent";
+import ProfileContent from "@/components/ProfileContent";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -43,18 +52,33 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useKeyboardShortcutPrefs } from "@/hooks/useKeyboardShortcutPrefs";
+import { loadKeyboardShortcutPrefs, matchShortcutToken, formatModCombo } from "@/lib/keyboardShortcutPrefs";
 
 const Index = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [mainView, setMainView] = useState<"chat" | "settings">("chat");
+  const [mainView, setMainView] = useState<"chat" | "settings" | "profile">("chat");
+  const location = useLocation();
+  const navigate = useNavigate();
   const [agentsSheetOpen, setAgentsSheetOpen] = useState(false);
   const [freeExhaustedDialogOpen, setFreeExhaustedDialogOpen] = useState(false);
   const [freeExhaustedErrorDetails, setFreeExhaustedErrorDetails] = useState<string | null>(null);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const [pendingAttachmentPicker, setPendingAttachmentPicker] = useState(false);
+  const chatInputRef = useRef<ChatInputHandle>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
+  const { prefs: shortcutPrefs } = useKeyboardShortcutPrefs();
   const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null; engine_type: string | null }>({ selected_model: null, custom_rules: null, engine_type: null });
   const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "simple" });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"user" | "display" | "global" | undefined>(undefined);
@@ -99,6 +123,14 @@ const Index = () => {
     loadSettings();
   }, [loadSettings]);
 
+  useEffect(() => {
+    const st = location.state as { openProfile?: boolean } | null;
+    if (st?.openProfile) {
+      setMainView("profile");
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.pathname, location.state, navigate]);
+
   const effectiveModel = sessionModelOverride ?? userSettings.selected_model ?? globalSettings.default_model;
 
   const onFreeModelsExhausted = useCallback((details: string | null) => {
@@ -135,6 +167,21 @@ const Index = () => {
   const isChatBusy = isConversationBusy(activeConversationId);
   const pipelineStep = activeRunInfo?.pipelineStep ?? null;
   const analysisStartTime = activeRunInfo?.analysisStartTime ?? null;
+
+  const shortcutsBlockRef = useRef({
+    mainView,
+    isChatBusy,
+    freeExhaustedDialogOpen,
+    shortcutsHelpOpen,
+    agentsSheetOpen,
+  });
+  shortcutsBlockRef.current = {
+    mainView,
+    isChatBusy,
+    freeExhaustedDialogOpen,
+    shortcutsHelpOpen,
+    agentsSheetOpen,
+  };
 
   const handleStop = useCallback(() => {
     void stopBackgroundForActiveConversation();
@@ -243,6 +290,79 @@ const Index = () => {
     setMainView("settings");
   }, []);
 
+  const handleProfile = useCallback(() => {
+    setMainView("profile");
+  }, []);
+
+  useLayoutEffect(() => {
+    if (mainView === "chat" && pendingAttachmentPicker) {
+      setPendingAttachmentPicker(false);
+      queueMicrotask(() => chatInputRef.current?.openAttachmentPicker());
+    }
+  }, [mainView, pendingAttachmentPicker]);
+
+  useEffect(() => {
+    const isForeignFormField = (): boolean => {
+      const active = document.activeElement;
+      if (!active || !(active instanceof HTMLElement)) return false;
+      const t = active.tagName;
+      if (t !== "INPUT" && t !== "TEXTAREA" && t !== "SELECT") return false;
+      if (t === "TEXTAREA" && active.getAttribute("data-composer-chat") === "true") return false;
+      return true;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const s = shortcutsBlockRef.current;
+      if (s.freeExhaustedDialogOpen || s.shortcutsHelpOpen || s.agentsSheetOpen) return;
+      if (document.documentElement.hasAttribute("data-docbill-capture-shortcut")) return;
+
+      const prefs = loadKeyboardShortcutPrefs();
+
+      if (e.key === "Escape") {
+        if (!prefs.escapeStopsAnalysis || !s.isChatBusy) return;
+        e.preventDefault();
+        handleStop();
+        return;
+      }
+
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      if (matchShortcutToken(e, prefs.keys.newChat)) {
+        e.preventDefault();
+        handleNewConversation();
+        return;
+      }
+      if (matchShortcutToken(e, prefs.keys.settings)) {
+        e.preventDefault();
+        handleSettings();
+        return;
+      }
+      if (matchShortcutToken(e, prefs.keys.help)) {
+        e.preventDefault();
+        setShortcutsHelpOpen(true);
+        return;
+      }
+      if (matchShortcutToken(e, prefs.keys.upload) && !isForeignFormField()) {
+        e.preventDefault();
+        if (s.mainView !== "chat") {
+          setMainView("chat");
+          setPendingAttachmentPicker(true);
+        } else {
+          chatInputRef.current?.openAttachmentPicker();
+        }
+        return;
+      }
+      if (matchShortcutToken(e, prefs.keys.stop) && s.isChatBusy) {
+        e.preventDefault();
+        handleStop();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [handleNewConversation, handleSettings, handleStop]);
+
   const historyPanelProps = {
     conversations,
     activeId: activeConversationId,
@@ -264,6 +384,7 @@ const Index = () => {
       {/* Sidebar: fixed overlay, expands over content */}
       <ConversationSidebar
         onSettings={handleSettings}
+        onProfile={handleProfile}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         collapsed={sidebarCollapsed}
@@ -273,7 +394,7 @@ const Index = () => {
       <div
         className={cn(
           "flex-1 flex flex-col min-w-0 relative transition-[margin] duration-200 ease-in-out",
-          sidebarCollapsed ? "md:ml-12 md:mr-72" : "md:ml-40 md:mr-72",
+          sidebarCollapsed ? "md:ml-[3.6rem] md:mr-72" : "md:ml-48 md:mr-72",
         )}
       >
         <header className="absolute top-0 right-0 left-0 z-50 md:right-72">
@@ -282,6 +403,7 @@ const Index = () => {
             onOpenAgentsSheet={() => setAgentsSheetOpen(true)}
             viewType={mainView}
             onBack={mainView !== "chat" ? () => setMainView("chat") : undefined}
+            onOpenProfile={handleProfile}
           />
         </header>
 
@@ -326,18 +448,36 @@ const Index = () => {
               <SettingsContent onSettingsSaved={loadSettings} initialTab={settingsInitialTab} />
             </div>
           )}
+          {mainView === "profile" && (
+            <div className="pb-16">
+              <ProfileContent />
+            </div>
+          )}
         </div>
 
         {mainView === "chat" && (
           <div
             className={cn(
               "fixed bottom-0 left-0 right-0 z-50 pointer-events-none transition-[left,right] duration-200 ease-in-out",
-              sidebarCollapsed ? "md:left-12 md:right-72" : "md:left-40 md:right-72",
+              sidebarCollapsed ? "md:left-[3.6rem] md:right-72" : "md:left-48 md:right-72",
             )}
           >
-            <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
-              <ChatInput onSend={sendMessage} isLoading={isChatBusy} onStop={handleStop} />
-              <div className="mt-1.5 flex items-center justify-between gap-3">
+            <div
+              className={cn(
+                "max-w-3xl mx-auto w-full px-4 pointer-events-auto",
+                CHAT_COMPOSER_DOCK_TOP_PAD,
+                CHAT_COMPOSER_DOCK_BOTTOM_PAD,
+              )}
+            >
+              <ChatInput
+                ref={chatInputRef}
+                onSend={sendMessage}
+                isLoading={isChatBusy}
+                onStop={handleStop}
+                attachmentShortcutHint={formatModCombo(shortcutPrefs.keys.upload)}
+                stopShortcutHint={formatModCombo(shortcutPrefs.keys.stop)}
+              />
+              <div className={cn("flex items-center justify-between gap-3", CHAT_COMPOSER_DOCK_BELOW_CARD)}>
                 <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 px-2.5 py-1 rounded-md bg-muted">
                   <AlertTriangle className="w-3 h-3 shrink-0 text-muted-foreground/80" />
                   Alle Ergebnisse müssen vor der Verwendung fachlich geprüft werden.
@@ -485,29 +625,54 @@ const Index = () => {
 
       <AgentsSidebar onNew={handleNewConversation} {...historyPanelProps} />
 
+      <Dialog open={shortcutsHelpOpen} onOpenChange={setShortcutsHelpOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Tastenkürzel</DialogTitle>
+            <DialogDescription className="sr-only">
+              Übersicht der Tastenkürzel in der App.
+            </DialogDescription>
+          </DialogHeader>
+          <KeyboardShortcutsReference prefs={shortcutPrefs} className="pt-2" />
+        </DialogContent>
+      </Dialog>
+
       <Sheet open={agentsSheetOpen} onOpenChange={setAgentsSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-72 p-0 flex flex-col gap-0 [&>button]:top-3">
-          <ScrollArea className="min-h-0 min-w-0 flex-1">
-            <div className="min-w-0 p-2 pb-4">
+        <SheetContent
+          side="right"
+          className="flex w-full flex-col gap-0 bg-muted/50 p-0 shadow-none dark:bg-muted/20 sm:max-w-72 [&>button]:top-3"
+        >
+          <ScrollArea className="min-h-0 min-w-0 flex-1 bg-muted/50 dark:bg-muted/20">
+            <div className="min-w-0 pl-2 pr-3.5 pt-2 pb-4">
               <HistoryPanel {...historyPanelProps} layout="sidebar" />
             </div>
           </ScrollArea>
-          <div className="shrink-0 px-3 pt-2">
+          <div
+            className={cn(
+              "shrink-0 pl-2 pr-3.5 bg-muted/50 transition-colors hover:bg-muted/40 dark:bg-muted/20 dark:hover:bg-muted/28",
+              CHAT_COMPOSER_DOCK_TOP_PAD,
+              CHAT_COMPOSER_DOCK_BOTTOM_PAD,
+            )}
+          >
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               className={cn(
-                "group h-auto min-h-[68px] w-full justify-center gap-2.5 rounded-xl border-border bg-card px-3 py-3 text-sm font-medium text-foreground shadow-none",
-                "hover:bg-muted/80 hover:text-foreground",
-                "[&_svg]:size-5 [&_svg]:opacity-90 [&_svg]:group-hover:opacity-100",
+                "group w-full inline-flex items-center justify-center gap-2.5 rounded-xl px-3 text-sm font-medium text-foreground shadow-none",
+                "transition-[background-color,border-color,transform,color] duration-200 ease-out",
+                "active:scale-[0.99]",
+                CHAT_COMPOSER_OUTER_HEIGHT_CLASS,
+                "border border-border/80 bg-foreground/[0.065] dark:border-border/70 dark:bg-muted/52",
+                "hover:border-border hover:bg-foreground/[0.115] hover:!text-foreground dark:hover:border-border dark:hover:bg-muted/88",
+                "active:border-border active:bg-foreground/[0.115] active:text-foreground dark:active:border-border dark:active:bg-muted/88",
+                "[&_svg]:size-5 [&_svg]:opacity-90 [&_svg]:transition-transform [&_svg]:duration-200 [&_svg]:ease-out [&_svg]:group-hover:scale-105 [&_svg]:group-hover:opacity-100",
               )}
               onClick={handleNewConversation}
             >
               <Plus className="shrink-0" />
               Neuer Chat
             </Button>
-            <div className="mt-1.5 min-h-7" aria-hidden />
-            <div className="pb-10" />
+            <div className={CHAT_COMPOSER_DOCK_BELOW_CARD} aria-hidden />
           </div>
         </SheetContent>
       </Sheet>

@@ -111,6 +111,29 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
   return true;
 }
 
+/** True when the stream appended one of our SSE error blocks (pipeline / billing / stream). */
+export function assistantContentHasSseError(content: string): boolean {
+  return /\n\n❌ \*\*(?:Pipeline-Fehler|Fehler|Stream-Fehler):\*\* /.test(content);
+}
+
+/** True when the stream produced something we can show (text or a structured result event). */
+export function sseAccumStateHasDeliverable(state: SseAccumState): boolean {
+  if ((state.assistantContent ?? "").trim().length > 0) return true;
+  if (state.serviceBillingData != null) return true;
+  if (state.invoiceData != null) return true;
+  return false;
+}
+
+/** First line of the SSE error message for persistence (e.g. job.error). */
+export function sseErrorSummaryFromAssistantContent(content: string): string {
+  const m = content.match(
+    /\n\n❌ \*\*(?:Pipeline-Fehler|Fehler|Stream-Fehler):\*\* ([^\n]+)/,
+  );
+  const line = m?.[1]?.trim();
+  if (line) return line.length > 220 ? `${line.slice(0, 217)}…` : line;
+  return "Pipeline- oder Stream-Fehler";
+}
+
 export async function consumeGoaeChatSseStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   ctx: SseHandlerContext,

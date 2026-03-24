@@ -88,6 +88,11 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<"user" | "display" | "global" | "praxis">(initialTab ?? "user");
+
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
+
   const [uiScale, setUiScale] = useState(() => {
     const saved = localStorage.getItem("ui-scale");
     return saved ? parseInt(saved, 10) : 100;

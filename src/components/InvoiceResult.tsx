@@ -147,7 +147,34 @@ function buildSuggestions(data: InvoiceResultData): FlatSuggestion[] {
       if (p.vorschlag) {
         const nachherFaktor = p.neueFaktor ?? pos.faktor;
         const nachherBetrag = p.neuerBetrag ?? (p.typ === "betrag" ? pos.berechneterBetrag : pos.betrag);
-        if (!isMeaningfulSuggestion(p, pos, nachherFaktor, nachherBetrag)) continue;
+        if (!isMeaningfulSuggestion(p, pos, nachherFaktor, nachherBetrag)) {
+          // #region agent log
+          fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "836585" },
+            body: JSON.stringify({
+              sessionId: "836585",
+              runId: "pre-fix",
+              hypothesisId: "H1",
+              location: "InvoiceResult.tsx:buildSuggestions",
+              message: "pruefung skipped (not meaningful numerically)",
+              data: {
+                posNr: pos.nr,
+                posNrType: typeof pos.nr,
+                ziffer: pos.ziffer,
+                pruefIdx: i,
+                pruefTyp: p.typ,
+                nachherFaktor,
+                nachherBetrag,
+                posFaktor: pos.faktor,
+                posBetrag: pos.betrag,
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          continue;
+        }
         out.push({
           id: `pos-${pos.nr}-pruef-${i}`,
           kind: "korrektur",
@@ -465,6 +492,53 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
   useEffect(() => {
     onDecisionsChange?.(decisions);
   }, [decisions, onDecisionsChange]);
+
+  useEffect(() => {
+    const perPosSuggestionCount: Record<string, number> = {};
+    for (const s of suggestions) {
+      if (s.pos?.nr != null) {
+        const k = String(s.pos.nr);
+        perPosSuggestionCount[k] = (perPosSuggestionCount[k] ?? 0) + 1;
+      }
+    }
+    const rowDebug = previewPositions.map((row) => {
+      const rs = getSuggestionsForPreviewRow(row, suggestions);
+      return {
+        displayNr: row.nr,
+        sourcePosNr: row.sourcePosNr,
+        sourcePosNrType: row.sourcePosNr != null ? typeof row.sourcePosNr : null,
+        sourceOptId: row.sourceOptSuggestionId ?? null,
+        isPendingOpt: !!row.isPendingOpt,
+        rowSuggestionsCount: rs.length,
+        suggestionIds: rs.map((x) => x.id),
+      };
+    });
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "836585" },
+      body: JSON.stringify({
+        sessionId: "836585",
+        runId: "pre-fix",
+        hypothesisId: "H2-H5",
+        location: "InvoiceResult.tsx:InvoiceResult",
+        message: "preview rows vs suggestions mapping",
+        data: {
+          positionenNrs: positionen.map((p) => ({
+            nr: p.nr,
+            nrType: typeof p.nr,
+            ziffer: p.ziffer,
+            pruefungenWithVorschlag: p.pruefungen.filter((pr) => pr.vorschlag).length,
+          })),
+          perPosSuggestionCount,
+          rowDebug,
+          totalSuggestions: suggestions.length,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [positionen, suggestions, previewPositions]);
 
   const pendingCount = useMemo(
     () => suggestions.filter((s) => decisions[s.id] === "pending").length,

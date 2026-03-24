@@ -3,6 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import type { ChatMessage } from "@/components/ChatBubble";
 import { fileToBase64 } from "@/lib/fileToBase64";
 import { executeGoaeChatRequest } from "@/lib/executeGoaeChatRequest";
+import {
+  assistantContentHasSseError,
+  sseAccumStateHasDeliverable,
+  sseErrorSummaryFromAssistantContent,
+} from "@/lib/goaeChatSse";
 import type { User } from "@supabase/supabase-js";
 import type { AppToastFn } from "@/hooks/use-toast";
 
@@ -46,8 +51,8 @@ type TaskSpec = { content: string; files?: File[] };
 
 function buildTaskList(content: string, files?: File[]): TaskSpec[] {
   if (!files?.length) return [{ content, files: undefined }];
-  if (files.length === 1) return [{ content, files }];
-  return files.map((f) => ({ content, files: [f] }));
+  /** One task with all files → one conversation / one job; executeGoaeChatRequest accepts multiple filePayloads. */
+  return [{ content, files }];
 }
 
 function mergePayload(
@@ -418,11 +423,28 @@ export function useBackgroundJobQueue({
           (state.invoiceData ? "Rechnungsprüfung abgeschlossen" : "") ||
           (state.serviceBillingData ? "Leistungsvorschläge erstellt" : "");
 
+        const sseFailed = assistantContentHasSseError(state.assistantContent);
+        const hasDeliverable = sseAccumStateHasDeliverable(state);
+        const jobFailed = sseFailed || !hasDeliverable;
+        if (!sseFailed && !hasDeliverable) {
+          toast({
+            title: "Keine Antwort",
+            description: "Die Analyse lieferte kein Ergebnis. Bitte versuchen Sie es erneut.",
+            variant: "destructive",
+          });
+        }
         await supabase
           .from("background_jobs")
           .update({
-            status: "completed",
+            status: jobFailed ? "failed" : "completed",
             finished_at: new Date().toISOString(),
+            ...(jobFailed
+              ? {
+                  error: sseFailed
+                    ? sseErrorSummaryFromAssistantContent(state.assistantContent)
+                    : "Keine Antwort erhalten.",
+                }
+              : { error: null }),
             progress_label: null,
             progress_step: null,
             progress_total: null,
@@ -531,8 +553,6 @@ export function useBackgroundJobQueue({
               : undefined,
         }));
 
-      let nextActiveId: string | null = activeConversationId;
-
       const { data: maxRow } = await supabase
         .from("background_jobs")
         .select("sort_order")
@@ -560,7 +580,6 @@ export function useBackgroundJobQueue({
         }
 
         if (i === 0 && !(tasks.length === 1 && activeConversationId)) {
-          nextActiveId = convId;
           setActiveConversationId(convId);
         }
 
@@ -620,18 +639,6 @@ export function useBackgroundJobQueue({
         if (filePayloads.length > 0) pendingFilePayloadsRef.current.set(jobId, filePayloads);
       }
 
-      if (tasks.length > 1 && nextActiveId) {
-        setActiveConversationId(nextActiveId);
-        const rest = await loadMessages(nextActiveId);
-        setMessages(
-          rest.map((m) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })),
-        );
-      }
-
       await fetchJobs();
       await fetchConversations();
       void drainQueue();
@@ -646,7 +653,6 @@ export function useBackgroundJobQueue({
       setMessages,
       toast,
       hasBlockingJobForConversation,
-      loadMessages,
       fetchJobs,
       fetchConversations,
       drainQueue,

@@ -102,6 +102,10 @@ export type HistoryPanelProps = {
   onMarkUnread?: (id: string) => void | Promise<void>;
   acknowledgedJobIds?: Set<string>;
   onAcknowledgeJob?: (jobId: string) => void;
+  /** Desktop: tab bar rendered in AgentsSidebar header; pass with onSidebarTabChange */
+  sidebarTab?: "chats" | "archive";
+  onSidebarTabChange?: (tab: "chats" | "archive") => void;
+  hideCompactTabBar?: boolean;
 };
 
 const HistoryPanel = ({
@@ -119,12 +123,19 @@ const HistoryPanel = ({
   onMarkUnread,
   acknowledgedJobIds,
   onAcknowledgeJob,
+  sidebarTab: sidebarTabProp,
+  onSidebarTabChange,
+  hideCompactTabBar,
 }: HistoryPanelProps) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [sidebarChatVisibleCount, setSidebarChatVisibleCount] = useState(SIDEBAR_CHAT_PAGE);
-  const [sidebarTab, setSidebarTab] = useState<"chats" | "archive">("chats");
+  const [internalSidebarTab, setInternalSidebarTab] = useState<"chats" | "archive">("chats");
   const compact = layout === "sidebar";
+  const tabControlled =
+    sidebarTabProp !== undefined && onSidebarTabChange !== undefined;
+  const sidebarTab = tabControlled ? sidebarTabProp : internalSidebarTab;
+  const setSidebarTab = tabControlled ? onSidebarTabChange : setInternalSidebarTab;
 
   useEffect(() => {
     if (compact) setSidebarChatVisibleCount(SIDEBAR_CHAT_PAGE);
@@ -174,19 +185,28 @@ const HistoryPanel = ({
   };
 
   const running = jobs.filter((j) => j.status === "running");
-  const queued = jobs.filter((j) => j.status === "queued");
   const recentDone = jobs
     .filter((j) => j.status === "completed")
     .sort((a, b) => (b.finished_at ?? "").localeCompare(a.finished_at ?? ""))
     .slice(0, compact ? 8 : 12);
 
+  /** Avoid listing the same conversation twice (JobRow + ConversationRow in the chat list). */
+  const nonArchivedChatIds = useMemo(() => new Set(nonArchived.map((c) => c.id)), [nonArchived]);
+  const runningInJobSectionOnly = useMemo(
+    () => running.filter((j) => !nonArchivedChatIds.has(j.conversation_id)),
+    [running, nonArchivedChatIds],
+  );
+  const recentDoneInJobSectionOnly = useMemo(
+    () => recentDone.filter((j) => !nonArchivedChatIds.has(j.conversation_id)),
+    [recentDone, nonArchivedChatIds],
+  );
+
   const showJobSection = !compact || sidebarTab === "chats";
 
   const hasJobBlock =
-    showJobSection && (running.length > 0 || queued.length > 0 || recentDone.length > 0);
-
-  const compactJobSublabel =
-    "text-[10px] font-medium text-muted-foreground/80 px-0.5 flex items-center gap-1";
+    !compact &&
+    showJobSection &&
+    (runningInJobSectionOnly.length > 0 || recentDoneInJobSectionOnly.length > 0);
 
   const JobRow = ({
     job,
@@ -203,96 +223,22 @@ const HistoryPanel = ({
           : job.created_at;
 
     const titleDisplay = convTitleForJobs(conversations, job.conversation_id);
-    const showDoneDot =
-      compact &&
-      variant === "done" &&
-      acknowledgedJobIds &&
-      onAcknowledgeJob &&
-      !acknowledgedJobIds.has(job.id);
 
     const handleJobOpen = () => {
       onAcknowledgeJob?.(job.id);
       onSelect(job.conversation_id);
     };
 
-    if (compact) {
-      return (
-        <div
-          className={cn(
-            "grid min-w-0 w-full grid-cols-[1rem_minmax(0,1fr)_auto_minmax(2.75rem,max-content)] items-start gap-x-1.5 rounded-lg px-2 py-2 text-sm transition-colors",
-            activeId === job.conversation_id
-              ? "bg-muted/70 dark:bg-muted/35"
-              : "bg-muted/25 dark:bg-muted/15 hover:bg-muted/45 dark:hover:bg-muted/25",
-          )}
-        >
-          <div className="flex w-4 shrink-0 justify-center pt-0.5" aria-hidden>
-            {variant === "running" && (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-            )}
-            {variant === "queued" && <ListOrdered className="h-3.5 w-3.5 text-muted-foreground" />}
-            {variant === "done" && <CircleCheck className="h-3.5 w-3.5 text-muted-foreground" />}
-          </div>
-          <button type="button" className="min-w-0 overflow-hidden text-left" onClick={handleJobOpen}>
-            <p
-              className="truncate text-xs font-medium text-foreground min-h-[1rem]"
-              aria-label={titleDisplay || "Unbenannter Chat"}
-            >
-              {titleDisplay ?? "\u00a0"}
-            </p>
-            {variant === "running" &&
-              (runStates[job.conversation_id]?.pipelineStep?.label || job.progress_label) && (
-                <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                  {runStates[job.conversation_id]?.pipelineStep?.label ?? job.progress_label}
-                </p>
-              )}
-            {variant === "queued" && (
-              <p className="mt-0.5 truncate text-[10px] text-muted-foreground">Warteschlange</p>
-            )}
-            {variant === "done" && job.payload?.assistantPreview && (
-              <p className="mt-1 line-clamp-2 break-words text-[10px] text-muted-foreground/90">
-                {job.payload.assistantPreview}
-              </p>
-            )}
-          </button>
-          <div className="flex shrink-0 justify-end pt-0.5">
-            {variant === "queued" && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0"
-                title="Aus Warteschlange entfernen"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void onCancelQueuedJob(job.id);
-                }}
-              >
-                <Ban className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
-          <div
-            className="flex w-full min-w-0 items-center justify-end gap-1 pt-0.5"
-            title={jobTimeIso ?? undefined}
-          >
-            <span className="text-right text-[10px] font-medium tabular-nums text-foreground/55 whitespace-nowrap">
-              {formatRelativeShort(jobTimeIso) || "–"}
-            </span>
-            {showDoneDot && (
-              <span
-                className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500"
-                aria-label="Erledigt, noch nicht geöffnet"
-              />
-            )}
-          </div>
-        </div>
-      );
-    }
+    const convForJob = conversations.find((c) => c.id === job.conversation_id);
+    const jobRowActionsActive = Boolean(convForJob && !convForJob.archived_at);
 
     return (
       <div
         className={cn(
-          "flex items-start gap-3 text-sm transition-colors rounded-lg px-3 py-2.5",
-          activeId === job.conversation_id ? "bg-muted/80" : "bg-muted/20 dark:bg-muted/10 hover:bg-muted/40",
+          "flex items-start gap-3 text-sm transition-colors rounded-lg border px-3 py-2.5",
+          activeId === job.conversation_id
+            ? "border-border bg-foreground/[0.115] text-foreground dark:border-border dark:bg-muted/88"
+            : "border-transparent bg-muted/20 text-muted-foreground hover:border-border/80 hover:bg-foreground/[0.065] hover:text-foreground dark:border-transparent dark:bg-muted/10 dark:hover:border-border/70 dark:hover:bg-muted/52",
         )}
       >
         <button type="button" className="flex-1 min-w-0 text-left" onClick={handleJobOpen}>
@@ -343,12 +289,15 @@ const HistoryPanel = ({
   }: {
     visual: ReturnType<typeof resolveConversationJobVisual>;
   }) => (
-    <div className="flex w-4 shrink-0 justify-center pt-0.5" aria-hidden>
-      {visual === "running" && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-      {visual === "queued" && <ListOrdered className="h-3.5 w-3.5 text-muted-foreground" />}
-      {visual === "done" && <CircleCheck className="h-3.5 w-3.5 text-muted-foreground" />}
-      {visual === "failed" && <XCircle className="h-3.5 w-3.5 text-destructive/80" />}
-      {visual === "idle" && <MessageSquare className="h-3.5 w-3.5 text-muted-foreground/55" />}
+    <div
+      className="flex w-4 shrink-0 justify-center pt-0.5 text-muted-foreground transition-colors group-hover:text-foreground/85"
+      aria-hidden
+    >
+      {visual === "running" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+      {visual === "queued" && <ListOrdered className="h-3.5 w-3.5" />}
+      {visual === "done" && <CircleCheck className="h-3.5 w-3.5" />}
+      {visual === "failed" && <XCircle className="h-3.5 w-3.5 text-destructive/80 group-hover:text-destructive" />}
+      {visual === "idle" && <MessageSquare className="h-3.5 w-3.5 opacity-70 group-hover:opacity-100" />}
     </div>
   );
 
@@ -357,21 +306,20 @@ const HistoryPanel = ({
   const ConversationRow = ({ conv, rowMode }: { conv: Conversation; rowMode: RowMode }) => {
     const jobVisual = resolveConversationJobVisual(conv.id, jobs, runStates);
     const titleDisplay = conversationListTitleDisplay(conv.title);
+    const queuedJobId = jobs.find((j) => j.conversation_id === conv.id && j.status === "queued")?.id;
 
     return (
       <div
         className={cn(
-          "group cursor-pointer text-sm transition-colors rounded-lg",
+          "group cursor-pointer text-sm transition-colors rounded-lg border",
           rowMode !== "page" &&
-            "focus-within:bg-muted/45 dark:focus-within:bg-muted/25 hover:bg-muted/45 dark:hover:bg-muted/25",
-          rowMode === "page" && "flex items-start gap-2 px-3 py-2.5 bg-muted/20 dark:bg-muted/10 hover:bg-muted/40",
-          rowMode !== "page" &&
-            "flex min-w-0 w-full items-start gap-1.5 px-2 py-2 bg-muted/25 dark:bg-muted/15",
+            "flex min-w-0 w-full items-start gap-1.5 px-2 py-2",
+          rowMode === "page" && "flex items-start gap-2 px-3 py-2.5",
           activeId === conv.id
-            ? rowMode === "page"
-              ? "bg-muted/80 text-foreground"
-              : "bg-muted/70 dark:bg-muted/35 text-foreground"
-            : rowMode === "page" && "text-muted-foreground hover:text-foreground",
+            ? "border-border bg-foreground/[0.115] text-foreground dark:border-border dark:bg-muted/88"
+            : rowMode !== "page"
+              ? "border-transparent text-muted-foreground hover:border-border/80 hover:bg-foreground/[0.065] hover:text-foreground focus-within:border-border/80 focus-within:bg-foreground/[0.065] dark:border-transparent dark:hover:border-border/70 dark:hover:bg-muted/52 dark:focus-within:border-border/70 dark:focus-within:bg-muted/52"
+              : "border-transparent bg-muted/20 text-muted-foreground hover:border-border/80 hover:bg-foreground/[0.065] hover:text-foreground dark:border-transparent dark:bg-muted/10 dark:hover:border-border/70 dark:hover:bg-muted/52",
         )}
         onClick={() => editingId !== conv.id && onSelect(conv.id)}
       >
@@ -411,6 +359,20 @@ const HistoryPanel = ({
             </div>
             {editingId !== conv.id && (
               <div className="flex shrink-0 items-center gap-0.5 self-center opacity-0 transition-opacity group-hover:opacity-100">
+                {queuedJobId && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 hover:bg-transparent"
+                    title="Aus Warteschlange entfernen"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void onCancelQueuedJob(queuedJobId);
+                    }}
+                  >
+                    <Ban className="h-3.5 w-3.5" />
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -478,7 +440,7 @@ const HistoryPanel = ({
                 )}
                 title={conv.updated_at}
               >
-                <span className="text-right text-[10px] font-medium tabular-nums text-foreground/55 whitespace-nowrap">
+                <span className="text-right text-[10px] font-medium tabular-nums text-foreground/55 whitespace-nowrap transition-colors group-hover:text-foreground/85">
                   {formatRelativeShort(conv.updated_at) || "–"}
                 </span>
                 {conv.marked_unread && (
@@ -490,23 +452,34 @@ const HistoryPanel = ({
               </div>
               <div
                 className={cn(
-                  "absolute inset-y-0 right-0 flex items-center gap-px opacity-0 transition-opacity duration-150",
+                  "absolute inset-y-0 right-1 flex items-center gap-px opacity-0 transition-opacity duration-150",
                   "group-hover:opacity-100 group-focus-within:opacity-100",
                   "pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto",
                 )}
               >
+                {rowMode === "compact-active" && queuedJobId && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0 text-muted-foreground/55 hover:bg-muted/18 hover:text-foreground dark:text-muted-foreground/50 dark:hover:bg-muted/22 dark:hover:text-foreground"
+                    title="Aus Warteschlange entfernen"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void onCancelQueuedJob(queuedJobId);
+                    }}
+                  >
+                    <Ban className="h-2.5 w-2.5" />
+                  </Button>
+                )}
                 {rowMode === "compact-active" && onArchive && (
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 shrink-0 text-muted-foreground/45 hover:bg-muted/50 hover:text-muted-foreground"
+                    className="h-6 w-6 shrink-0 text-muted-foreground/55 hover:bg-muted/18 hover:text-foreground dark:text-muted-foreground/50 dark:hover:bg-muted/22 dark:hover:text-foreground"
                     title="Archivieren"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void (async () => {
-                        await Promise.resolve(onArchive(conv.id));
-                        if (compact) setSidebarTab("archive");
-                      })();
+                      void Promise.resolve(onArchive(conv.id));
                     }}
                   >
                     <Archive className="h-2.5 w-2.5" />
@@ -516,14 +489,11 @@ const HistoryPanel = ({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 shrink-0 text-muted-foreground/45 hover:bg-muted/50 hover:text-muted-foreground"
+                    className="h-6 w-6 shrink-0 text-muted-foreground/55 hover:bg-muted/18 hover:text-foreground dark:text-muted-foreground/50 dark:hover:bg-muted/22 dark:hover:text-foreground"
                     title="Wiederherstellen"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void (async () => {
-                        await Promise.resolve(onRestore(conv.id));
-                        if (compact) setSidebarTab("chats");
-                      })();
+                      void Promise.resolve(onRestore(conv.id));
                     }}
                   >
                     <ArchiveRestore className="h-2.5 w-2.5" />
@@ -534,7 +504,7 @@ const HistoryPanel = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 shrink-0 text-muted-foreground/45 hover:bg-muted/50 hover:text-muted-foreground"
+                      className="h-6 w-6 shrink-0 text-muted-foreground/55 hover:bg-muted/18 hover:text-foreground dark:text-muted-foreground/50 dark:hover:bg-muted/22 dark:hover:text-foreground"
                       title="Mehr"
                       onClick={(e) => e.stopPropagation()}
                     >
@@ -616,12 +586,7 @@ const HistoryPanel = ({
   const jobSectionTitle =
     "text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60 pl-1";
 
-  const showFailedBanner = showJobSection && failed > 0;
-  const compactChatsListNeedsTopMargin =
-    compact &&
-    sidebarTab === "chats" &&
-    nonArchived.length > 0 &&
-    (hasJobBlock || showFailedBanner);
+  const showFailedBanner = showJobSection && failed > 0 && !compact;
 
   const chatsListPagination =
     (sidebarChatVisibleCount < sortedChatsForSidebar.length ||
@@ -631,7 +596,7 @@ const HistoryPanel = ({
           {sidebarChatVisibleCount > SIDEBAR_CHAT_PAGE && (
             <button
               type="button"
-              className="inline-flex items-center gap-1 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/45 transition-colors px-2"
+              className="inline-flex items-center gap-1 rounded-md border border-transparent px-2 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:border-border/55 hover:bg-muted/12 hover:text-foreground dark:hover:bg-muted/18"
               onClick={() =>
                 setSidebarChatVisibleCount((n) => Math.max(n - SIDEBAR_CHAT_PAGE, SIDEBAR_CHAT_PAGE))
               }
@@ -645,7 +610,7 @@ const HistoryPanel = ({
           {sidebarChatVisibleCount < sortedChatsForSidebar.length && (
             <button
               type="button"
-              className="inline-flex items-center gap-1 py-2 text-right text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/45 transition-colors px-2"
+              className="inline-flex items-center gap-1 rounded-md border border-transparent px-2 py-2 text-right text-xs font-medium text-muted-foreground transition-colors hover:border-border/55 hover:bg-muted/12 hover:text-foreground dark:hover:bg-muted/18"
               onClick={() =>
                 setSidebarChatVisibleCount((n) => Math.min(n + SIDEBAR_CHAT_PAGE, sortedChatsForSidebar.length))
               }
@@ -660,15 +625,15 @@ const HistoryPanel = ({
 
   return (
     <div className={cn("min-w-0 space-y-4", !compact && "space-y-8")}>
-      {compact && (
-        <div className="flex gap-1 rounded-lg bg-muted/40 p-0.5">
+      {compact && !hideCompactTabBar && (
+        <div className="flex min-w-0 gap-1.5">
           <button
             type="button"
             className={cn(
-              "flex-1 rounded-md py-1.5 text-xs font-medium transition-colors",
+              "flex-1 rounded-lg border py-1.5 text-xs font-medium shadow-none transition-colors",
               sidebarTab === "chats"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
+                ? "border-border bg-foreground/[0.115] text-foreground dark:border-border dark:bg-muted/88"
+                : "border-border/55 text-muted-foreground hover:border-border/80 hover:bg-foreground/[0.065] hover:text-foreground dark:border-border/50 dark:hover:border-border/70 dark:hover:bg-muted/52 dark:hover:text-foreground",
             )}
             onClick={() => setSidebarTab("chats")}
           >
@@ -677,10 +642,10 @@ const HistoryPanel = ({
           <button
             type="button"
             className={cn(
-              "flex-1 rounded-md py-1.5 text-xs font-medium transition-colors",
+              "flex-1 rounded-lg border py-1.5 text-xs font-medium shadow-none transition-colors",
               sidebarTab === "archive"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
+                ? "border-border bg-foreground/[0.115] text-foreground dark:border-border dark:bg-muted/88"
+                : "border-border/55 text-muted-foreground hover:border-border/80 hover:bg-foreground/[0.065] hover:text-foreground dark:border-border/50 dark:hover:border-border/70 dark:hover:bg-muted/52 dark:hover:text-foreground",
             )}
             onClick={() => setSidebarTab("archive")}
           >
@@ -694,31 +659,30 @@ const HistoryPanel = ({
           {hasJobBlock && (
             <div className="space-y-6">
               <p className={jobSectionTitle}>Chats</p>
-              {running.length > 0 && (
+              {runningInJobSectionOnly.length > 0 && (
                 <div className="space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                     <Loader2 className="w-3.5 h-3.5" />
                     Läuft
                   </p>
-                  <div className="space-y-1.5">{running.map((j) => <JobRow key={j.id} job={j} variant="running" />)}</div>
+                  <div className="space-y-1.5">
+                    {runningInJobSectionOnly.map((j) => (
+                      <JobRow key={j.id} job={j} variant="running" />
+                    ))}
+                  </div>
                 </div>
               )}
-              {queued.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                    <ListOrdered className="w-3.5 h-3.5" />
-                    Warteschlange
-                  </p>
-                  <div className="space-y-1.5">{queued.map((j) => <JobRow key={j.id} job={j} variant="queued" />)}</div>
-                </div>
-              )}
-              {recentDone.length > 0 && (
+              {recentDoneInJobSectionOnly.length > 0 && (
                 <div className="space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                     <CircleCheck className="w-3.5 h-3.5" />
                     Zuletzt fertig
                   </p>
-                  <div className="space-y-1.5">{recentDone.map((j) => <JobRow key={j.id} job={j} variant="done" />)}</div>
+                  <div className="space-y-1.5">
+                    {recentDoneInJobSectionOnly.map((j) => (
+                      <JobRow key={j.id} job={j} variant="done" />
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -742,60 +706,22 @@ const HistoryPanel = ({
           </div>
         </>
       ) : sidebarTab === "chats" ? (
-        <>
-          {hasJobBlock && (
-            <div className="space-y-1.5">
-              {running.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className={compactJobSublabel}>
-                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
-                    Läuft
-                  </p>
-                  <div className="space-y-1.5">{running.map((j) => <JobRow key={j.id} job={j} variant="running" />)}</div>
-                </div>
-              )}
-              {queued.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className={compactJobSublabel}>
-                    <ListOrdered className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    Warteschlange
-                  </p>
-                  <div className="space-y-1.5">{queued.map((j) => <JobRow key={j.id} job={j} variant="queued" />)}</div>
-                </div>
-              )}
-              {recentDone.length > 0 && (
-                <div className="space-y-1.5">
-                  {recentDone.map((j) => (
-                    <JobRow key={j.id} job={j} variant="done" />
-                  ))}
-                </div>
-              )}
-            </div>
+        <div>
+          {nonArchived.length === 0 ? (
+            <p className="text-xs text-muted-foreground/80 text-center py-8">Noch keine Chats</p>
+          ) : (
+            <>
+              <div className="min-w-0 space-y-1.5">
+                {visibleSidebarChats.map((conv) => (
+                  <ConversationRow key={conv.id} conv={conv} rowMode="compact-active" />
+                ))}
+              </div>
+              {chatsListPagination}
+            </>
           )}
-          {showFailedBanner && (
-            <p className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1.5 pl-0.5">
-              <XCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>{failed} abgebrochen/fehlgeschlagen</span>
-            </p>
-          )}
-          <div className={cn(compactChatsListNeedsTopMargin && "mt-3")}>
-            {nonArchived.length === 0 && !hasJobBlock ? (
-              <p className="text-xs text-muted-foreground/80 text-center py-8">Noch keine Chats</p>
-            ) : nonArchived.length > 0 ? (
-              <>
-                <div className="min-w-0 space-y-1.5">
-                  {visibleSidebarChats.map((conv) => (
-                    <ConversationRow key={conv.id} conv={conv} rowMode="compact-active" />
-                  ))}
-                </div>
-                {chatsListPagination}
-              </>
-            ) : null}
-          </div>
-        </>
+        </div>
       ) : (
         <>
-          <p className={cn(sectionLabel, "mb-2")}>Archiv</p>
           {archivedOnly.length === 0 ? (
             <p className="text-xs text-muted-foreground/80 text-center py-8">Archiv ist leer</p>
           ) : (

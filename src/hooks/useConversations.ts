@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 
 export type Conversation = {
   id: string;
@@ -22,6 +23,7 @@ export type DbMessage = {
 
 export const useConversations = () => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -114,18 +116,44 @@ export const useConversations = () => {
 
   const archiveConversation = useCallback(
     async (id: string) => {
-      await supabase.from("conversations").update({ archived_at: new Date().toISOString() }).eq("id", id);
+      if (!user) return;
+      const { error } = await supabase
+        .from("conversations")
+        .update({ archived_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("user_id", user.id);
+      if (error) {
+        toast({
+          title: "Archivieren fehlgeschlagen",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
       await fetchConversations();
     },
-    [fetchConversations]
+    [user, fetchConversations, toast]
   );
 
   const restoreConversation = useCallback(
     async (id: string) => {
-      await supabase.from("conversations").update({ archived_at: null }).eq("id", id);
+      if (!user) return;
+      const { error } = await supabase
+        .from("conversations")
+        .update({ archived_at: null })
+        .eq("id", id)
+        .eq("user_id", user.id);
+      if (error) {
+        toast({
+          title: "Wiederherstellen fehlgeschlagen",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
       await fetchConversations();
     },
-    [fetchConversations]
+    [user, fetchConversations, toast]
   );
 
   const markConversationUnread = useCallback(

@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState } from "react";
+import { useRef, useCallback, useEffect, useState, forwardRef, useImperativeHandle } from "react";
 import { Send, Square, Paperclip, X, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,23 @@ type ChatInputProps = {
   onSend: (message: string, files?: File[]) => void;
   isLoading: boolean;
   onStop?: () => void;
+  /** Shown in title/tooltip, e.g. "Strg+U" */
+  attachmentShortcutHint?: string;
+  stopShortcutHint?: string;
 };
+
+export type ChatInputHandle = {
+  openAttachmentPicker: () => void;
+};
+
+/** Outer height of the composer card when there are no file chips (border + py-3 + input row with min-h-[44px]). */
+export const CHAT_COMPOSER_OUTER_HEIGHT_CLASS = "h-[70px]";
+
+/** Shared bottom dock rhythm: Index composer strip + AgentsSidebar „Neuer Chat“ footer. */
+export const CHAT_COMPOSER_DOCK_BOTTOM_PAD = "pb-10";
+export const CHAT_COMPOSER_DOCK_BELOW_CARD = "mt-1.5 min-h-8";
+/** Same top inset on dock + sidebar footer so „Neuer Chat“ and composer tops stay aligned. */
+export const CHAT_COMPOSER_DOCK_TOP_PAD = "pt-3";
 
 const ALLOWED_TYPES = [
   "application/pdf",
@@ -18,11 +34,18 @@ const ALLOWED_TYPES = [
 
 const ALLOWED_EXT = /\.(jpe?g|png|gif|bmp|tiff?|heic|pdf)$/i;
 
-const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
+const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
+  { onSend, isLoading, onStop, attachmentShortcutHint, stopShortcutHint },
+  ref,
+) {
   const { text, setText, files, addFiles, removeFile, clearDraft } = useDraft();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewFile, setPreviewFile] = useState<{ src: string; name: string; type: string } | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    openAttachmentPicker: () => fileInputRef.current?.click(),
+  }), []);
 
   // Restore textarea height when component remounts with existing text
   useEffect(() => {
@@ -218,7 +241,7 @@ const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
 
       <div className="absolute -inset-2 rounded-2xl bg-accent/8 blur-xl" />
       <div
-        className="relative bg-card border border-border rounded-xl shadow-sm px-4 py-3"
+        className="relative bg-card border border-border rounded-xl px-4 py-3"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleFileDrop}
       >
@@ -249,7 +272,11 @@ const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
         <button
           onClick={() => fileInputRef.current?.click()}
           className="flex-shrink-0 p-1.5 sm:p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-          title="Datei hochladen (PDF, JPEG, PNG, GIF, BMP, TIFF, HEIC)"
+          title={
+            attachmentShortcutHint
+              ? `Datei hochladen (PDF, JPEG, PNG, GIF, BMP, TIFF, HEIC) — ${attachmentShortcutHint}`
+              : "Datei hochladen (PDF, JPEG, PNG, GIF, BMP, TIFF, HEIC)"
+          }
         >
           <Paperclip className="w-5 h-5" />
         </button>
@@ -264,6 +291,7 @@ const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
 
         <textarea
           ref={textareaRef}
+          data-composer-chat="true"
           value={text}
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
@@ -283,7 +311,7 @@ const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
             size="icon"
             variant="ghost"
             className="flex-shrink-0 rounded-full h-10 w-10 sm:h-11 sm:w-11 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-            title="Analyse stoppen"
+            title={stopShortcutHint ? `Analyse stoppen — ${stopShortcutHint}` : "Analyse stoppen"}
             aria-label="Analyse stoppen"
           >
             <Square className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
@@ -302,6 +330,6 @@ const ChatInput = ({ onSend, isLoading, onStop }: ChatInputProps) => {
     </div>
     </div>
   );
-};
+});
 
 export default ChatInput;
