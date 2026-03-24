@@ -71,7 +71,9 @@ CREATE POLICY "Users can delete own settings"
 CREATE TABLE IF NOT EXISTS public.conversations (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID NOT NULL,
-  title TEXT NOT NULL DEFAULT 'Neues Gespräch',
+  title TEXT NOT NULL DEFAULT '',
+  archived_at TIMESTAMP WITH TIME ZONE NULL,
+  marked_unread BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );

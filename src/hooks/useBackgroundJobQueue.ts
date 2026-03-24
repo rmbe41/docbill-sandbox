@@ -550,9 +550,7 @@ export function useBackgroundJobQueue({
           convId = activeConversationId;
         } else {
           const title =
-            spec.files?.[0]?.name?.replace(/\.[^.]+$/, "") ||
-            spec.content.slice(0, 60) ||
-            "Neues Gespräch";
+            spec.files?.[0]?.name?.replace(/\.[^.]+$/, "") || spec.content.slice(0, 60) || "";
           convId = await createConversation(title);
         }
 

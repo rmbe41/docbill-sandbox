@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Trash2,
   Pencil,
@@ -9,15 +9,34 @@ import {
   XCircle,
   Ban,
   MessageSquare,
+  Archive,
+  ArchiveRestore,
+  MoreHorizontal,
+  Mail,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { Conversation } from "@/hooks/useConversations";
 import type { BackgroundJobRow, ConversationRunInfo } from "@/hooks/useBackgroundJobQueue";
 import { isToday, isYesterday } from "date-fns";
 
 const SIDEBAR_CHAT_PAGE = 10;
+
+/** Visible title in lists; legacy DB default treated as empty. */
+export function conversationListTitleDisplay(title: string | null | undefined): string | null {
+  const t = (title ?? "").trim();
+  if (!t || t === "Neues Gespräch") return null;
+  return t;
+}
 
 function resolveConversationJobVisual(
   convId: string,
@@ -45,8 +64,9 @@ function groupByDate(conversations: Conversation[]) {
   return { today, yesterday, earlier };
 }
 
-function convTitle(conversations: Conversation[], conversationId: string) {
-  return conversations.find((c) => c.id === conversationId)?.title ?? "Gespräch";
+function convTitleForJobs(conversations: Conversation[], conversationId: string): string | null {
+  const raw = conversations.find((c) => c.id === conversationId)?.title;
+  return conversationListTitleDisplay(raw);
 }
 
 /** Cursor-style relative time: XXm (minutes), XXh (hours), XXd (days), then short date. */
@@ -77,6 +97,11 @@ export type HistoryPanelProps = {
   runStates: Record<string, ConversationRunInfo>;
   onCancelQueuedJob: (jobId: string) => void;
   layout: "page" | "sidebar";
+  onArchive?: (id: string) => void | Promise<void>;
+  onRestore?: (id: string) => void | Promise<void>;
+  onMarkUnread?: (id: string) => void | Promise<void>;
+  acknowledgedJobIds?: Set<string>;
+  onAcknowledgeJob?: (jobId: string) => void;
 };
 
 const HistoryPanel = ({
@@ -89,18 +114,40 @@ const HistoryPanel = ({
   runStates,
   onCancelQueuedJob,
   layout,
+  onArchive,
+  onRestore,
+  onMarkUnread,
+  acknowledgedJobIds,
+  onAcknowledgeJob,
 }: HistoryPanelProps) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [sidebarChatVisibleCount, setSidebarChatVisibleCount] = useState(SIDEBAR_CHAT_PAGE);
+  const [sidebarTab, setSidebarTab] = useState<"chats" | "archive">("chats");
   const compact = layout === "sidebar";
+
+  useEffect(() => {
+    if (compact) setSidebarChatVisibleCount(SIDEBAR_CHAT_PAGE);
+  }, [compact, sidebarTab]);
+
+  const nonArchived = useMemo(
+    () => conversations.filter((c) => !c.archived_at),
+    [conversations],
+  );
+  const archivedOnly = useMemo(
+    () => conversations.filter((c) => c.archived_at),
+    [conversations],
+  );
+
+  const conversationsForPage = nonArchived;
 
   const sortedChatsForSidebar = useMemo(() => {
     if (!compact) return [];
-    return [...conversations].sort(
+    const pool = sidebarTab === "chats" ? nonArchived : archivedOnly;
+    return [...pool].sort(
       (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
     );
-  }, [compact, conversations]);
+  }, [compact, nonArchived, archivedOnly, sidebarTab]);
 
   const visibleSidebarChats = useMemo(() => {
     if (!compact) return [];
@@ -114,7 +161,7 @@ const HistoryPanel = ({
   };
 
   const saveEdit = () => {
-    if (editingId && editValue.trim()) {
+    if (editingId) {
       onRename(editingId, editValue.trim());
     }
     setEditingId(null);
@@ -133,6 +180,14 @@ const HistoryPanel = ({
     .sort((a, b) => (b.finished_at ?? "").localeCompare(a.finished_at ?? ""))
     .slice(0, compact ? 8 : 12);
 
+  const showJobSection = !compact || sidebarTab === "chats";
+
+  const hasJobBlock =
+    showJobSection && (running.length > 0 || queued.length > 0 || recentDone.length > 0);
+
+  const compactJobSublabel =
+    "text-[10px] font-medium text-muted-foreground/80 px-0.5 flex items-center gap-1";
+
   const JobRow = ({
     job,
     variant,
@@ -146,6 +201,19 @@ const HistoryPanel = ({
         : variant === "running"
           ? job.started_at ?? job.created_at
           : job.created_at;
+
+    const titleDisplay = convTitleForJobs(conversations, job.conversation_id);
+    const showDoneDot =
+      compact &&
+      variant === "done" &&
+      acknowledgedJobIds &&
+      onAcknowledgeJob &&
+      !acknowledgedJobIds.has(job.id);
+
+    const handleJobOpen = () => {
+      onAcknowledgeJob?.(job.id);
+      onSelect(job.conversation_id);
+    };
 
     if (compact) {
       return (
@@ -164,13 +232,12 @@ const HistoryPanel = ({
             {variant === "queued" && <ListOrdered className="h-3.5 w-3.5 text-muted-foreground" />}
             {variant === "done" && <CircleCheck className="h-3.5 w-3.5 text-muted-foreground" />}
           </div>
-          <button
-            type="button"
-            className="min-w-0 overflow-hidden text-left"
-            onClick={() => onSelect(job.conversation_id)}
-          >
-            <p className="truncate text-xs font-medium text-foreground">
-              {convTitle(conversations, job.conversation_id)}
+          <button type="button" className="min-w-0 overflow-hidden text-left" onClick={handleJobOpen}>
+            <p
+              className="truncate text-xs font-medium text-foreground min-h-[1rem]"
+              aria-label={titleDisplay || "Unbenannter Chat"}
+            >
+              {titleDisplay ?? "\u00a0"}
             </p>
             {variant === "running" &&
               (runStates[job.conversation_id]?.pipelineStep?.label || job.progress_label) && (
@@ -203,12 +270,20 @@ const HistoryPanel = ({
               </Button>
             )}
           </div>
-          <span
-            className="w-full pt-0.5 text-right text-[10px] font-medium tabular-nums text-foreground/55 whitespace-nowrap"
+          <div
+            className="flex w-full min-w-0 items-center justify-end gap-1 pt-0.5"
             title={jobTimeIso ?? undefined}
           >
-            {formatRelativeShort(jobTimeIso) || "–"}
-          </span>
+            <span className="text-right text-[10px] font-medium tabular-nums text-foreground/55 whitespace-nowrap">
+              {formatRelativeShort(jobTimeIso) || "–"}
+            </span>
+            {showDoneDot && (
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500"
+                aria-label="Erledigt, noch nicht geöffnet"
+              />
+            )}
+          </div>
         </div>
       );
     }
@@ -220,12 +295,8 @@ const HistoryPanel = ({
           activeId === job.conversation_id ? "bg-muted/80" : "bg-muted/20 dark:bg-muted/10 hover:bg-muted/40",
         )}
       >
-        <button
-          type="button"
-          className="flex-1 min-w-0 text-left"
-          onClick={() => onSelect(job.conversation_id)}
-        >
-          <p className="truncate font-medium text-sm">{convTitle(conversations, job.conversation_id)}</p>
+        <button type="button" className="flex-1 min-w-0 text-left" onClick={handleJobOpen}>
+          <p className="truncate font-medium text-sm">{titleDisplay ?? "\u00a0"}</p>
           {variant === "running" &&
             (runStates[job.conversation_id]?.pipelineStep?.label || job.progress_label) && (
               <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
@@ -281,25 +352,93 @@ const HistoryPanel = ({
     </div>
   );
 
-  const ConversationRow = ({ conv }: { conv: Conversation }) => {
+  type RowMode = "page" | "compact-active" | "compact-archived";
+
+  const ConversationRow = ({ conv, rowMode }: { conv: Conversation; rowMode: RowMode }) => {
     const jobVisual = resolveConversationJobVisual(conv.id, jobs, runStates);
+    const titleDisplay = conversationListTitleDisplay(conv.title);
+
     return (
-    <div
-      className={cn(
-        "group cursor-pointer text-sm transition-colors rounded-lg",
-        compact
-          ? "flex min-w-0 w-full items-start gap-1.5 px-2 py-2 bg-muted/25 dark:bg-muted/15 hover:bg-muted/45 dark:hover:bg-muted/25"
-          : "flex items-start gap-2 px-3 py-2.5 bg-muted/20 dark:bg-muted/10 hover:bg-muted/40",
-        activeId === conv.id
-          ? compact
-            ? "bg-muted/70 dark:bg-muted/35 text-foreground"
-            : "bg-muted/80 text-foreground"
-          : !compact && "text-muted-foreground hover:text-foreground",
-      )}
-      onClick={() => editingId !== conv.id && onSelect(conv.id)}
-    >
-      {compact ? (
-        editingId === conv.id ? (
+      <div
+        className={cn(
+          "group cursor-pointer text-sm transition-colors rounded-lg",
+          rowMode !== "page" &&
+            "focus-within:bg-muted/45 dark:focus-within:bg-muted/25 hover:bg-muted/45 dark:hover:bg-muted/25",
+          rowMode === "page" && "flex items-start gap-2 px-3 py-2.5 bg-muted/20 dark:bg-muted/10 hover:bg-muted/40",
+          rowMode !== "page" &&
+            "flex min-w-0 w-full items-start gap-1.5 px-2 py-2 bg-muted/25 dark:bg-muted/15",
+          activeId === conv.id
+            ? rowMode === "page"
+              ? "bg-muted/80 text-foreground"
+              : "bg-muted/70 dark:bg-muted/35 text-foreground"
+            : rowMode === "page" && "text-muted-foreground hover:text-foreground",
+        )}
+        onClick={() => editingId !== conv.id && onSelect(conv.id)}
+      >
+        {rowMode === "page" ? (
+          <>
+            <ConversationStatusGlyph visual={jobVisual} />
+            <div className="min-w-0 flex-1">
+              {editingId === conv.id ? (
+                <Input
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onBlur={saveEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveEdit();
+                    if (e.key === "Escape") cancelEdit();
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-8 text-sm"
+                  autoFocus
+                />
+              ) : (
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="truncate text-sm font-medium min-h-[1.25rem]"
+                    aria-label={titleDisplay || "Unbenannter Chat"}
+                  >
+                    {titleDisplay ?? "\u00a0"}
+                  </p>
+                  {conv.source_filename && (
+                    <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground/80">
+                      <FileText className="h-3 w-3 shrink-0" />
+                      <span className="min-w-0 truncate">{conv.source_filename}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+            {editingId !== conv.id && (
+              <div className="flex shrink-0 items-center gap-0.5 self-center opacity-0 transition-opacity group-hover:opacity-100">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:bg-transparent"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startEdit(conv);
+                  }}
+                  title="Umbenennen"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:bg-transparent"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(conv.id);
+                  }}
+                  title="Löschen"
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </div>
+            )}
+          </>
+        ) : editingId === conv.id ? (
           <Input
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
@@ -313,111 +452,149 @@ const HistoryPanel = ({
             autoFocus
           />
         ) : (
-          <div className="grid min-w-0 w-full grid-cols-[1rem_minmax(0,1fr)_minmax(2.75rem,max-content)_auto] items-start gap-x-1.5">
+          <div className="grid min-w-0 w-full grid-cols-[1rem_minmax(0,1fr)_minmax(4.75rem,auto)] items-start gap-x-1.5">
             <ConversationStatusGlyph visual={jobVisual} />
             <div className="min-w-0 overflow-hidden">
-              <p className="truncate text-xs font-medium text-foreground">{conv.title}</p>
-              {conv.source_filename && (
-                <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground/80">
-                  <FileText className="h-3 w-3 shrink-0" />
-                  <span className="min-w-0 truncate">{conv.source_filename}</span>
-                </p>
-              )}
-            </div>
-            <span
-              className="w-full text-right text-[10px] font-medium tabular-nums text-foreground/55 whitespace-nowrap"
-              title={conv.updated_at}
-            >
-              {formatRelativeShort(conv.updated_at) || "–"}
-            </span>
-            <div className="flex items-center justify-end gap-0.5">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 hover:bg-transparent"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  startEdit(conv);
-                }}
-                title="Umbenennen"
-              >
-                <Pencil className="h-3 w-3" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 hover:bg-transparent"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(conv.id);
-                }}
-                title="Löschen"
-              >
-                <Trash2 className="h-3 w-3 text-destructive" />
-              </Button>
-            </div>
-          </div>
-        )
-      ) : (
-        <>
-          <ConversationStatusGlyph visual={jobVisual} />
-          <div className="min-w-0 flex-1">
-            {editingId === conv.id ? (
-              <Input
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={saveEdit}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") saveEdit();
-                  if (e.key === "Escape") cancelEdit();
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="h-8 text-sm"
-                autoFocus
-              />
-            ) : (
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{conv.title}</p>
+                <p
+                  className="truncate text-xs font-medium min-h-[1rem] text-foreground"
+                  aria-label={titleDisplay || "Unbenannter Chat"}
+                >
+                  {titleDisplay ?? "\u00a0"}
+                </p>
                 {conv.source_filename && (
-                  <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground/80">
+                  <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground/80">
                     <FileText className="h-3 w-3 shrink-0" />
                     <span className="min-w-0 truncate">{conv.source_filename}</span>
                   </p>
                 )}
               </div>
-            )}
-          </div>
-          {editingId !== conv.id && (
-            <div className="flex shrink-0 items-center gap-0.5 self-center opacity-0 transition-opacity group-hover:opacity-100">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hover:bg-transparent"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  startEdit(conv);
-                }}
-                title="Umbenennen"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hover:bg-transparent"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(conv.id);
-                }}
-                title="Löschen"
-              >
-                <Trash2 className="h-3.5 w-3.5 text-destructive" />
-              </Button>
             </div>
-          )}
-        </>
-      )}
-    </div>
+            <div className="relative flex h-4 min-w-[4.75rem] shrink-0 items-center justify-end self-start pt-0.5">
+              <div
+                className={cn(
+                  "flex items-center justify-end gap-1 transition-opacity duration-150",
+                  "group-hover:opacity-0 group-hover:pointer-events-none group-focus-within:opacity-0 group-focus-within:pointer-events-none",
+                )}
+                title={conv.updated_at}
+              >
+                <span className="text-right text-[10px] font-medium tabular-nums text-foreground/55 whitespace-nowrap">
+                  {formatRelativeShort(conv.updated_at) || "–"}
+                </span>
+                {conv.marked_unread && (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500"
+                    aria-label="Ungelesen"
+                  />
+                )}
+              </div>
+              <div
+                className={cn(
+                  "absolute inset-y-0 right-0 flex items-center gap-px opacity-0 transition-opacity duration-150",
+                  "group-hover:opacity-100 group-focus-within:opacity-100",
+                  "pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto",
+                )}
+              >
+                {rowMode === "compact-active" && onArchive && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0 text-muted-foreground/45 hover:bg-muted/50 hover:text-muted-foreground"
+                    title="Archivieren"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void (async () => {
+                        await Promise.resolve(onArchive(conv.id));
+                        if (compact) setSidebarTab("archive");
+                      })();
+                    }}
+                  >
+                    <Archive className="h-2.5 w-2.5" />
+                  </Button>
+                )}
+                {rowMode === "compact-archived" && onRestore && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0 text-muted-foreground/45 hover:bg-muted/50 hover:text-muted-foreground"
+                    title="Wiederherstellen"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void (async () => {
+                        await Promise.resolve(onRestore(conv.id));
+                        if (compact) setSidebarTab("chats");
+                      })();
+                    }}
+                  >
+                    <ArchiveRestore className="h-2.5 w-2.5" />
+                  </Button>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 text-muted-foreground/45 hover:bg-muted/50 hover:text-muted-foreground"
+                      title="Mehr"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreHorizontal className="h-2.5 w-2.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+                    {rowMode === "compact-active" && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEdit(conv);
+                          }}
+                        >
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Umbenennen
+                        </DropdownMenuItem>
+                        {onMarkUnread && (
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void Promise.resolve(onMarkUnread(conv.id));
+                            }}
+                          >
+                            <Mail className="mr-2 h-3.5 w-3.5" />
+                            Als ungelesen markieren
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          className="text-destructive data-[highlighted]:bg-destructive/12 data-[highlighted]:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(conv.id);
+                          }}
+                        >
+                          <Trash2 className="mr-2 h-3.5 w-3.5" />
+                          Löschen
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {rowMode === "compact-archived" && (
+                      <DropdownMenuItem
+                        className="text-destructive data-[highlighted]:bg-destructive/12 data-[highlighted]:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(conv.id);
+                        }}
+                      >
+                        <Trash2 className="mr-2 h-3.5 w-3.5" />
+                        Löschen
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -427,123 +604,212 @@ const HistoryPanel = ({
         <p className={sectionLabel}>{label}</p>
         <div className="space-y-1.5">
           {items.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} />
+            <ConversationRow key={conv.id} conv={conv} rowMode="page" />
           ))}
         </div>
       </div>
     );
 
-  const { today, yesterday, earlier } = groupByDate(conversations);
+  const { today, yesterday, earlier } = groupByDate(conversationsForPage);
   const failed = jobs.filter((j) => j.status === "failed" || j.status === "cancelled").length;
 
-  const jobSectionTitle = compact
-    ? "text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 px-0.5"
-    : "text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60 pl-1";
+  const jobSectionTitle =
+    "text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60 pl-1";
+
+  const showFailedBanner = showJobSection && failed > 0;
+  const compactChatsListNeedsTopMargin =
+    compact &&
+    sidebarTab === "chats" &&
+    nonArchived.length > 0 &&
+    (hasJobBlock || showFailedBanner);
+
+  const chatsListPagination =
+    (sidebarChatVisibleCount < sortedChatsForSidebar.length ||
+      sidebarChatVisibleCount > SIDEBAR_CHAT_PAGE) && (
+      <div className="mt-2 flex w-full items-center justify-between gap-2 px-3">
+        <div className="min-w-0 flex-1 flex justify-start">
+          {sidebarChatVisibleCount > SIDEBAR_CHAT_PAGE && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/45 transition-colors px-2"
+              onClick={() =>
+                setSidebarChatVisibleCount((n) => Math.max(n - SIDEBAR_CHAT_PAGE, SIDEBAR_CHAT_PAGE))
+              }
+            >
+              <ChevronUp className="h-3 w-3 shrink-0" aria-hidden />
+              Weniger
+            </button>
+          )}
+        </div>
+        <div className="min-w-0 flex-1 flex justify-end">
+          {sidebarChatVisibleCount < sortedChatsForSidebar.length && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 py-2 text-right text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/45 transition-colors px-2"
+              onClick={() =>
+                setSidebarChatVisibleCount((n) => Math.min(n + SIDEBAR_CHAT_PAGE, sortedChatsForSidebar.length))
+              }
+            >
+              Mehr
+              <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
+            </button>
+          )}
+        </div>
+      </div>
+    );
 
   return (
     <div className={cn("min-w-0 space-y-4", !compact && "space-y-8")}>
-      {(running.length > 0 || queued.length > 0 || recentDone.length > 0) && (
-        <div className={cn(!compact && "space-y-6")}>
-          <p className={jobSectionTitle}>{compact ? "Aufgaben" : "Hintergrund-Aufgaben"}</p>
-          {running.length > 0 && (
-            <div className={cn("space-y-1.5", compact && "mt-2")}>
-              {!compact && (
-                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                  <Loader2 className="w-3.5 h-3.5" />
-                  Läuft
-                </p>
-              )}
-              <div className="space-y-1.5">{running.map((j) => <JobRow key={j.id} job={j} variant="running" />)}</div>
-            </div>
-          )}
-          {queued.length > 0 && (
-            <div className={cn("space-y-1.5", compact && "mt-2")}>
-              {!compact && (
-                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                  <ListOrdered className="w-3.5 h-3.5" />
-                  Warteschlange
-                </p>
-              )}
-              <div className="space-y-1.5">{queued.map((j) => <JobRow key={j.id} job={j} variant="queued" />)}</div>
-            </div>
-          )}
-          {recentDone.length > 0 && (
-            <div className={cn("space-y-1.5", compact && "mt-2")}>
-              {!compact && (
-                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                  <CircleCheck className="w-3.5 h-3.5" />
-                  Zuletzt fertig
-                </p>
-              )}
-              {compact && (
-                <p className="text-[10px] font-medium text-muted-foreground/80 px-0.5">Abgeschlossen</p>
-              )}
-              <div className="space-y-1.5">{recentDone.map((j) => <JobRow key={j.id} job={j} variant="done" />)}</div>
-            </div>
-          )}
+      {compact && (
+        <div className="flex gap-1 rounded-lg bg-muted/40 p-0.5">
+          <button
+            type="button"
+            className={cn(
+              "flex-1 rounded-md py-1.5 text-xs font-medium transition-colors",
+              sidebarTab === "chats"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setSidebarTab("chats")}
+          >
+            Chats
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "flex-1 rounded-md py-1.5 text-xs font-medium transition-colors",
+              sidebarTab === "archive"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setSidebarTab("archive")}
+          >
+            Archiv
+          </button>
         </div>
       )}
 
-      {failed > 0 && (
-        <p className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1.5 pl-0.5">
-          <XCircle className="w-3.5 h-3.5 shrink-0" />
-          <span>{failed} abgebrochen/fehlgeschlagen</span>
-        </p>
-      )}
-
-      <div>
-        <p className={cn(sectionLabel, "mb-2")}>{compact ? "Chats" : "Alle Gespräche"}</p>
-        {conversations.length === 0 ? (
-          <p className="text-xs text-muted-foreground/80 text-center py-8">Noch keine Chats</p>
-        ) : compact ? (
-          <>
-            <div className="min-w-0 space-y-1.5">
-              {visibleSidebarChats.map((conv) => (
-                <ConversationRow key={conv.id} conv={conv} />
-              ))}
+      {!compact ? (
+        <>
+          {hasJobBlock && (
+            <div className="space-y-6">
+              <p className={jobSectionTitle}>Chats</p>
+              {running.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5" />
+                    Läuft
+                  </p>
+                  <div className="space-y-1.5">{running.map((j) => <JobRow key={j.id} job={j} variant="running" />)}</div>
+                </div>
+              )}
+              {queued.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                    <ListOrdered className="w-3.5 h-3.5" />
+                    Warteschlange
+                  </p>
+                  <div className="space-y-1.5">{queued.map((j) => <JobRow key={j.id} job={j} variant="queued" />)}</div>
+                </div>
+              )}
+              {recentDone.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                    <CircleCheck className="w-3.5 h-3.5" />
+                    Zuletzt fertig
+                  </p>
+                  <div className="space-y-1.5">{recentDone.map((j) => <JobRow key={j.id} job={j} variant="done" />)}</div>
+                </div>
+              )}
             </div>
-            {(sidebarChatVisibleCount < sortedChatsForSidebar.length ||
-              sidebarChatVisibleCount > SIDEBAR_CHAT_PAGE) && (
-              <div className="mt-2 flex w-full items-center justify-between gap-2">
-                <div className="min-w-0 flex-1 flex justify-start">
-                  {sidebarChatVisibleCount > SIDEBAR_CHAT_PAGE && (
-                    <button
-                      type="button"
-                      className="py-1.5 text-left text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/45 transition-colors px-1 -mx-1"
-                      onClick={() =>
-                        setSidebarChatVisibleCount((n) => Math.max(n - SIDEBAR_CHAT_PAGE, SIDEBAR_CHAT_PAGE))
-                      }
-                    >
-                      ...weniger
-                    </button>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1 flex justify-end">
-                  {sidebarChatVisibleCount < sortedChatsForSidebar.length && (
-                    <button
-                      type="button"
-                      className="py-1.5 text-right text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/45 transition-colors px-1 -mx-1"
-                      onClick={() =>
-                        setSidebarChatVisibleCount((n) =>
-                          Math.min(n + SIDEBAR_CHAT_PAGE, sortedChatsForSidebar.length),
-                        )
-                      }
-                    >
-                      ...mehr
-                    </button>
-                  )}
-                </div>
-              </div>
+          )}
+          {showFailedBanner && (
+            <p className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1.5 pl-0.5">
+              <XCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{failed} abgebrochen/fehlgeschlagen</span>
+            </p>
+          )}
+          <div>
+            {conversationsForPage.length === 0 ? (
+              <p className="text-xs text-muted-foreground/80 text-center py-8">Noch keine Chats</p>
+            ) : (
+              <>
+                <Section label="Heute" items={today} />
+                <Section label="Gestern" items={yesterday} />
+                <Section label="Älter" items={earlier} />
+              </>
             )}
-          </>
-        ) : (
-          <>
-            <Section label="Heute" items={today} />
-            <Section label="Gestern" items={yesterday} />
-            <Section label="Älter" items={earlier} />
-          </>
-        )}
-      </div>
+          </div>
+        </>
+      ) : sidebarTab === "chats" ? (
+        <>
+          {hasJobBlock && (
+            <div className="space-y-1.5">
+              {running.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className={compactJobSublabel}>
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+                    Läuft
+                  </p>
+                  <div className="space-y-1.5">{running.map((j) => <JobRow key={j.id} job={j} variant="running" />)}</div>
+                </div>
+              )}
+              {queued.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className={compactJobSublabel}>
+                    <ListOrdered className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    Warteschlange
+                  </p>
+                  <div className="space-y-1.5">{queued.map((j) => <JobRow key={j.id} job={j} variant="queued" />)}</div>
+                </div>
+              )}
+              {recentDone.length > 0 && (
+                <div className="space-y-1.5">
+                  {recentDone.map((j) => (
+                    <JobRow key={j.id} job={j} variant="done" />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {showFailedBanner && (
+            <p className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1.5 pl-0.5">
+              <XCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{failed} abgebrochen/fehlgeschlagen</span>
+            </p>
+          )}
+          <div className={cn(compactChatsListNeedsTopMargin && "mt-3")}>
+            {nonArchived.length === 0 && !hasJobBlock ? (
+              <p className="text-xs text-muted-foreground/80 text-center py-8">Noch keine Chats</p>
+            ) : nonArchived.length > 0 ? (
+              <>
+                <div className="min-w-0 space-y-1.5">
+                  {visibleSidebarChats.map((conv) => (
+                    <ConversationRow key={conv.id} conv={conv} rowMode="compact-active" />
+                  ))}
+                </div>
+                {chatsListPagination}
+              </>
+            ) : null}
+          </div>
+        </>
+      ) : (
+        <>
+          <p className={cn(sectionLabel, "mb-2")}>Archiv</p>
+          {archivedOnly.length === 0 ? (
+            <p className="text-xs text-muted-foreground/80 text-center py-8">Archiv ist leer</p>
+          ) : (
+            <>
+              <div className="min-w-0 space-y-1.5">
+                {visibleSidebarChats.map((conv) => (
+                  <ConversationRow key={conv.id} conv={conv} rowMode="compact-archived" />
+                ))}
+              </div>
+              {chatsListPagination}
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 };

@@ -8,6 +8,8 @@ export type Conversation = {
   created_at: string;
   updated_at: string;
   source_filename: string | null;
+  archived_at: string | null;
+  marked_unread: boolean;
 };
 
 export type DbMessage = {
@@ -30,7 +32,15 @@ export const useConversations = () => {
       .from("conversations")
       .select("*")
       .order("updated_at", { ascending: false });
-    if (data) setConversations(data);
+    if (data) {
+      setConversations(
+        (data as Conversation[]).map((c) => ({
+          ...c,
+          archived_at: c.archived_at ?? null,
+          marked_unread: c.marked_unread ?? false,
+        })),
+      );
+    }
   }, [user]);
 
   useEffect(() => {
@@ -102,6 +112,38 @@ export const useConversations = () => {
     [fetchConversations]
   );
 
+  const archiveConversation = useCallback(
+    async (id: string) => {
+      await supabase.from("conversations").update({ archived_at: new Date().toISOString() }).eq("id", id);
+      await fetchConversations();
+    },
+    [fetchConversations]
+  );
+
+  const restoreConversation = useCallback(
+    async (id: string) => {
+      await supabase.from("conversations").update({ archived_at: null }).eq("id", id);
+      await fetchConversations();
+    },
+    [fetchConversations]
+  );
+
+  const markConversationUnread = useCallback(
+    async (id: string) => {
+      await supabase.from("conversations").update({ marked_unread: true }).eq("id", id);
+      await fetchConversations();
+    },
+    [fetchConversations]
+  );
+
+  const markConversationRead = useCallback(
+    async (id: string) => {
+      await supabase.from("conversations").update({ marked_unread: false }).eq("id", id);
+      await fetchConversations();
+    },
+    [fetchConversations]
+  );
+
   return {
     conversations,
     activeConversationId,
@@ -113,5 +155,9 @@ export const useConversations = () => {
     updateTitle,
     updateSourceFilename,
     fetchConversations,
+    archiveConversation,
+    restoreConversation,
+    markConversationUnread,
+    markConversationRead,
   };
 };

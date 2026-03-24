@@ -99,24 +99,30 @@ export type Database = {
       }
       conversations: {
         Row: {
+          archived_at: string | null
           created_at: string
           id: string
+          marked_unread: boolean
           title: string
           updated_at: string
           user_id: string
           source_filename: string | null
         }
         Insert: {
+          archived_at?: string | null
           created_at?: string
           id?: string
+          marked_unread?: boolean
           title?: string
           updated_at?: string
           user_id: string
           source_filename?: string | null
         }
         Update: {
+          archived_at?: string | null
           created_at?: string
           id?: string
+          marked_unread?: boolean
           title?: string
           updated_at?: string
           user_id?: string

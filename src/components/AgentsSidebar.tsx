@@ -25,13 +25,13 @@ const AgentsSidebar = ({ onNew, className, ...panelProps }: Props) => {
           <HistoryPanel {...panelProps} layout="sidebar" />
         </div>
       </ScrollArea>
-      <div className="shrink-0 border-t border-border/30 px-2 pt-2">
+      <div className="shrink-0 px-2 pt-2">
         <Button
           type="button"
           variant="outline"
           className={cn(
-            "group h-auto min-h-[68px] w-full justify-center gap-2.5 rounded-xl border-border bg-card px-3 py-3 text-sm font-medium text-foreground shadow-md",
-            "hover:bg-muted/80 hover:text-foreground hover:shadow-lg",
+            "group h-auto min-h-[68px] w-full justify-center gap-2.5 rounded-xl border-border bg-card px-3 py-3 text-sm font-medium text-foreground shadow-none",
+            "hover:bg-muted/80 hover:text-foreground",
             "[&_svg]:size-5 [&_svg]:opacity-90 [&_svg]:group-hover:opacity-100",
           )}
           onClick={onNew}

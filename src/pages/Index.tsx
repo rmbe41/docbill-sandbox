@@ -16,6 +16,7 @@ import { Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
+import { useAcknowledgedJobs } from "@/hooks/useAcknowledgedJobs";
 import { useBackgroundJobQueue } from "@/hooks/useBackgroundJobQueue";
 import { supabase } from "@/integrations/supabase/client";
 import { getModelInfo, AVAILABLE_MODELS, MODEL_TAG_LABELS, MODEL_TAG_TOOLTIPS, type ModelTag } from "@/data/models";
@@ -70,7 +71,13 @@ const Index = () => {
     updateTitle,
     updateSourceFilename,
     fetchConversations,
+    archiveConversation,
+    restoreConversation,
+    markConversationUnread,
+    markConversationRead,
   } = useConversations();
+
+  const { acknowledgedSet, acknowledge } = useAcknowledgedJobs(user?.id);
 
   const loadSettings = useCallback(async () => {
     if (!user) return;
@@ -189,8 +196,9 @@ const Index = () => {
       setMainView("chat");
       const merged = await mergeMessagesWithLiveStream(id);
       setMessages(merged);
+      void markConversationRead(id);
     },
-    [mergeMessagesWithLiveStream, setActiveConversationId]
+    [mergeMessagesWithLiveStream, setActiveConversationId, markConversationRead]
   );
 
   const handleNewConversation = useCallback(() => {
@@ -219,6 +227,17 @@ const Index = () => {
     [updateTitle]
   );
 
+  const handleArchiveConversation = useCallback(
+    async (id: string) => {
+      await archiveConversation(id);
+      if (activeConversationId === id) {
+        setActiveConversationId(null);
+        setMessages([]);
+      }
+    },
+    [archiveConversation, activeConversationId, setActiveConversationId, setMessages],
+  );
+
   const handleSettings = useCallback(() => {
     setSettingsInitialTab(undefined);
     setMainView("settings");
@@ -233,6 +252,11 @@ const Index = () => {
     jobs,
     runStates,
     onCancelQueuedJob: cancelQueuedJob,
+    onArchive: handleArchiveConversation,
+    onRestore: restoreConversation,
+    onMarkUnread: markConversationUnread,
+    acknowledgedJobIds: acknowledgedSet,
+    onAcknowledgeJob: acknowledge,
   };
 
   return (
@@ -468,13 +492,13 @@ const Index = () => {
               <HistoryPanel {...historyPanelProps} layout="sidebar" />
             </div>
           </ScrollArea>
-          <div className="shrink-0 border-t border-border/30 px-3 pt-2">
+          <div className="shrink-0 px-3 pt-2">
             <Button
               type="button"
               variant="outline"
               className={cn(
-                "group h-auto min-h-[68px] w-full justify-center gap-2.5 rounded-xl border-border bg-card px-3 py-3 text-sm font-medium text-foreground shadow-md",
-                "hover:bg-muted/80 hover:text-foreground hover:shadow-lg",
+                "group h-auto min-h-[68px] w-full justify-center gap-2.5 rounded-xl border-border bg-card px-3 py-3 text-sm font-medium text-foreground shadow-none",
+                "hover:bg-muted/80 hover:text-foreground",
                 "[&_svg]:size-5 [&_svg]:opacity-90 [&_svg]:group-hover:opacity-100",
               )}
               onClick={handleNewConversation}
