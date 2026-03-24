@@ -14,33 +14,35 @@ const AgentsSidebar = ({ onNew, className, ...panelProps }: Props) => {
     <aside
       className={cn(
         "hidden md:flex flex-col shrink-0 z-[100]",
-        "fixed top-4 right-0 bottom-4 w-64",
-        "bg-muted/50 dark:bg-muted/20 border border-border/50 border-r-0",
-        "rounded-l-xl shadow-lg overflow-hidden",
+        "fixed top-4 right-0 bottom-0 w-72",
+        "bg-muted/50 dark:bg-muted/20 border border-border/50 border-r-0 border-b-0",
+        "rounded-tl-xl shadow-lg overflow-hidden",
         className,
       )}
     >
-      <div className="px-2 py-1.5 border-b border-border/30 shrink-0">
+      <ScrollArea className="min-h-0 min-w-0 flex-1">
+        <div className="min-w-0 px-2 py-3 pb-4">
+          <HistoryPanel {...panelProps} layout="sidebar" />
+        </div>
+      </ScrollArea>
+      <div className="shrink-0 border-t border-border/30 px-2 pt-2">
         <Button
           type="button"
-          variant="ghost"
-          size="sm"
+          variant="outline"
           className={cn(
-            "group w-full h-8 gap-1.5 justify-center rounded-md border border-border/25 bg-transparent font-normal text-xs text-muted-foreground shadow-none",
-            "hover:bg-muted/60 hover:text-foreground hover:border-border/45",
+            "group h-auto min-h-[68px] w-full justify-center gap-2.5 rounded-xl border-border bg-card px-3 py-3 text-sm font-medium text-foreground shadow-md",
+            "hover:bg-muted/80 hover:text-foreground hover:shadow-lg",
+            "[&_svg]:size-5 [&_svg]:opacity-90 [&_svg]:group-hover:opacity-100",
           )}
           onClick={onNew}
           title="Neuer Chat"
         >
-          <Plus className="h-3.5 w-3.5 opacity-60 group-hover:opacity-100" />
+          <Plus className="shrink-0" />
           Neuer Chat
         </Button>
+        <div className="mt-1.5 min-h-7" aria-hidden />
+        <div className="pb-10" />
       </div>
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="px-2 py-3 pb-16">
-          <HistoryPanel {...panelProps} layout="sidebar" />
-        </div>
-      </ScrollArea>
     </aside>
   );
 };

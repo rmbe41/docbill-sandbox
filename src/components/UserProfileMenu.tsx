@@ -1,5 +1,4 @@
-import { LogOut, Settings } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { LogOut } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -20,16 +19,20 @@ function getInitials(email: string | undefined): string {
   return part.slice(0, 1).toUpperCase();
 }
 
+function labelRail(collapsed: boolean) {
+  return cn(
+    "min-w-0 overflow-hidden transition-[max-width,opacity] duration-200 ease-in-out",
+    collapsed ? "max-w-0 opacity-0" : "max-w-[7rem] opacity-100 flex-1",
+  );
+}
+
 type Props = {
   collapsed: boolean;
-  /** DocBill inline settings (Index) — zusätzlich zu /settings */
-  onInlineSettings?: () => void;
   /** z. B. linke Sidebar schließen nach Klick */
   onAfterNavigate?: () => void;
 };
 
-const UserProfileMenu = ({ collapsed, onInlineSettings, onAfterNavigate }: Props) => {
-  const navigate = useNavigate();
+const UserProfileMenu = ({ collapsed, onAfterNavigate }: Props) => {
   const { user, signOut } = useAuth();
   const avatarUrl = user?.user_metadata?.avatar_url as string | undefined;
 
@@ -44,43 +47,32 @@ const UserProfileMenu = ({ collapsed, onInlineSettings, onAfterNavigate }: Props
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          type="button"
           variant="ghost"
-          className={cn(
-            "rounded-md shrink-0 pointer-events-auto hover:bg-muted/50 text-muted-foreground hover:text-foreground",
-            collapsed ? "h-8 w-8 p-0 mx-auto" : "h-8 w-full justify-start px-1.5 gap-1.5 min-w-0",
-          )}
+          data-sidebar-interactive
+          className="h-8 w-full flex items-center justify-start rounded-md shrink-0 pointer-events-auto hover:bg-muted/50 text-muted-foreground hover:text-foreground px-0 min-w-0 cursor-pointer"
           title="Profil"
         >
-          <Avatar className="h-[22px] w-[22px] shrink-0">
-            <AvatarImage src={avatarUrl} alt={user.email ?? ""} />
-            <AvatarFallback className="text-[9px] leading-none bg-muted">{getInitials(user.email)}</AvatarFallback>
-          </Avatar>
-          {!collapsed && (
-            <span className="truncate text-left text-[11px] leading-tight text-muted-foreground/85 min-w-0 flex-1">
+          <div className="w-12 min-w-[3rem] shrink-0 flex justify-center items-center">
+            <Avatar className="h-[22px] w-[22px] shrink-0">
+              <AvatarImage src={avatarUrl} alt={user.email ?? ""} />
+              <AvatarFallback className="text-[9px] leading-none bg-muted">{getInitials(user.email)}</AvatarFallback>
+            </Avatar>
+          </div>
+          <div className={labelRail(collapsed)}>
+            <span className="block truncate text-left pr-2 text-[11px] leading-tight text-muted-foreground/85">
               {user.email}
             </span>
-          )}
+          </div>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align={collapsed ? "start" : "start"}
-        side="top"
-        sideOffset={8}
-        className="w-56 z-[100]"
-      >
+      <DropdownMenuContent side="top" sideOffset={8} align="start" className="w-56 z-[100]">
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium truncate">{user.email}</p>
             <p className="text-xs text-muted-foreground">Kontostatus: Aktiv</p>
           </div>
         </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={wrap(() => (onInlineSettings ? onInlineSettings() : navigate("/settings")))}
-        >
-          <Settings className="w-4 h-4 mr-2" />
-          Einstellungen
-        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={wrap(() => void signOut())} className="text-destructive">
           <LogOut className="w-4 h-4 mr-2" />

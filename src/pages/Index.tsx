@@ -249,10 +249,10 @@ const Index = () => {
       <div
         className={cn(
           "flex-1 flex flex-col min-w-0 relative transition-[margin] duration-200 ease-in-out",
-          sidebarCollapsed ? "md:ml-12 md:mr-64" : "md:ml-40 md:mr-64",
+          sidebarCollapsed ? "md:ml-12 md:mr-72" : "md:ml-40 md:mr-72",
         )}
       >
-        <header className="absolute top-0 right-0 left-0 z-50 md:right-64">
+        <header className="absolute top-0 right-0 left-0 z-50 md:right-72">
           <AppHeader
             onToggleSidebar={() => setSidebarOpen((v) => !v)}
             onOpenAgentsSheet={() => setAgentsSheetOpen(true)}
@@ -308,7 +308,7 @@ const Index = () => {
           <div
             className={cn(
               "fixed bottom-0 left-0 right-0 z-50 pointer-events-none transition-[left,right] duration-200 ease-in-out",
-              sidebarCollapsed ? "md:left-12 md:right-64" : "md:left-40 md:right-64",
+              sidebarCollapsed ? "md:left-12 md:right-72" : "md:left-40 md:right-72",
             )}
           >
             <div className="max-w-3xl mx-auto w-full px-4 pb-10 pointer-events-auto">
@@ -462,27 +462,29 @@ const Index = () => {
       <AgentsSidebar onNew={handleNewConversation} {...historyPanelProps} />
 
       <Sheet open={agentsSheetOpen} onOpenChange={setAgentsSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-sm p-0 flex flex-col gap-0 [&>button]:top-3">
-          <div className="px-3 py-2 border-b border-border/30 shrink-0">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "group w-full h-8 gap-1.5 justify-center rounded-md border border-border/25 bg-transparent font-normal text-xs text-muted-foreground shadow-none",
-                "hover:bg-muted/60 hover:text-foreground hover:border-border/45",
-              )}
-              onClick={handleNewConversation}
-            >
-              <Plus className="h-3.5 w-3.5 opacity-60 group-hover:opacity-100" />
-              Neuer Chat
-            </Button>
-          </div>
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="p-2 pb-20">
+        <SheetContent side="right" className="w-full sm:max-w-72 p-0 flex flex-col gap-0 [&>button]:top-3">
+          <ScrollArea className="min-h-0 min-w-0 flex-1">
+            <div className="min-w-0 p-2 pb-4">
               <HistoryPanel {...historyPanelProps} layout="sidebar" />
             </div>
           </ScrollArea>
+          <div className="shrink-0 border-t border-border/30 px-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(
+                "group h-auto min-h-[68px] w-full justify-center gap-2.5 rounded-xl border-border bg-card px-3 py-3 text-sm font-medium text-foreground shadow-md",
+                "hover:bg-muted/80 hover:text-foreground hover:shadow-lg",
+                "[&_svg]:size-5 [&_svg]:opacity-90 [&_svg]:group-hover:opacity-100",
+              )}
+              onClick={handleNewConversation}
+            >
+              <Plus className="shrink-0" />
+              Neuer Chat
+            </Button>
+            <div className="mt-1.5 min-h-7" aria-hidden />
+            <div className="pb-10" />
+          </div>
         </SheetContent>
       </Sheet>
     </div>
