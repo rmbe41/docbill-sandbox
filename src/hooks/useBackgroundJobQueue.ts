@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ChatMessage } from "@/components/ChatBubble";
+import { dbRowToChatMessage } from "@/lib/dbMessageToChatMessage";
 import { fileToBase64 } from "@/lib/fileToBase64";
 import { executeGoaeChatRequest } from "@/lib/executeGoaeChatRequest";
+import {
+  buildAssistantStructuredContent,
+  buildUserStructuredContent,
+  type MessageStructuredContentV1,
+} from "@/lib/messageStructuredContent";
 import {
   assistantContentHasSseError,
   sseAccumStateHasDeliverable,
   sseErrorSummaryFromAssistantContent,
 } from "@/lib/goaeChatSse";
+import {
+  buildConversationTitle,
+  conversationListTitleDisplay,
+} from "@/lib/conversationTitle";
 import type { User } from "@supabase/supabase-js";
 import type { AppToastFn } from "@/hooks/use-toast";
 
@@ -68,8 +78,15 @@ type UseBackgroundJobQueueParams = {
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
   createConversation: (title: string) => Promise<string | null>;
-  saveMessage: (conversationId: string, role: "user" | "assistant", content: string) => Promise<string | null>;
-  loadMessages: (conversationId: string) => Promise<{ id: string; role: string; content: string }[]>;
+  saveMessage: (
+    conversationId: string,
+    role: "user" | "assistant",
+    content: string,
+    structured?: MessageStructuredContentV1 | null,
+  ) => Promise<string | null>;
+  loadMessages: (conversationId: string) => Promise<
+    { id: string; role: string; content: string; structured_content?: unknown }[]
+  >;
   updateSourceFilename: (id: string, filename: string) => Promise<void>;
   updateTitle: (id: string, title: string) => Promise<void>;
   fetchConversations: () => Promise<void>;
@@ -407,8 +424,19 @@ export function useBackgroundJobQueue({
           analysisTimeSeconds,
         );
 
-        if (state.assistantContent) {
-          const savedId = await saveMessage(conversationId, "assistant", state.assistantContent);
+        const assistantStructured = buildAssistantStructuredContent({
+          invoiceResult: state.invoiceData,
+          serviceBillingResult: state.serviceBillingData,
+          analysisTimeSeconds,
+        });
+        const hasAssistantText = Boolean(state.assistantContent?.trim());
+        if (hasAssistantText || assistantStructured) {
+          const savedId = await saveMessage(
+            conversationId,
+            "assistant",
+            hasAssistantText ? state.assistantContent : "",
+            assistantStructured ?? undefined,
+          );
           if (savedId) {
             upsertAssistantUi(
               state.assistantContent,
@@ -454,6 +482,35 @@ export function useBackgroundJobQueue({
           })
           .eq("id", job.id);
 
+        if (!jobFailed) {
+          const userMsgs = dbMsgs.filter((m) => m.role === "user");
+          const userTextForTitle = userMsgs[0]?.content ?? "";
+          const initialAutoTitle = buildConversationTitle({
+            userText: userTextForTitle,
+            fileNames,
+            status: "queued",
+          });
+          const resultStatus =
+            state.invoiceData ? "invoice" : state.serviceBillingData ? "service" : "generic";
+          const finalTitle = buildConversationTitle({
+            userText: userTextForTitle,
+            fileNames,
+            status: resultStatus,
+          });
+          const { data: convRow } = await supabase
+            .from("conversations")
+            .select("title")
+            .eq("id", conversationId)
+            .maybeSingle();
+          const currentRaw = (convRow?.title as string | undefined) ?? "";
+          const currentDisplay = conversationListTitleDisplay(currentRaw);
+          const currentNorm = currentRaw.trim();
+          const initialNorm = initialAutoTitle.trim();
+          const shouldRefine =
+            !currentDisplay || currentNorm === "Neues Gespräch" || currentNorm === initialNorm;
+          if (shouldRefine) await updateTitle(conversationId, finalTitle);
+        }
+
         await fetchConversations();
         await fetchJobs();
         liveAssistantByConvRef.current.delete(conversationId);
@@ -497,6 +554,7 @@ export function useBackgroundJobQueue({
       setMessages,
       fetchJobs,
       updateJobProgressDb,
+      updateTitle,
     ],
   );
 
@@ -572,14 +630,18 @@ export function useBackgroundJobQueue({
 
       for (let i = 0; i < tasks.length; i++) {
         const spec = tasks[i];
+        const fileNamesForTitle = spec.files?.map((f) => f.name) ?? [];
+        const listTitle = buildConversationTitle({
+          userText: spec.content,
+          fileNames: fileNamesForTitle,
+          status: fileNamesForTitle.length > 0 ? "queued" : "generic",
+        });
         let convId: string | null = null;
 
         if (tasks.length === 1 && activeConversationId) {
           convId = activeConversationId;
         } else {
-          const title =
-            spec.files?.[0]?.name?.replace(/\.[^.]+$/, "") || spec.content.slice(0, 60) || "";
-          convId = await createConversation(title);
+          convId = await createConversation(listTitle);
         }
 
         if (!convId) {
@@ -591,8 +653,25 @@ export function useBackgroundJobQueue({
           setActiveConversationId(convId);
         }
 
+        const filePayloads =
+          spec.files && spec.files.length > 0
+            ? await Promise.all(
+                spec.files.map(async (f) => ({
+                  name: f.name,
+                  type: f.type,
+                  data: await fileToBase64(f),
+                })),
+              )
+            : [];
+        const userStructured = buildUserStructuredContent(filePayloads);
+        const savedUserId = await saveMessage(
+          convId,
+          "user",
+          spec.content,
+          userStructured ?? undefined,
+        );
         const userMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: savedUserId ?? crypto.randomUUID(),
           role: "user",
           content: spec.content,
           attachments: attachmentsFor(spec.files),
@@ -606,28 +685,10 @@ export function useBackgroundJobQueue({
           }
         }
 
-        await saveMessage(convId, "user", spec.content);
-        if (
-          isEmptyActiveConversation &&
-          i === 0 &&
-          convId === activeConversationId
-        ) {
-          const derivedListTitle =
-            spec.files?.[0]?.name?.replace(/\.[^.]+$/, "") || spec.content.slice(0, 60) || "";
-          if (derivedListTitle) await updateTitle(convId, derivedListTitle);
+        if (isEmptyActiveConversation && i === 0 && convId === activeConversationId) {
+          await updateTitle(convId, listTitle);
         }
         if (spec.files?.[0]) await updateSourceFilename(convId, spec.files[0].name);
-
-        const filePayloads =
-          spec.files && spec.files.length > 0
-            ? await Promise.all(
-                spec.files.map(async (f) => ({
-                  name: f.name,
-                  type: f.type,
-                  data: await fileToBase64(f),
-                })),
-              )
-            : [];
 
         sortCursor += 1;
         const jobPayload: BackgroundJobPayload = {
@@ -743,11 +804,7 @@ export function useBackgroundJobQueue({
   const mergeMessagesWithLiveStream = useCallback(
     async (conversationId: string): Promise<ChatMessage[]> => {
       const db = await loadMessages(conversationId);
-      const base: ChatMessage[] = db.map((m) => ({
-        id: m.id,
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+      const base: ChatMessage[] = db.map((m) => dbRowToChatMessage(m));
       const live = liveAssistantByConvRef.current.get(conversationId);
       if (!live || (!live.content?.trim() && !live.invoiceResult && !live.serviceBillingResult)) {
         return base;

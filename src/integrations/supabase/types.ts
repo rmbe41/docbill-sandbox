@@ -161,6 +161,7 @@ export type Database = {
           created_at: string
           id: string
           role: string
+          structured_content: Json | null
         }
         Insert: {
           content: string
@@ -168,6 +169,7 @@ export type Database = {
           created_at?: string
           id?: string
           role: string
+          structured_content?: Json | null
         }
         Update: {
           content?: string
@@ -175,6 +177,7 @@ export type Database = {
           created_at?: string
           id?: string
           role?: string
+          structured_content?: Json | null
         }
         Relationships: [
           {

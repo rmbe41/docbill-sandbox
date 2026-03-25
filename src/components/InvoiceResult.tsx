@@ -75,7 +75,7 @@ export interface InvoiceResultData {
 
 // ── Unified suggestion model ──
 
-type SuggestionDecision = "accepted" | "rejected" | "pending";
+export type SuggestionDecision = "accepted" | "rejected" | "pending";
 
 interface FlatSuggestion {
   id: string;
@@ -93,6 +93,19 @@ interface FlatSuggestion {
   pos?: GeprueftePosition;
   pruefung?: Pruefung;
   opt?: Optimierung;
+}
+
+function decisionsFromServer(
+  suggestions: FlatSuggestion[],
+  initial?: Record<string, string> | null,
+): Record<string, SuggestionDecision> {
+  const init: Record<string, SuggestionDecision> = {};
+  for (const s of suggestions) {
+    const raw = initial?.[s.id];
+    init[s.id] =
+      raw === "accepted" || raw === "rejected" || raw === "pending" ? raw : "pending";
+  }
+  return init;
 }
 
 const FAKTOR_TOLERANZ = 0.001;
@@ -245,8 +258,8 @@ function UnifiedPositionCard({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border p-3 space-y-2",
-        anyPending && "bg-amber-50/50 dark:bg-amber-950/20 border-l-4 border-l-amber-400 dark:border-l-amber-500",
+        "rounded-lg p-3 space-y-2",
+        anyPending && "bg-amber-50/50 dark:bg-amber-950/20",
         anyAccepted && !anyPending && "bg-emerald-50/30 dark:bg-emerald-950/10",
       )}
     >
@@ -273,7 +286,7 @@ function UnifiedPositionCard({
         const hasNachher = s.nachherFaktor != null || s.nachherBetrag != null;
         const showNumericalChange = suggestionHasMeaningfulNumericalChange(s);
         return (
-          <div key={s.id} className="space-y-1.5 text-xs border-t border-border/50 pt-2">
+          <div key={s.id} className="space-y-1.5 text-xs mt-2 pt-2 first:mt-0 first:pt-0">
             {isPending && hasVorher && hasNachher && showNumericalChange && (
               <div className="text-muted-foreground">
                 <span className="font-medium">Aktuell: </span>
@@ -291,7 +304,7 @@ function UnifiedPositionCard({
               </div>
             )}
             {s.begruendungVorschlag && (
-              <div className="p-2 rounded-md bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40">
+              <div className="p-2 rounded-md bg-emerald-50/60 dark:bg-emerald-950/20">
                 <p className="text-[10px] uppercase font-medium text-emerald-800 dark:text-emerald-300 mb-0.5">Begründung:</p>
                 <p className="leading-relaxed">{s.begruendungVorschlag}</p>
               </div>
@@ -356,7 +369,7 @@ function UnifiedPositionRow({
     <tr
       className={cn(
         "transition-colors",
-        anyPending && "bg-amber-50/50 dark:bg-amber-950/20 border-l-2 border-l-amber-400 dark:border-l-amber-500",
+        anyPending && "bg-amber-50/50 dark:bg-amber-950/20",
         anyAccepted && !anyPending && "bg-emerald-50/30 dark:bg-emerald-950/10",
         rowSuggestions.some((s) => decisions[s.id] === "rejected") && !anyPending && "opacity-75",
       )}
@@ -446,8 +459,11 @@ function formatEuro(n: number): string {
 
 type InvoiceResultProps = {
   data: InvoiceResultData;
-  onDecisionsChange?: (decisions: Record<string, string>) => void;
+  onDecisionsChange?: (decisions: Record<string, SuggestionDecision>) => void;
   onExportSuccess?: () => void;
+  messageId?: string | null;
+  initialInvoiceDecisions?: Record<string, string> | null;
+  onPersistInvoiceDecisions?: (decisions: Record<string, SuggestionDecision>) => void;
 };
 
 const DEFAULT_ZUSAMMENFASSUNG = {
@@ -455,7 +471,14 @@ const DEFAULT_ZUSAMMENFASSUNG = {
   rechnungsSumme: 0, korrigierteSumme: 0, optimierungsPotenzial: 0,
 };
 
-export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess }: InvoiceResultProps) {
+export default function InvoiceResult({
+  data,
+  onDecisionsChange,
+  onExportSuccess,
+  messageId = null,
+  initialInvoiceDecisions = null,
+  onPersistInvoiceDecisions,
+}: InvoiceResultProps) {
   const positionen = data?.positionen ?? [];
   const optimierungen = data?.optimierungen ?? [];
   const z = data?.zusammenfassung ?? DEFAULT_ZUSAMMENFASSUNG;
@@ -479,11 +502,9 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
     }
   }, [data?.stammdaten]);
 
-  const [decisions, setDecisions] = useState<Record<string, SuggestionDecision>>(() => {
-    const init: Record<string, SuggestionDecision> = {};
-    for (const s of suggestions) init[s.id] = "pending";
-    return init;
-  });
+  const [decisions, setDecisions] = useState<Record<string, SuggestionDecision>>(() =>
+    decisionsFromServer(suggestions, initialInvoiceDecisions),
+  );
 
   const setDecision = useCallback((id: string, decision: SuggestionDecision) => {
     setDecisions((prev) => ({ ...prev, [id]: decision }));
@@ -492,6 +513,14 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
   useEffect(() => {
     onDecisionsChange?.(decisions);
   }, [decisions, onDecisionsChange]);
+
+  useEffect(() => {
+    if (!messageId || !onPersistInvoiceDecisions) return;
+    const t = window.setTimeout(() => {
+      onPersistInvoiceDecisions(decisions);
+    }, 450);
+    return () => clearTimeout(t);
+  }, [decisions, messageId, onPersistInvoiceDecisions]);
 
   const pendingCount = useMemo(
     () => suggestions.filter((s) => decisions[s.id] === "pending").length,
@@ -662,7 +691,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
   return (
     <div className="invoice-result space-y-6">
       {/* ── Überblick ── */}
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
         <h2 className="text-sm font-semibold text-foreground mb-3">Überblick</h2>
         <div className={cn("grid gap-2", suggestions.length > 0 ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4")}>
           <SummaryCard
@@ -697,7 +726,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
             totalSuggestions={suggestions.length}
           />
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 pt-1 text-xs text-muted-foreground">
           <span>Rechnungssumme: <strong className="text-foreground">{formatEuro(z.rechnungsSumme)}</strong></span>
           {suggestions.length > 0 && (
             <span>Vorschau-Summe: <strong className="text-emerald-600 dark:text-emerald-400">{formatEuro(previewSum)}</strong></span>
@@ -706,7 +735,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
       </section>
 
       {/* ── Rechnung (Vorschläge + Vorschau vereint) ── */}
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <h2 className="text-sm font-semibold text-foreground">Rechnung</h2>
           <div className="flex items-center gap-2">
@@ -782,7 +811,7 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
             </tbody>
           </table>
         </div>
-        <div className="mt-3 pt-3 border-t border-border text-sm">
+        <div className="mt-4 pt-1 text-sm">
           <span className="text-muted-foreground">Summe: </span>
           <strong className="text-foreground">{formatEuro(previewSum)}</strong>
         </div>
@@ -891,10 +920,8 @@ function BetragCard({
     return (
       <div
         className={cn(
-          "rounded-lg border p-2.5",
-          isReduktion
-            ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
-            : "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
+          "rounded-lg p-2.5",
+          isReduktion ? "bg-red-50 dark:bg-red-950/30" : "bg-emerald-50 dark:bg-emerald-950/30",
         )}
       >
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
@@ -918,7 +945,7 @@ function BetragCard({
 
   if (hasOpt) {
     return (
-      <div className="rounded-lg border p-2.5 bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800">
+      <div className="rounded-lg p-2.5 bg-emerald-50 dark:bg-emerald-950/30">
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
           Betrag
         </p>
@@ -931,7 +958,7 @@ function BetragCard({
   }
 
   return (
-    <div className="rounded-lg border p-2.5 bg-muted/50 dark:bg-muted/30">
+    <div className="rounded-lg p-2.5 bg-muted/50 dark:bg-muted/30">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
         Betrag
       </p>

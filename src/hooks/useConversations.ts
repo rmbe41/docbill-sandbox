@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import {
+  mergeStructuredContent,
+  parseMessageStructured,
+  type MessageStructuredContentV1,
+} from "@/lib/messageStructuredContent";
 
 export type Conversation = {
   id: string;
@@ -19,6 +25,7 @@ export type DbMessage = {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  structured_content?: Json | null;
 };
 
 export const useConversations = () => {
@@ -77,16 +84,45 @@ export const useConversations = () => {
   );
 
   const saveMessage = useCallback(
-    async (conversationId: string, role: "user" | "assistant", content: string): Promise<string | null> => {
+    async (
+      conversationId: string,
+      role: "user" | "assistant",
+      content: string,
+      structured?: MessageStructuredContentV1 | null,
+    ): Promise<string | null> => {
       const { data, error } = await supabase
         .from("messages")
-        .insert({ conversation_id: conversationId, role, content })
+        .insert({
+          conversation_id: conversationId,
+          role,
+          content,
+          ...(structured != null ? { structured_content: structured as unknown as Json } : {}),
+        })
         .select("id")
         .single();
       if (error || !data) return null;
       return data.id;
     },
-    []
+    [],
+  );
+
+  const updateMessageStructuredContent = useCallback(
+    async (messageId: string, patch: Partial<MessageStructuredContentV1>): Promise<boolean> => {
+      const { data: row, error: fetchErr } = await supabase
+        .from("messages")
+        .select("structured_content")
+        .eq("id", messageId)
+        .maybeSingle();
+      if (fetchErr || !row) return false;
+      const prev = parseMessageStructured(row.structured_content);
+      const next = mergeStructuredContent(prev, patch);
+      const { error } = await supabase
+        .from("messages")
+        .update({ structured_content: next as unknown as Json })
+        .eq("id", messageId);
+      return !error;
+    },
+    [],
   );
 
   const deleteConversation = useCallback(
@@ -179,6 +215,7 @@ export const useConversations = () => {
     createConversation,
     loadMessages,
     saveMessage,
+    updateMessageStructuredContent,
     deleteConversation,
     updateTitle,
     updateSourceFilename,

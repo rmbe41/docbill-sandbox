@@ -1,10 +1,13 @@
 import React, { useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { User, FileText, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp } from "lucide-react";
+import { User, FileText, ThumbsUp, ThumbsDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
-import InvoiceResult, { type InvoiceResultData } from "@/components/InvoiceResult";
+import InvoiceResult, {
+  type InvoiceResultData,
+  type SuggestionDecision,
+} from "@/components/InvoiceResult";
 import ServiceBillingResult, { type ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import FileOverlay from "@/components/FileOverlay";
 import { useFeedback } from "@/hooks/useFeedback";
@@ -14,6 +17,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import type { MessageStructuredContentV1 } from "@/lib/messageStructuredContent";
 
 export type ChatMessage = {
   id: string;
@@ -23,11 +27,19 @@ export type ChatMessage = {
   invoiceResult?: InvoiceResultData;
   serviceBillingResult?: ServiceBillingResultData;
   analysisTimeSeconds?: number;
+  suggestionDecisions?: {
+    invoice?: Record<string, string>;
+    service?: Record<string, string>;
+  };
 };
 
 type ChatBubbleProps = {
   message: ChatMessage;
   conversationId?: string | null;
+  updateMessageStructuredContent?: (
+    messageId: string,
+    patch: Partial<MessageStructuredContentV1>,
+  ) => Promise<boolean>;
 };
 
 // Custom markdown components – flache Typografie, keine Boxen
@@ -45,7 +57,7 @@ const markdownComponents = {
   ),
 };
 
-const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
+const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }: ChatBubbleProps) => {
   const isUser = message.role === "user";
   const [overlayFile, setOverlayFile] = useState<{
     src?: string;
@@ -53,14 +65,45 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
     type: string;
   } | null>(null);
   const [feedbackState, setFeedbackState] = useState<"none" | "positive" | "negative">("none");
-  const [decisions, setDecisions] = useState<Record<string, string>>({});
   const [inquiryOpen, setInquiryOpen] = useState(false);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
-  const hasResultButNoContent = (message.invoiceResult || message.serviceBillingResult) && !message.content;
-  const [explanationExpanded, setExplanationExpanded] = useState(!hasResultButNoContent);
   const { sendFeedback, isExpertMode } = useFeedback();
-  const decisionsRef = useRef(decisions);
-  decisionsRef.current = decisions;
+  const invoiceDecisionsRef = useRef<Record<string, string>>({});
+  const serviceDecisionsRef = useRef<Record<string, string>>({});
+
+  const handleInvoiceDecisionsForFeedback = useCallback((d: Record<string, SuggestionDecision>) => {
+    invoiceDecisionsRef.current = Object.fromEntries(
+      Object.entries(d).map(([k, v]) => [k, v]),
+    );
+  }, []);
+
+  const handleServiceDecisionsForFeedback = useCallback((d: Record<string, string>) => {
+    serviceDecisionsRef.current = d;
+  }, []);
+
+  const handlePersistInvoice = useCallback(
+    (d: Record<string, SuggestionDecision>) => {
+      if (!updateMessageStructuredContent) return;
+      void updateMessageStructuredContent(message.id, {
+        suggestionDecisions: {
+          invoice: Object.fromEntries(Object.entries(d).map(([k, v]) => [k, v])),
+        },
+      });
+    },
+    [message.id, updateMessageStructuredContent],
+  );
+
+  const handlePersistService = useCallback(
+    (d: Record<string, "pending" | "accepted" | "rejected">) => {
+      if (!updateMessageStructuredContent) return;
+      void updateMessageStructuredContent(message.id, {
+        suggestionDecisions: {
+          service: Object.fromEntries(Object.entries(d).map(([k, v]) => [k, v])),
+        },
+      });
+    },
+    [message.id, updateMessageStructuredContent],
+  );
 
   const submitFeedback = useCallback(
     async (rating: 1 | -1, inquiryReason?: "A" | "B" | "C" | null) => {
@@ -72,7 +115,7 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
         response_content: message.content,
         rating,
         metadata: {
-          decisions: decisionsRef.current,
+          decisions: { ...invoiceDecisionsRef.current, ...serviceDecisionsRef.current },
           inquiry_reason: inquiryReason ?? null,
         },
       });
@@ -212,43 +255,42 @@ const ChatBubble = ({ message, conversationId }: ChatBubbleProps) => {
             {message.invoiceResult && (
               <InvoiceResult
                 data={message.invoiceResult}
-                onDecisionsChange={setDecisions}
+                onDecisionsChange={handleInvoiceDecisionsForFeedback}
                 onExportSuccess={handleExportSuccess}
+                messageId={message.id}
+                initialInvoiceDecisions={message.suggestionDecisions?.invoice ?? null}
+                onPersistInvoiceDecisions={
+                  updateMessageStructuredContent ? handlePersistInvoice : undefined
+                }
               />
             )}
             {message.serviceBillingResult && (
-              <ServiceBillingResult data={message.serviceBillingResult} />
+              <ServiceBillingResult
+                data={message.serviceBillingResult}
+                messageId={message.id}
+                initialServiceDecisions={message.suggestionDecisions?.service ?? null}
+                onDecisionsChange={handleServiceDecisionsForFeedback}
+                onPersistServiceDecisions={
+                  updateMessageStructuredContent ? handlePersistService : undefined
+                }
+              />
             )}
-            {(message.content || (message.invoiceResult && !message.content) || (message.serviceBillingResult && !message.content)) && (
-              <div className="rounded-lg border border-border overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setExplanationExpanded((e) => !e)}
-                  className="flex items-center justify-between w-full px-3 py-2 text-left text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                >
-                  <span>Detaillierte Erklärung</span>
-                  {explanationExpanded ? (
-                    <ChevronUp className="w-4 h-4 shrink-0" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 shrink-0" />
-                  )}
-                </button>
-                {explanationExpanded && (
-                  <div className="px-3 pb-3 pt-0 markdown-output prose prose-sm max-w-none">
-                    {message.content ? (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={markdownComponents}
-                      >
-                        {message.content}
-                      </ReactMarkdown>
-                    ) : (
-                      <p className="text-muted-foreground text-sm">
-                        Die detaillierte Erklärung konnte nicht geladen werden (z. B. Timeout). 
-                        Die Prüfung oben ist vollständig – bei Bedarf die Anfrage erneut senden.
-                      </p>
-                    )}
-                  </div>
+            {(message.content ||
+              (message.invoiceResult && !message.content) ||
+              (message.serviceBillingResult && !message.content)) && (
+              <div className="markdown-output prose prose-sm max-w-none pt-1">
+                {(message.invoiceResult || message.serviceBillingResult) && message.content && (
+                  <p className="text-xs font-medium text-muted-foreground not-prose mb-2">Detaillierte Erklärung</p>
+                )}
+                {message.content ? (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {message.content}
+                  </ReactMarkdown>
+                ) : (
+                  <p className="text-muted-foreground text-sm not-prose">
+                    Die detaillierte Erklärung konnte nicht geladen werden (z. B. Timeout). Die Prüfung
+                    oben ist vollständig – bei Bedarf die Anfrage erneut senden.
+                  </p>
                 )}
               </div>
             )}

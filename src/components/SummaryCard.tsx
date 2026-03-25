@@ -11,9 +11,9 @@ type SummaryCardProps = {
 
 const bgClasses: Record<SummaryCardVariant, string> = {
   neutral: "bg-muted/50 dark:bg-muted/30",
-  warning: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800",
-  error: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800",
-  accent: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
+  warning: "bg-amber-50 dark:bg-amber-950/30",
+  error: "bg-red-50 dark:bg-red-950/30",
+  accent: "bg-emerald-50 dark:bg-emerald-950/30",
 };
 
 const valueClasses: Record<SummaryCardVariant, string> = {
@@ -25,7 +25,7 @@ const valueClasses: Record<SummaryCardVariant, string> = {
 
 export function SummaryCard({ label, value, detail, variant }: SummaryCardProps) {
   return (
-    <div className={cn("rounded-lg border p-2.5", bgClasses[variant])}>
+    <div className={cn("rounded-lg p-2.5", bgClasses[variant])}>
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
         {label}
       </p>

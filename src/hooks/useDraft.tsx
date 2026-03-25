@@ -6,6 +6,7 @@ interface DraftState {
   files: File[];
   addFiles: (files: File[]) => void;
   removeFile: (index: number) => void;
+  clearFiles: () => void;
   clearDraft: () => void;
 }
 
@@ -23,13 +24,19 @@ export function DraftProvider({ children }: { children: ReactNode }) {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const clearFiles = useCallback(() => {
+    setFiles([]);
+  }, []);
+
   const clearDraft = useCallback(() => {
     setText("");
     setFiles([]);
   }, []);
 
   return (
-    <DraftContext.Provider value={{ text, setText, files, addFiles, removeFile, clearDraft }}>
+    <DraftContext.Provider
+      value={{ text, setText, files, addFiles, removeFile, clearFiles, clearDraft }}
+    >
       {children}
     </DraftContext.Provider>
   );

@@ -83,6 +83,8 @@ const Index = () => {
   const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "simple" });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"user" | "display" | "global" | undefined>(undefined);
   const [sessionModelOverride, setSessionModelOverride] = useState<string | null>(null);
+  /** Bumps on „Neuer Chat“ so WelcomeScreen remounts and fade-in runs again. */
+  const [emptyChatAnimKey, setEmptyChatAnimKey] = useState(0);
 
   const {
     conversations,
@@ -91,6 +93,7 @@ const Index = () => {
     createConversation,
     loadMessages,
     saveMessage,
+    updateMessageStructuredContent,
     deleteConversation,
     updateTitle,
     updateSourceFilename,
@@ -250,6 +253,7 @@ const Index = () => {
   );
 
   const handleNewConversation = useCallback(async () => {
+    setEmptyChatAnimKey((k) => k + 1);
     setMessages([]);
     setSidebarOpen(false);
     setAgentsSheetOpen(false);
@@ -424,7 +428,12 @@ const Index = () => {
         >
           {mainView === "chat" && (
             messages.length === 0 ? (
-              <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
+              <div
+                key={emptyChatAnimKey}
+                className="motion-reduce:animate-none animate-fade-in min-h-[40vh] flex flex-col"
+              >
+                <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
+              </div>
             ) : (
               <div className="max-w-6xl mx-auto px-4 pt-6 pb-16 space-y-4 min-h-[40vh]">
                 <ErrorBoundary>
@@ -433,6 +442,7 @@ const Index = () => {
                       key={msg.id}
                       message={msg}
                       conversationId={activeConversationId}
+                      updateMessageStructuredContent={updateMessageStructuredContent}
                     />
                   ))}
                   {isChatBusy && analysisStartTime != null && (
@@ -484,6 +494,7 @@ const Index = () => {
                 onStop={handleStop}
                 attachmentShortcutHint={formatModCombo(shortcutPrefs.keys.upload)}
                 stopShortcutHint={formatModCombo(shortcutPrefs.keys.stop)}
+                draftConversationId={activeConversationId}
               />
               <div className={cn("flex items-center justify-between gap-3", CHAT_COMPOSER_DOCK_BELOW_CARD)}>
                 <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 px-2.5 py-1 rounded-md bg-muted">

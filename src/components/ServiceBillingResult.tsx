@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Copy, ClipboardCheck, Download, CheckIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,10 @@ function formatEuro(n: number): string {
 
 type ServiceBillingResultProps = {
   data: ServiceBillingResultData;
+  messageId?: string | null;
+  initialServiceDecisions?: Record<string, string> | null;
+  onDecisionsChange?: (decisions: Record<string, string>) => void;
+  onPersistServiceDecisions?: (decisions: Record<string, Decision>) => void;
 };
 
 type Decision = "pending" | "accepted" | "rejected";
@@ -61,17 +65,38 @@ type Decision = "pending" | "accepted" | "rejected";
 const getKey = (v: ServiceBillingPosition, isOpt = false) =>
   (isOpt ? "opt-" : "") + v.ziffer + "|" + v.leistung;
 
-const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
+function initialServiceDecisionsMap(
+  data: ServiceBillingResultData,
+  initial?: Record<string, string> | null,
+): Record<string, Decision> {
+  const init: Record<string, Decision> = {};
+  for (const v of data.vorschlaege) {
+    const k = getKey(v, false);
+    const raw = initial?.[k];
+    init[k] = raw === "accepted" || raw === "rejected" || raw === "pending" ? raw : "pending";
+  }
+  for (const v of data.optimierungen ?? []) {
+    const k = getKey(v, true);
+    const raw = initial?.[k];
+    init[k] = raw === "accepted" || raw === "rejected" || raw === "pending" ? raw : "pending";
+  }
+  return init;
+}
+
+const ServiceBillingResult = ({
+  data,
+  messageId = null,
+  initialServiceDecisions = null,
+  onDecisionsChange,
+  onPersistServiceDecisions,
+}: ServiceBillingResultProps) => {
   const allItems = [
     ...data.vorschlaege.map((v) => ({ ...v, isOpt: false })),
     ...(data.optimierungen ?? []).map((v) => ({ ...v, isOpt: true })),
   ];
-  const [decisions, setDecisions] = useState<Record<string, Decision>>(() => {
-    const init: Record<string, Decision> = {};
-    for (const v of data.vorschlaege) init[getKey(v, false)] = "pending";
-    for (const v of data.optimierungen ?? []) init[getKey(v, true)] = "pending";
-    return init;
-  });
+  const [decisions, setDecisions] = useState<Record<string, Decision>>(() =>
+    initialServiceDecisionsMap(data, initialServiceDecisions),
+  );
   const [copied, setCopied] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [patientName, setPatientName] = useState("");
@@ -86,6 +111,21 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
   const setDecision = useCallback((key: string, decision: Decision) => {
     setDecisions((prev) => ({ ...prev, [key]: decision }));
   }, []);
+
+  useEffect(() => {
+    if (!onDecisionsChange) return;
+    onDecisionsChange(
+      Object.fromEntries(Object.entries(decisions).map(([k, v]) => [k, v])),
+    );
+  }, [decisions, onDecisionsChange]);
+
+  useEffect(() => {
+    if (!messageId || !onPersistServiceDecisions) return;
+    const t = window.setTimeout(() => {
+      onPersistServiceDecisions(decisions);
+    }, 450);
+    return () => clearTimeout(t);
+  }, [decisions, messageId, onPersistServiceDecisions]);
 
   const acceptAll = useCallback(() => {
     setDecisions((prev) => {
@@ -171,7 +211,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
 
   if (data.vorschlaege.length === 0 && (data.sachkosten?.length ?? 0) === 0) {
     return (
-      <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+      <div className="rounded-lg bg-muted/30 p-4 text-sm text-muted-foreground">
         Keine abrechenbaren Leistungen erkannt. Bitte beschreiben Sie die erbrachten
         Leistungen genauer oder laden Sie einen Behandlungsbericht hoch.
       </div>
@@ -181,7 +221,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
   return (
     <div className="flex flex-col gap-4">
       {/* ── Überblick ── */}
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
         <h2 className="text-sm font-semibold text-foreground mb-3">Überblick</h2>
         <div className="grid gap-2 grid-cols-2 sm:grid-cols-5">
           <SummaryCard
@@ -210,7 +250,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
             variant="accent"
           />
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 pt-1 text-xs text-muted-foreground">
           <span>Summe (ausgewählt): <strong className="text-foreground">{formatEuro(totalBetrag)}</strong></span>
           {data.summary && (
             <>
@@ -224,14 +264,14 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
           )}
         </div>
         {data.summary?.compliance_score != null && data.summary.compliance_score < 0.9 && (
-          <div className="mt-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
+          <div className="mt-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
             Hinweis: Compliance-Score unter 90 %. Bitte prüfen Sie Ausschlussziffern und Begründungen vor der Abrechnung.
           </div>
         )}
       </section>
 
       {/* ── GOÄ-Vorschläge ── */}
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <h2 className="text-sm font-semibold text-foreground">GOÄ-Vorschläge</h2>
           <button
@@ -248,7 +288,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
 
         {/* Alle annehmen – prominent über den Zeilen */}
         {pendingCount > 0 && (
-          <div className="mb-3 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+          <div className="mb-3 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30">
             <button
               type="button"
               onClick={acceptAll}
@@ -276,10 +316,10 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
               <div
                 key={key}
                 className={cn(
-                  "rounded-lg border p-3 transition-colors",
-                  isAccepted && "border-border bg-emerald-50/30 dark:bg-emerald-950/10",
-                  isPending && "border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/20",
-                  decision === "rejected" && "border-border opacity-75"
+                  "rounded-lg p-3 transition-colors",
+                  isAccepted && "bg-emerald-50/30 dark:bg-emerald-950/10",
+                  isPending && "bg-amber-50/50 dark:bg-amber-950/20",
+                  decision === "rejected" && "opacity-75"
                 )}
               >
                 <div className="flex justify-between items-start gap-2">
@@ -313,7 +353,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
                     <span className="font-mono font-semibold ml-1">{formatEuro(v.betrag)}</span>
                   </div>
                 </div>
-                <div className="flex gap-1 pt-2 mt-2 border-t border-border/50">
+                <div className="flex gap-1 pt-2 mt-2">
                   <button
                     type="button"
                     onClick={() => setDecision(key, "accepted")}
@@ -354,7 +394,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
               {data.sachkosten!.map((s, i) => (
                 <div
                   key={i}
-                  className="rounded-lg border border-border bg-muted/20 p-3"
+                  className="rounded-lg bg-muted/20 p-3"
                 >
                   <div className="flex justify-between items-center">
                     <p className="text-sm font-medium">{s.bezeichnung}</p>
@@ -383,10 +423,10 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
                   <div
                     key={key}
                     className={cn(
-                      "rounded-lg border p-3 transition-colors",
-                      isAccepted && "border-border bg-emerald-50/30 dark:bg-emerald-950/10",
-                      isPending && "border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/20",
-                      decision === "rejected" && "border-border opacity-75"
+                      "rounded-lg p-3 transition-colors",
+                      isAccepted && "bg-emerald-50/30 dark:bg-emerald-950/10",
+                      isPending && "bg-amber-50/50 dark:bg-amber-950/20",
+                      decision === "rejected" && "opacity-75"
                     )}
                   >
                     <div className="flex justify-between items-start gap-2">
@@ -410,7 +450,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
                         <span className="font-mono font-semibold ml-1">{formatEuro(v.betrag)}</span>
                       </div>
                     </div>
-                    <div className="flex gap-1 pt-2 mt-2 border-t border-border/50">
+                    <div className="flex gap-1 pt-2 mt-2">
                       <button
                         type="button"
                         onClick={() => setDecision(key, "accepted")}
@@ -445,7 +485,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
           </>
         )}
 
-        <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
+        <div className="mt-4 pt-1 flex items-center justify-between gap-2">
           <span className="text-sm text-muted-foreground">
             {acceptedPositions.length} von {allItems.length} angenommen
           </span>
@@ -550,7 +590,7 @@ const ServiceBillingResult = ({ data }: ServiceBillingResultProps) => {
       </Dialog>
 
       {data.klinischerKontext && (
-        <p className="text-xs text-muted-foreground border-t border-border pt-2">
+        <p className="text-xs text-muted-foreground mt-2 pt-1">
           <span className="font-medium">Kontext:</span> {data.klinischerKontext}
         </p>
       )}

@@ -12,7 +12,13 @@ type ChatInputProps = {
   /** Shown in title/tooltip, e.g. "Strg+U" */
   attachmentShortcutHint?: string;
   stopShortcutHint?: string;
+  /** Persist/load composer text per conversation (localStorage). */
+  draftConversationId?: string | null;
 };
+
+function composerDraftStorageKey(conversationId: string | null | undefined) {
+  return `docbill-composer-draft:${conversationId ?? "__none__"}`;
+}
 
 export type ChatInputHandle = {
   openAttachmentPicker: () => void;
@@ -35,17 +41,54 @@ const ALLOWED_TYPES = [
 const ALLOWED_EXT = /\.(jpe?g|png|gif|bmp|tiff?|heic|pdf)$/i;
 
 const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
-  { onSend, isLoading, onStop, attachmentShortcutHint, stopShortcutHint },
+  { onSend, isLoading, onStop, attachmentShortcutHint, stopShortcutHint, draftConversationId = null },
   ref,
 ) {
-  const { text, setText, files, addFiles, removeFile, clearDraft } = useDraft();
+  const { text, setText, files, addFiles, removeFile, clearFiles, clearDraft } = useDraft();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewFile, setPreviewFile] = useState<{ src: string; name: string; type: string } | null>(null);
+  const textRef = useRef(text);
+  textRef.current = text;
+  const prevDraftConvRef = useRef<string | null | undefined>(undefined);
+  const convIdForAutosaveRef = useRef(draftConversationId);
 
   useImperativeHandle(ref, () => ({
     openAttachmentPicker: () => fileInputRef.current?.click(),
   }), []);
+
+  useEffect(() => {
+    const key = composerDraftStorageKey(draftConversationId);
+    const prev = prevDraftConvRef.current;
+    if (prev !== undefined && prev !== draftConversationId) {
+      try {
+        localStorage.setItem(composerDraftStorageKey(prev), textRef.current);
+      } catch {
+        /* quota */
+      }
+    }
+    let loaded = "";
+    try {
+      loaded = localStorage.getItem(key) ?? "";
+    } catch {
+      loaded = "";
+    }
+    setText(loaded);
+    clearFiles();
+    prevDraftConvRef.current = draftConversationId;
+    convIdForAutosaveRef.current = draftConversationId;
+  }, [draftConversationId, setText, clearFiles]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      try {
+        localStorage.setItem(composerDraftStorageKey(convIdForAutosaveRef.current), text);
+      } catch {
+        /* quota */
+      }
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [text]);
 
   // Restore textarea height when component remounts with existing text
   useEffect(() => {
@@ -61,6 +104,11 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     const trimmed = text.trim();
     if (!trimmed && files.length === 0) return;
     onSend(trimmed, files.length > 0 ? files : undefined);
+    try {
+      localStorage.removeItem(composerDraftStorageKey(draftConversationId));
+    } catch {
+      /* ignore */
+    }
     clearDraft();
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";

@@ -25,18 +25,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { conversationListTitleDisplay } from "@/lib/conversationTitle";
 import type { Conversation } from "@/hooks/useConversations";
 import type { BackgroundJobRow, ConversationRunInfo } from "@/hooks/useBackgroundJobQueue";
 import { isToday, isYesterday } from "date-fns";
 
 const SIDEBAR_CHAT_PAGE = 10;
-
-/** Visible title in lists; legacy DB default treated as empty. */
-export function conversationListTitleDisplay(title: string | null | undefined): string | null {
-  const t = (title ?? "").trim();
-  if (!t || t === "Neues Gespräch") return null;
-  return t;
-}
 
 function resolveConversationJobVisual(
   convId: string,
