@@ -24,6 +24,7 @@ export async function mappeGoae(
   analyse: MedizinischeAnalyse,
   apiKey: string,
   userModel: string,
+  adminContext?: string,
 ): Promise<GoaeMappingResult> {
   const zuordnungen: GoaeZuordnung[] = [];
   const nichtZugeordnet: ExtrahierteLeistung[] = [];
@@ -53,6 +54,7 @@ export async function mappeGoae(
       analyse,
       apiKey,
       userModel,
+      adminContext,
     );
     zuordnungen.push(...llmMappings.zuordnungen);
     return {
@@ -100,11 +102,18 @@ REGELN:
 - Bevorzuge gelistete Ziffern vor Analogbewertungen
 - "alternativZiffern": Gib 1–3 alternative GOÄ-Ziffern an, wenn sinnvolle weitere Abrechnungsmöglichkeiten existieren (z.B. ähnliche Leistung, ergänzende Ziffer bei typischer Kombination)`;
 
+function withAdminContextPrompt(base: string, adminContext?: string): string {
+  const a = adminContext?.trim();
+  if (!a) return base;
+  return `${base}\n\n## ADMIN-KONTEXT (Praxis-/Klinik-Wissen):\n${a}`;
+}
+
 async function suggestMappingsViaLlm(
   leistungen: ExtrahierteLeistung[],
   analyse: MedizinischeAnalyse,
   apiKey: string,
   userModel: string,
+  adminContext?: string,
 ): Promise<GoaeMappingResult> {
   const model = pickExtractionModel(userModel);
 
@@ -127,7 +136,7 @@ async function suggestMappingsViaLlm(
   const raw = await callLlm({
     apiKey,
     model,
-    systemPrompt: MAPPING_PROMPT,
+    systemPrompt: withAdminContextPrompt(MAPPING_PROMPT, adminContext),
     userContent: [{ type: "text", text: prompt }],
     jsonMode: true,
     temperature: 0.1,

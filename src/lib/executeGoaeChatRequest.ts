@@ -99,5 +99,26 @@ export async function executeGoaeChatRequest(
   });
 
   const analysisTimeSeconds = (Date.now() - startTime) / 1000;
+
+  // #region agent log
+  fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c81fbe" },
+    body: JSON.stringify({
+      sessionId: "c81fbe",
+      hypothesisId: "H1",
+      location: "executeGoaeChatRequest.ts:success",
+      message: "client observed response shape",
+      data: {
+        hadServiceBilling: !!state.serviceBillingData,
+        hadInvoice: !!state.invoiceData,
+        hasFiles: !!(params.filePayloads && params.filePayloads.length),
+        assistantLen: state.assistantContent.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+
   return { ok: true, state, analysisTimeSeconds };
 }

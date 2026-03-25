@@ -161,6 +161,8 @@ export interface ServiceBillingInput {
   extraRules?: string;
   /** Optimierungsziele aus Input-Parser (z.B. "maximal abrechnen" → maximaler_umsatz) */
   optimizeFor?: OptimizeFor[];
+  /** RAG-/Dateiname-abgestimmter Admin-KI-Kontext (wie im Chat/Rechnungsmodus) */
+  adminContext?: string;
 }
 
 export async function runServiceBillingPipeline(
@@ -174,6 +176,7 @@ export async function runServiceBillingPipeline(
       input.files,
       apiKey,
       input.model,
+      input.adminContext,
     );
     if (input.userMessage?.trim()) {
       parsedRechnung.rawText = `${input.userMessage}\n\n---\n\n${parsedRechnung.rawText}`;
@@ -191,6 +194,7 @@ export async function runServiceBillingPipeline(
     parsedRechnung,
     apiKey,
     input.model,
+    input.adminContext,
   );
 
   const leistungen = extrahiereLeistungenAusNlp(medizinischeAnalyse);
@@ -219,6 +223,7 @@ export async function runServiceBillingPipeline(
     medizinischeAnalyse,
     apiKey,
     input.model,
+    input.adminContext,
   );
 
   const katalog = getKatalogMap();

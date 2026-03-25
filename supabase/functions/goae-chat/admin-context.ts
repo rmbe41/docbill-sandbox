@@ -21,6 +21,93 @@ function normalizeChunkBody(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+/** True if the user query clearly refers to this admin file name (stem / words). */
+function filenameStemMatchesQuery(filename: string, query: string): boolean {
+  const q = query.toLowerCase();
+  const stem = filename.replace(/\.[^/.]+$/, "").trim().toLowerCase();
+  if (!stem || stem.length < 2) return false;
+  if (q.includes(stem)) return true;
+  const words = stem.split(/[\s_\-–—.]+/).filter((w) => w.length >= 2);
+  if (words.length < 2) return words.length === 1 && q.includes(words[0]);
+  return words.every((w) => q.includes(w));
+}
+
+function adminBlockCoversFilename(adminHtml: string, filename: string): boolean {
+  const esc = filename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^###\\s+${esc}(\\s|\\(|\\.|$)`, "im").test(adminHtml);
+}
+
+async function loadFilenameMatchSections(
+  query: string,
+  sbUrl: string,
+  sbKey: string,
+): Promise<{ filename: string; section: string }[]> {
+  if (!query?.trim()) return [];
+
+  const listResp = await fetchWithTimeout(
+    `${sbUrl}/rest/v1/admin_context_files?select=id,filename`,
+    {
+      headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+      timeoutMs: RPC_TIMEOUT_MS,
+    },
+  );
+  if (!listResp.ok) return [];
+
+  const files = (await listResp.json()) as { id: string; filename: string }[];
+  const matched = files.filter((f) => filenameStemMatchesQuery(f.filename, query));
+  if (matched.length === 0) return [];
+
+  const out: { filename: string; section: string }[] = [];
+  for (const f of matched) {
+    const rowResp = await fetchWithTimeout(
+      `${sbUrl}/rest/v1/admin_context_files?id=eq.${f.id}&select=filename,content_text`,
+      {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        timeoutMs: RPC_TIMEOUT_MS,
+      },
+    );
+    if (!rowResp.ok) continue;
+    const rows = (await rowResp.json()) as { filename?: string; content_text?: string }[];
+    const row = rows[0];
+    const text = (row?.content_text ?? "").trim();
+    if (!text) continue;
+    const fn = row?.filename ?? f.filename;
+    out.push({ filename: fn, section: `### ${fn}\n${text}` });
+  }
+  return out;
+}
+
+async function mergeFilenameMatchedSections(
+  query: string,
+  base: string,
+  sbUrl: string,
+  sbKey: string,
+): Promise<string> {
+  const maxChars = MAX_ADMIN_TOKENS * CHARS_PER_TOKEN;
+  const sections = await loadFilenameMatchSections(query, sbUrl, sbKey);
+  const uncovered = sections.filter((s) => !adminBlockCoversFilename(base, s.filename));
+  // #region agent log
+  debugAdminCtx("H_fname", "admin-context.ts:filenameMerge", "filename-aligned admin sections", {
+    matchedFiles: sections.map((s) => s.filename),
+    uncoveredFiles: uncovered.map((s) => s.filename),
+    baseLen: base.length,
+  });
+  // #endregion
+  if (uncovered.length === 0) return base;
+
+  const header = "\n\n## ADMIN-KONTEXT (Anfrage bezieht sich auf diese Kontext-Datei(en)):\n";
+  const sup = header + uncovered.map((s) => s.section).join("\n\n");
+  let combined = sup + (base.trim() ? `\n\n${base.trim()}` : "");
+  if (combined.length <= maxChars) return combined;
+
+  const room = Math.max(0, maxChars - sup.length - 80);
+  const trimmedBase =
+    room > 0 && base.trim()
+      ? `${base.trim().slice(0, room)}\n\n[… weiterer ADMIN-KONTEXT gekürzt …]`
+      : "";
+  return sup + (trimmedBase ? `\n\n${trimmedBase}` : "");
+}
+
 // #region agent log
 function debugAdminCtx(
   hypothesisId: string,
@@ -29,17 +116,17 @@ function debugAdminCtx(
   data: Record<string, unknown>,
 ) {
   const payload = {
-    sessionId: "84bf6e",
+    sessionId: "c81fbe",
     hypothesisId,
     location,
     message,
     data,
     timestamp: Date.now(),
   };
-  console.error("DOCBILL_INSTRUMENTATION_84BF6E admin-context", JSON.stringify(payload));
+  console.error("DOCBILL_INSTRUMENTATION admin-context", JSON.stringify(payload));
   fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "84bf6e" },
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c81fbe" },
     body: JSON.stringify(payload),
   }).catch(() => {});
 }
@@ -80,11 +167,26 @@ export async function loadRelevantAdminContext(
   query: string,
   apiKey: string,
 ): Promise<string> {
-  if (!query?.trim()) return "";
+  if (!query?.trim()) {
+    // #region agent log
+    debugAdminCtx("H3", "admin-context.ts:emptyQuery", "skip admin context (empty rag query)", {
+      queryPresent: typeof query === "string",
+    });
+    // #endregion
+    return "";
+  }
 
   const sbUrl = Deno.env.get("SUPABASE_URL");
   const sbKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!sbUrl || !sbKey) return "";
+  if (!sbUrl || !sbKey) {
+    // #region agent log
+    debugAdminCtx("H_env", "admin-context.ts:noSupabase", "skip admin context (missing sb env)", {
+      hasUrl: !!sbUrl,
+      hasKey: !!sbKey,
+    });
+    // #endregion
+    return "";
+  }
 
   try {
     const zExtracted = extractZiffernFromText(query);
@@ -125,7 +227,12 @@ export async function loadRelevantAdminContext(
         status: rpcResp.status,
       });
       // #endregion
-      return loadFullAdminContextFallback(sbUrl, sbKey);
+      return await mergeFilenameMatchedSections(
+        query,
+        await loadFullAdminContextFallback(sbUrl, sbKey),
+        sbUrl,
+        sbKey,
+      );
     }
 
     const chunks = await rpcResp.json();
@@ -135,7 +242,12 @@ export async function loadRelevantAdminContext(
         chunksType: typeof chunks,
       });
       // #endregion
-      return loadFullAdminContextFallback(sbUrl, sbKey);
+      return await mergeFilenameMatchedSections(
+        query,
+        await loadFullAdminContextFallback(sbUrl, sbKey),
+        sbUrl,
+        sbKey,
+      );
     }
 
     const topPreview = chunks.slice(0, 5).map((c: { similarity?: number; content?: string; chunk_index?: number }) => ({
@@ -153,6 +265,7 @@ export async function loadRelevantAdminContext(
       chunkCount: chunks.length,
       topPreview,
       distinctHeadCount: distinctHeads.size,
+      chunkFilenames: chunks.slice(0, 12).map((c: { filename?: string }) => c?.filename ?? null),
     });
     // #endregion
 
@@ -163,7 +276,12 @@ export async function loadRelevantAdminContext(
         distinctHeadCount: distinctHeads.size,
       });
       // #endregion
-      return loadFullAdminContextFallback(sbUrl, sbKey);
+      return await mergeFilenameMatchedSections(
+        query,
+        await loadFullAdminContextFallback(sbUrl, sbKey),
+        sbUrl,
+        sbKey,
+      );
     }
 
     const nonEmptyContents = chunks
@@ -176,7 +294,12 @@ export async function loadRelevantAdminContext(
         chunkCount: chunks.length,
       });
       // #endregion
-      return loadFullAdminContextFallback(sbUrl, sbKey);
+      return await mergeFilenameMatchedSections(
+        query,
+        await loadFullAdminContextFallback(sbUrl, sbKey),
+        sbUrl,
+        sbKey,
+      );
     }
 
     const maxChars = MAX_ADMIN_TOKENS * CHARS_PER_TOKEN;
@@ -198,24 +321,26 @@ export async function loadRelevantAdminContext(
       totalChars += content.length;
     }
 
-    if (parts.length === 0) return "";
+    if (parts.length === 0) {
+      return await mergeFilenameMatchedSections(query, "", sbUrl, sbKey);
+    }
     const ragBlock =
       "\n\n## ADMIN-KONTEXT (relevante Ausschnitte):\n" + parts.join("\n\n");
     // #region agent log
-    debugAdminCtx("H_rag_polluted", "admin-context.ts:ragPath", "using RAG block", {
+    debugAdminCtx("H_rag_ok", "admin-context.ts:ragPath", "using RAG block", {
       ragLen: ragBlock.length,
-      mentionsBlackie: ragBlock.includes("Blackie"),
-      mentionsBenRea: ragBlock.includes("Ben Rea"),
+      blockMentionsCatKnowledge: /cat\s*knowledge/i.test(ragBlock),
     });
     // #endregion
-    return ragBlock;
+    return await mergeFilenameMatchedSections(query, ragBlock, sbUrl, sbKey);
   } catch {
     const url = Deno.env.get("SUPABASE_URL");
     const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     // #region agent log
     debugAdminCtx("H_rag_empty", "admin-context.ts:catch", "exception → fallback", {});
     // #endregion
-    return url && key ? loadFullAdminContextFallback(url, key) : "";
+    const fb = url && key ? await loadFullAdminContextFallback(url, key) : "";
+    return await mergeFilenameMatchedSections(query, fb, sbUrl, sbKey);
   }
 }
 
@@ -245,13 +370,16 @@ async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promi
       total += text.length;
     }
     const fb = "\n\n## ADMIN-KONTEXT:\n" + parts.join("\n\n");
+    const allNames = (ctxFiles as { filename?: string }[]).map((f) => f?.filename ?? "");
     // #region agent log
-    debugAdminCtx("H_fallback", "admin-context.ts:fallback", "full-file fallback", {
+    debugAdminCtx("H_budget", "admin-context.ts:fallback", "full-file fallback", {
       fileCount: ctxFiles.length,
       fbLen: fb.length,
-      mentionsBlackie: fb.includes("Blackie"),
-      mentionsBenRea: fb.includes("Ben Rea"),
-      filenames: (ctxFiles as { filename?: string }[]).map((f) => f?.filename).slice(0, 8),
+      partsCount: parts.length,
+      filenamesOrderedNewestFirst: allNames,
+      partsIncluded: parts.length,
+      maxChars,
+      blockMentionsCatKnowledge: /cat\s*knowledge/i.test(fb),
     });
     // #endregion
     return fb;

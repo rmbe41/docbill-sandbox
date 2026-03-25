@@ -62,10 +62,17 @@ REGELN:
 - Erkenne implizite Behandlungen (z.B. GOÄ 1240 = Spaltlampenuntersuchung)
 - Benenne das Fachgebiet basierend auf den verwendeten GOÄ-Ziffern`;
 
+function withAdminContextPrompt(base: string, adminContext?: string): string {
+  const a = adminContext?.trim();
+  if (!a) return base;
+  return `${base}\n\n## ADMIN-KONTEXT (Praxis-/Klinik-Wissen):\n${a}`;
+}
+
 export async function analysiereMedizinisch(
   rechnung: ParsedRechnung,
   apiKey: string,
   userModel: string,
+  adminContext?: string,
 ): Promise<MedizinischeAnalyse> {
   const model = pickExtractionModel(userModel);
 
@@ -74,7 +81,7 @@ export async function analysiereMedizinisch(
   const raw = await callLlm({
     apiKey,
     model,
-    systemPrompt: NLP_SYSTEM_PROMPT,
+    systemPrompt: withAdminContextPrompt(NLP_SYSTEM_PROMPT, adminContext),
     userContent: [{ type: "text", text: zusammenfassung }],
     jsonMode: true,
     temperature: 0.1,

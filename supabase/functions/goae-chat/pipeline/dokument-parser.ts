@@ -226,10 +226,17 @@ REGELN:
 - rawText: der gesamte extrahierte Text
 - diagnosen: alle genannten Diagnosen, Befunde, Verdachtsdiagnosen`;
 
+function withAdminContextPrompt(base: string, adminContext?: string): string {
+  const a = adminContext?.trim();
+  if (!a) return base;
+  return `${base}\n\n## ADMIN-KONTEXT (Praxis-/Klinik-Wissen):\n${a}`;
+}
+
 export async function parseBehandlungsbericht(
   files: FilePayload[],
   apiKey: string,
   userModel: string,
+  adminContext?: string,
 ): Promise<ParsedRechnung> {
   const model = pickExtractionModel(userModel);
 
@@ -267,7 +274,7 @@ export async function parseBehandlungsbericht(
   const raw = await callLlm({
     apiKey,
     model,
-    systemPrompt: BEHANDLUNGSBERICHT_PROMPT,
+    systemPrompt: withAdminContextPrompt(BEHANDLUNGSBERICHT_PROMPT, adminContext),
     userContent: contentParts,
     jsonMode: true,
     temperature: 0.05,

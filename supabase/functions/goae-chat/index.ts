@@ -333,12 +333,42 @@ serve(async (req) => {
       if (h === "frage") intent = "frage";
     }
 
+    // #region agent log
+    {
+      const _dbgPayload = {
+        sessionId: "c81fbe",
+        hypothesisId: "H1",
+        location: "goae-chat/index.ts:intentRoute",
+        message: "intent routing (service-billing lädt Admin-Kontext seit Fix)",
+        data: {
+          intent,
+          hasFiles: !!hasFiles,
+          engine_type: engine_type ?? "",
+          serviceBillingLoadsAdminContext: intent === "leistungen_abrechnen",
+        },
+        timestamp: Date.now(),
+      };
+      console.error("DOCBILL_DEBUG_INTENT", JSON.stringify(_dbgPayload));
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c81fbe" },
+        body: JSON.stringify(_dbgPayload),
+      }).catch(() => {});
+    }
+    // #endregion
+
     let response: Response;
 
     if (intent === "leistungen_abrechnen") {
       // ═══════════════════════════════════════════════════════
       // SERVICE-BILLING: Leistungen aus Text/Dokument → GOÄ-Vorschläge
       // ═══════════════════════════════════════════════════════
+      const ragQueryBilling = userMessage.trim() ||
+        buildPipelineQuery(userMessage, undefined, lastResult);
+      const adminContextBilling = await loadRelevantAdminContext(
+        ragQueryBilling,
+        OPENROUTER_API_KEY,
+      );
       response = await runServiceBillingAsStream(
         {
           files: hasFiles ? files : undefined,
@@ -346,6 +376,7 @@ serve(async (req) => {
           model: resolvedModel,
           extraRules: extra_rules,
           optimizeFor: extrahiereOptimizeFor(userMessage),
+          adminContext: adminContextBilling,
         },
         OPENROUTER_API_KEY,
       );
