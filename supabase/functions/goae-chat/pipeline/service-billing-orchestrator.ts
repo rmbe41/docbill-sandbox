@@ -14,7 +14,7 @@ import {
   pruefeServiceBillingVorschlaege,
   erstelleBegruendungVorschlag,
 } from "./regelengine.ts";
-import { GOAE_KATALOG } from "../goae-catalog.ts";
+import { buildServiceKatalogMapFromJson } from "../goae-catalog-json.ts";
 import type {
   ParsedRechnung,
   ExtrahierteLeistung,
@@ -64,44 +64,11 @@ interface KatalogEintrag {
   bezeichnung: string;
 }
 
-/** Parst Katalog-Zeile für Punkte, Schwellenfaktor, Höchstfaktor und Bezeichnung */
-function parseKatalogEintrag(katalogText: string): Map<string, KatalogEintrag> {
-  const map = new Map<string, KatalogEintrag>();
-
-  for (const line of katalogText.split("\n")) {
-    const trimmed = line.trim();
-    const parts = trimmed.split("|");
-    if (parts.length < 5) continue;
-
-    const ziffer = parts[0].trim();
-    if (!ziffer || !/^[\dA]/.test(ziffer)) continue;
-
-    const bezeichnung = parts[1]?.trim() || ziffer;
-    const punkte = parseInt(parts[2]?.trim() || "0", 10);
-    if (isNaN(punkte) || punkte === 0) continue;
-
-    let schwellenfaktor = 2.3;
-    let hoechstfaktor = 3.5;
-    const schwelleMatch = parts[4]?.match(/([\d,]+)→/);
-    if (schwelleMatch) {
-      schwellenfaktor = parseFloat(schwelleMatch[1].replace(",", "."));
-    }
-    const maxMatch = parts[5]?.match(/([\d,]+)→/);
-    if (maxMatch) {
-      hoechstfaktor = parseFloat(maxMatch[1].replace(",", "."));
-    }
-
-    map.set(ziffer, { punkte, schwellenfaktor, hoechstfaktor, bezeichnung });
-  }
-
-  return map;
-}
-
 let _katalogCache: Map<string, KatalogEintrag> | null = null;
 
 function getKatalogMap(): Map<string, KatalogEintrag> {
   if (!_katalogCache) {
-    _katalogCache = parseKatalogEintrag(GOAE_KATALOG);
+    _katalogCache = buildServiceKatalogMapFromJson();
   }
   return _katalogCache;
 }
@@ -262,7 +229,7 @@ export async function runServiceBillingPipeline(
   } = pruefeServiceBillingVorschlaege(
     mappings.zuordnungen,
     medizinischeAnalyse,
-    GOAE_KATALOG,
+    "",
   );
 
   const hauptZiffern = new Set(mappings.zuordnungen.map((z) => z.ziffer));
@@ -291,7 +258,7 @@ export async function runServiceBillingPipeline(
           z.ziffer,
           faktor,
           medizinischeAnalyse,
-          GOAE_KATALOG,
+          "",
         );
       } else {
         begruendung = `Standardfaktor ${faktor}× (Schwellenwert) – keine Begründung erforderlich.`;
@@ -330,7 +297,7 @@ export async function runServiceBillingPipeline(
           altZiffer,
           faktor,
           medizinischeAnalyse,
-          GOAE_KATALOG,
+          "",
         );
       } else {
         begruendung = `Alternative zu GOÄ ${z.ziffer} (${z.bezeichnung}). Standardfaktor ${faktor}× (Schwellenwert) – keine Begründung erforderlich.`;

@@ -15,7 +15,6 @@ import { mappeGoae } from "./goae-mapping.ts";
 import { pruefeRechnung } from "./regelengine.ts";
 import { generateTextStream, buildTextGenerationPrompt } from "./text-generator.ts";
 import { isFreeModel } from "../model-resolver.ts";
-import { GOAE_KATALOG } from "../goae-catalog.ts";
 import type {
   PipelineInput,
   PipelineResult,
@@ -118,7 +117,7 @@ export async function runPipeline(
         parsedRechnung,
         medizinischeAnalyse,
         mappings,
-        GOAE_KATALOG,
+        "",
       );
 
       const pipelineResult: PipelineResult = {

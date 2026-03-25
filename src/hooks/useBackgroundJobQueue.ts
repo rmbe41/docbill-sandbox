@@ -71,6 +71,7 @@ type UseBackgroundJobQueueParams = {
   saveMessage: (conversationId: string, role: "user" | "assistant", content: string) => Promise<string | null>;
   loadMessages: (conversationId: string) => Promise<{ id: string; role: string; content: string }[]>;
   updateSourceFilename: (id: string, filename: string) => Promise<void>;
+  updateTitle: (id: string, title: string) => Promise<void>;
   fetchConversations: () => Promise<void>;
   userSettings: { engine_type: string | null; custom_rules: string | null };
   globalSettings: { default_engine: string; default_rules: string };
@@ -88,6 +89,7 @@ export function useBackgroundJobQueue({
   saveMessage,
   loadMessages,
   updateSourceFilename,
+  updateTitle,
   fetchConversations,
   userSettings,
   globalSettings,
@@ -562,6 +564,12 @@ export function useBackgroundJobQueue({
         .maybeSingle();
       let sortCursor = (maxRow?.sort_order as number | undefined) ?? 0;
 
+      let isEmptyActiveConversation = false;
+      if (tasks.length === 1 && activeConversationId) {
+        const existingMsgs = await loadMessages(activeConversationId);
+        isEmptyActiveConversation = existingMsgs.length === 0;
+      }
+
       for (let i = 0; i < tasks.length; i++) {
         const spec = tasks[i];
         let convId: string | null = null;
@@ -599,6 +607,15 @@ export function useBackgroundJobQueue({
         }
 
         await saveMessage(convId, "user", spec.content);
+        if (
+          isEmptyActiveConversation &&
+          i === 0 &&
+          convId === activeConversationId
+        ) {
+          const derivedListTitle =
+            spec.files?.[0]?.name?.replace(/\.[^.]+$/, "") || spec.content.slice(0, 60) || "";
+          if (derivedListTitle) await updateTitle(convId, derivedListTitle);
+        }
         if (spec.files?.[0]) await updateSourceFilename(convId, spec.files[0].name);
 
         const filePayloads =
@@ -648,7 +665,9 @@ export function useBackgroundJobQueue({
       activeConversationId,
       createConversation,
       saveMessage,
+      loadMessages,
       updateSourceFilename,
+      updateTitle,
       setActiveConversationId,
       setMessages,
       toast,

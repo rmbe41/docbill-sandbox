@@ -20,8 +20,33 @@ const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const EMBEDDING_DIM = 1536;
 const CHUNK_SIZE = 2500;
 const CHUNK_OVERLAP = 200;
-const MAX_CHUNKS = 100;
+const MAX_CHUNKS_DEFAULT = 100;
 const EMBEDDING_TIMEOUT_MS = 60000; // 60s – verhindert endloses Hängen bei großen Chunks
+
+/** Debug ingest (erreicht nur bei lokalem Functions-Serve die Session-Ingest-URL). */
+function agentLog(hypothesisId: string, location: string, message: string, data: Record<string, unknown>) {
+  // #region agent log
+  fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" },
+    body: JSON.stringify({
+      sessionId: "25aeaa",
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+}
+
+function effectiveMaxChunks(): number {
+  const raw = Deno.env.get("ADMIN_CONTEXT_MAX_CHUNKS");
+  if (!raw) return MAX_CHUNKS_DEFAULT;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : MAX_CHUNKS_DEFAULT;
+}
 
 async function fetchWithTimeout(
   url: string,
@@ -37,10 +62,32 @@ async function fetchWithTimeout(
   }
 }
 
-function chunkText(text: string, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
+type ChunkTextResult = { chunks: string[]; truncated: boolean };
+
+/** Heuristik GOÄ-Ziffern im Chunk (ohne gebündelten Katalog in dieser Function). */
+function guessChunkZiffern(content: string): string[] {
+  const s = new Set<string>();
+  for (const m of content.matchAll(/\bGOÄ\s*(\d{1,4}[a-z]?|[A-Z]\d{0,4})\b/gi)) {
+    s.add(m[1].trim());
+  }
+  for (const m of content.matchAll(/\b(\d{3,4})\b/g)) {
+    const n = m[1];
+    if (/^(19|20)\d{2}$/.test(n)) continue;
+    s.add(n);
+  }
+  return [...s].slice(0, 48);
+}
+
+function chunkText(
+  text: string,
+  chunkSize = CHUNK_SIZE,
+  overlap = CHUNK_OVERLAP,
+  maxChunks = effectiveMaxChunks(),
+): ChunkTextResult {
   const chunks: string[] = [];
   let start = 0;
-  while (start < text.length && chunks.length < MAX_CHUNKS) {
+  let lastEnd = 0;
+  while (start < text.length && chunks.length < maxChunks) {
     let end = Math.min(start + chunkSize, text.length);
     if (end < text.length) {
       const lastNewline = text.lastIndexOf("\n", end);
@@ -48,9 +95,12 @@ function chunkText(text: string, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP
     }
     const chunk = text.slice(start, end).trim();
     if (chunk.length > 0) chunks.push(chunk);
-    start = end - overlap;
+    lastEnd = end;
+    if (end >= text.length) break;
+    start = Math.max(0, end - overlap);
   }
-  return chunks;
+  const truncated = lastEnd < text.length;
+  return { chunks, truncated };
 }
 
 async function createEmbeddings(texts: string[], apiKey: string): Promise<number[][]> {
@@ -146,6 +196,9 @@ serve(async (req) => {
 
     const isAdmin = Array.isArray(roleRow) && roleRow.some((r: { role: string }) => r.role === "admin");
     if (!isAdmin) {
+      agentLog("H5", "admin-context-upload:403", "admin role required", {
+        roleRowCount: Array.isArray(roleRow) ? roleRow.length : -1,
+      });
       return new Response(
         JSON.stringify({ error: "Admin role required" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -219,7 +272,7 @@ serve(async (req) => {
         );
         const existing = await existingResp.json();
         if (Array.isArray(existing) && existing.length > 0) continue;
-        const chunks = chunkText(contentText);
+        const { chunks } = chunkText(contentText);
         if (chunks.length === 0) continue;
         const embeddings = await createEmbeddings(chunks, openRouterKey);
         let ok = true;
@@ -229,7 +282,14 @@ serve(async (req) => {
           const chunkResp = await fetch(`${sbUrl}/rest/v1/admin_context_chunks`, {
             method: "POST",
             headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ file_id: fileId, filename, chunk_index: i, content: chunks[i], embedding: emb }),
+            body: JSON.stringify({
+              file_id: fileId,
+              filename,
+              chunk_index: i,
+              content: chunks[i],
+              embedding: emb,
+              ziffern: guessChunkZiffern(chunks[i]),
+            }),
           });
           if (!chunkResp.ok) ok = false;
         }
@@ -258,7 +318,22 @@ serve(async (req) => {
       );
     }
 
-    const chunks = chunkText(text);
+    agentLog("H3", "admin-context-upload:uploadPath", "upload path", {
+      filename,
+      textLen: text.length,
+      base64Len: typeof file_base64 === "string" ? file_base64.length : 0,
+    });
+
+    const maxC = effectiveMaxChunks();
+    const estChunks = Math.min(
+      maxC,
+      Math.ceil(text.length / Math.max(1, CHUNK_SIZE - CHUNK_OVERLAP)),
+    );
+    console.log(
+      `[admin-context-upload] preflight filename=${filename} chars=${text.length} est_chunks≤${estChunks} max_chunks=${maxC}`,
+    );
+
+    const { chunks, truncated } = chunkText(text);
     if (chunks.length === 0) {
       return new Response(
         JSON.stringify({ error: "No content chunks produced" }),
@@ -267,6 +342,14 @@ serve(async (req) => {
     }
 
     const embeddings = await createEmbeddings(chunks, openRouterKey);
+    agentLog("H3", "admin-context-upload:afterEmbed", "embeddings done", {
+      chunkCount: chunks.length,
+      embCount: embeddings.length,
+    });
+    const approxInputTokens = chunks.length * Math.ceil(CHUNK_SIZE / 4);
+    console.log(
+      `[admin-context-upload] embedding batches=1 chunks=${chunks.length} approx_input_tokens≈${approxInputTokens} truncated=${truncated}`,
+    );
 
     let storagePath: string | null = null;
     const isPdf = filename.toLowerCase().endsWith(".pdf");
@@ -327,6 +410,7 @@ serve(async (req) => {
           chunk_index: i,
           content: chunks[i],
           embedding: emb,
+          ziffern: guessChunkZiffern(chunks[i]),
         }),
       });
       if (!chunkResp.ok) {
@@ -335,12 +419,44 @@ serve(async (req) => {
       }
     }
 
+    try {
+      await fetch(`${sbUrl}/rest/v1/ingest_jobs`, {
+        method: "POST",
+        headers: {
+          apikey: sbKey,
+          Authorization: `Bearer ${sbKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          label: filename,
+          status: "completed",
+          chunks_created: chunks.length,
+          estimated_chunks: estChunks,
+          estimated_input_tokens: approxInputTokens,
+          truncated,
+          meta: { file_id: fileId, max_chunks: maxC },
+        }),
+      });
+    } catch {
+      /* Monitoring optional */
+    }
+
     return new Response(
-      JSON.stringify({ ok: true, file_id: fileId, chunks: chunks.length }),
+      JSON.stringify({
+        ok: true,
+        file_id: fileId,
+        chunks: chunks.length,
+        truncated,
+        max_chunks: maxC,
+        estimated_input_tokens_approx: approxInputTokens,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
     console.error("admin-context-upload error:", e);
+    agentLog("H3", "admin-context-upload:catch", "handler error", {
+      err: e instanceof Error ? e.message : String(e),
+    });
     return new Response(
       JSON.stringify({
         error: e instanceof Error ? e.message : "Upload failed",

@@ -1,12 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useAuth } from "@/hooks/useAuth";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
-).toString();
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,6 +24,8 @@ import TextPreviewOverlay from "@/components/TextPreviewOverlay";
 import { goaeCatalogMeta } from "@/data/goae-catalog-meta";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const DEBOUNCE_MS = 500;
 const GLOBAL_RULE_SEPARATOR = "\n\n<<DOCBILL_RULE_SEPARATOR>>\n\n";
@@ -55,18 +53,55 @@ type ContextFile = {
 const serializeGlobalRuleFields = (fields: string[]): string =>
   fields.map((f) => f.trim()).filter(Boolean).join(GLOBAL_RULE_SEPARATOR);
 
-async function extractTextFromPdf(file: File): Promise<string> {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const numPages = pdf.numPages;
-  const texts: string[] = [];
-  for (let i = 1; i <= numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items.map((item: { str?: string }) => item.str ?? "").join(" ");
-    texts.push(pageText);
+/** PDF.js real Web Workers can hang in some dev/browser setups; preloading the worker module registers WorkerMessageHandler on globalThis so PDFWorker skips new Worker() (see pdfjs PDFWorker.#initialize). */
+let pdfMainThreadWorkerReady: Promise<void> | null = null;
+function ensurePdfJsMainThreadWorker(): Promise<void> {
+  if (!pdfMainThreadWorkerReady) {
+    const g = globalThis as typeof globalThis & { pdfjsWorker?: { WorkerMessageHandler?: unknown } };
+    pdfMainThreadWorkerReady =
+      g.pdfjsWorker?.WorkerMessageHandler != null
+        ? Promise.resolve()
+        : import(/* @vite-ignore */ pdfjsWorker).then(() => {});
   }
-  return texts.join("\n\n");
+  return pdfMainThreadWorkerReady;
+}
+
+async function extractTextFromPdf(file: File): Promise<string> {
+  // #region agent log
+  fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H1", location: "SettingsContent.tsx:extractTextFromPdf:entry", message: "pdf extract start", data: { name: file.name, size: file.size }, timestamp: Date.now() }) }).catch(() => {});
+  // #endregion
+  try {
+    await ensurePdfJsMainThreadWorker();
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H7", location: "SettingsContent.tsx:extractTextFromPdf:afterEnsureWorker", message: "main-thread worker hook ready", data: { hasGlobalHandler: (globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker != null, workerSrcSet: !!pdfjsLib.GlobalWorkerOptions.workerSrc }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
+    const arrayBuffer = await file.arrayBuffer();
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H6", location: "SettingsContent.tsx:extractTextFromPdf:afterBuffer", message: "arrayBuffer done", data: { byteLength: arrayBuffer.byteLength }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H7", location: "SettingsContent.tsx:extractTextFromPdf:beforeGetDocument", message: "calling getDocument", data: {}, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const numPages = pdf.numPages;
+    const texts: string[] = [];
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map((item: { str?: string }) => item.str ?? "").join(" ");
+      texts.push(pageText);
+    }
+    const combined = texts.join("\n\n");
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H1", location: "SettingsContent.tsx:extractTextFromPdf:ok", message: "pdf extract ok", data: { numPages, combinedLen: combined.length, nonEmptyPages: texts.filter((t) => t.trim().length > 0).length }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
+    return combined;
+  } catch (e) {
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H1", location: "SettingsContent.tsx:extractTextFromPdf:fail", message: "pdf extract threw", data: { err: e instanceof Error ? e.message : String(e) }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
+    throw e;
+  }
 }
 
 const parseGlobalRuleFields = (value: string): string[] => {
@@ -332,8 +367,14 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
     setUploadStatus({ filename: file.name, step: "Text wird extrahiert…" });
 
     try {
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H5", location: "SettingsContent.tsx:handleContextFileUpload:start", message: "upload start", data: { name: file.name, size: file.size, isAdmin: !!isAdmin }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
       const isPdf = file.name.toLowerCase().endsWith(".pdf");
       const text = isPdf ? await extractTextFromPdf(file) : await file.text();
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H1", location: "SettingsContent.tsx:handleContextFileUpload:afterRead", message: "content read", data: { isPdf, textLen: text?.length ?? 0, trimLen: text?.trim()?.length ?? 0 }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
       if (!text.trim()) {
         toast({ title: "Fehler", description: "Datei enthält keinen Text.", variant: "destructive" });
         setUploading(false);
@@ -348,11 +389,18 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
         content_text: text,
       };
       if (isPdf) body.file_base64 = await fileToBase64(file);
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H2", location: "SettingsContent.tsx:handleContextFileUpload:beforeInvoke", message: "before invoke", data: { contentLen: body.content_text.length, base64Len: body.file_base64?.length ?? 0 }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
 
       const { data, error } = await invokeWithTimeout(
         () => supabase.functions.invoke("admin-context-upload", { body }),
         UPLOAD_TIMEOUT_MS,
       );
+
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H2-H5", location: "SettingsContent.tsx:handleContextFileUpload:afterInvoke", message: "invoke returned", data: { hasError: !!error, errorMsg: error?.message ?? null, dataType: data === null ? "null" : typeof data, dataKeys: data && typeof data === "object" ? Object.keys(data as object) : [], serverError: (data as { error?: string })?.error ?? null, fileId: (data as { file_id?: string })?.file_id ?? null, ok: (data as { ok?: boolean })?.ok }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
 
       if (error) {
         throw new Error(error.message ?? "Upload fehlgeschlagen");
@@ -374,6 +422,9 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
 
       toast({ title: "Hochgeladen", description: `${file.name} wurde als Kontext hinzugefügt.` });
     } catch (err) {
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H-catch", location: "SettingsContent.tsx:handleContextFileUpload:catch", message: "upload catch", data: { err: err instanceof Error ? err.message : String(err) }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
       toast({
         title: "Fehler",
         description: err instanceof Error ? err.message : "Upload fehlgeschlagen.",

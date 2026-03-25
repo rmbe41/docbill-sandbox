@@ -55,7 +55,7 @@ REGELN:
 - Bei Unklarheit → frage (sicherer Fallback)`;
 
 /** Heuristische Fallback-Logik, wenn LLM nicht verfügbar oder fehlschlägt */
-function classifyByHeuristics(input: IntentClassifierInput): WorkflowIntent {
+export function classifyByHeuristics(input: IntentClassifierInput): WorkflowIntent {
   const msg = (input.userMessage || "").toLowerCase().trim();
 
   // Rechnung prüfen: Dateien + Rechnungs-Keywords
@@ -112,8 +112,11 @@ function classifyByHeuristics(input: IntentClassifierInput): WorkflowIntent {
   // Kurze Nachrichten ohne klaren Indikator → frage
   if (msg.length < 30) return "frage";
 
-  // Längere Beschreibungen → eher leistungen_abrechnen
-  return "leistungen_abrechnen";
+  // Längerer Text ohne Abrechnungs-/GOÄ-Bezug → Frage (Admin-Kontext + Chat; kein Service-Billing)
+  if (/\b(goä|ziffer|abrechnen|rechnung|patient|behandlung|untersuchung)\b/i.test(msg)) {
+    return "leistungen_abrechnen";
+  }
+  return "frage";
 }
 
 export async function classifyIntent(

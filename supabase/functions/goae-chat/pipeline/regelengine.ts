@@ -26,89 +26,23 @@ import type {
   Optimierung,
   GoaeZuordnung,
 } from "./types.ts";
+import {
+  buildRegelKatalogMapFromJson,
+  type RegelKatalogEintrag,
+} from "../goae-catalog-json.ts";
 
 const PUNKTWERT = 0.0582873;
 
-// ---------- GOÄ Katalog-Daten (inline für Deno Edge Function) ----------
+// ---------- GOÄ Katalog aus goae-catalog-full.json (kanonisch) ----------
 
-interface KatalogEintrag {
-  ziffer: string;
-  bezeichnung: string;
-  punkte: number;
-  schwellenfaktor: number;
-  hoechstfaktor: number;
-  ausschlussziffern: string[];
-  abschnitt: string;
-}
-
-/**
- * Parst den kompakten Katalog-String aus goae-catalog.ts.
- * Format pro Zeile: ziffer|bezeichnung|punkte|einfachsatz|schwelle→betrag|max→betrag|Ausschl: ...
- */
-function parseKatalog(katalogText: string): Map<string, KatalogEintrag> {
-  const map = new Map<string, KatalogEintrag>();
-  let currentAbschnitt = "";
-
-  for (const line of katalogText.split("\n")) {
-    const trimmed = line.trim();
-
-    const abschnittMatch = trimmed.match(/^##\s+Abschnitt\s+(\w+)/);
-    if (abschnittMatch) {
-      currentAbschnitt = abschnittMatch[1];
-      continue;
-    }
-
-    const parts = trimmed.split("|");
-    if (parts.length < 5) continue;
-
-    const ziffer = parts[0].trim();
-    if (!ziffer || !/^[\dA]/.test(ziffer)) continue;
-
-    const bezeichnung = parts[1]?.trim() || "";
-    const punkte = parseInt(parts[2]?.trim() || "0", 10);
-    if (isNaN(punkte) || punkte === 0) continue;
-
-    let schwellenfaktor = 2.3;
-    let hoechstfaktor = 3.5;
-
-    const schwelleMatch = parts[4]?.match(/([\d,]+)→/);
-    if (schwelleMatch) {
-      schwellenfaktor = parseFloat(schwelleMatch[1].replace(",", "."));
-    }
-
-    const maxMatch = parts[5]?.match(/([\d,]+)→/);
-    if (maxMatch) {
-      hoechstfaktor = parseFloat(maxMatch[1].replace(",", "."));
-    }
-
-    const ausschlussStr = parts.slice(6).join("|");
-    const ausMatch = ausschlussStr.match(/Ausschl:\s*(.+?)(?:\||$)/);
-    const ausschlussziffern = ausMatch
-      ? ausMatch[1]
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [];
-
-    map.set(ziffer, {
-      ziffer,
-      bezeichnung,
-      punkte,
-      schwellenfaktor,
-      hoechstfaktor,
-      ausschlussziffern,
-      abschnitt: currentAbschnitt,
-    });
-  }
-
-  return map;
-}
+type KatalogEintrag = RegelKatalogEintrag;
 
 let _katalogCache: Map<string, KatalogEintrag> | null = null;
 
-function getKatalog(katalogText: string): Map<string, KatalogEintrag> {
+/** katalogText wird nicht mehr geparst; Param bleibt aus Kompatibilität mit Aufrufern. */
+function getKatalog(_katalogText: string): Map<string, KatalogEintrag> {
   if (!_katalogCache) {
-    _katalogCache = parseKatalog(katalogText);
+    _katalogCache = buildRegelKatalogMapFromJson();
   }
   return _katalogCache;
 }

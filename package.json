@@ -14,7 +14,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "goae:fetch": "npx tsx scripts/fetch-goae-all.ts"
+    "goae:fetch": "npx tsx scripts/fetch-goae-all.ts",
+    "goae:sync:snapshot": "npx tsx scripts/sync-goae-catalog-snapshot.ts",
+    "pdf:ingest": "npx tsx scripts/pdf-ingest/ingest-cli.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

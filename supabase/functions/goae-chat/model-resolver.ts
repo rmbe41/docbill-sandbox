@@ -58,18 +58,27 @@ export function buildFallbackModels(
 
   let candidates: string[];
   if (multimodal) {
-    // Nutzer-Modell immer zuerst versuchen (auch Gemini). Fallbacks ohne Gemini
-    // (historisch: „File data is missing“ bei einigen Gemini-Varianten).
-    candidates = [
-      primary,
-      ...MULTIMODAL_SAFE_FALLBACKS.filter(
-        (m) => m !== primary && !m.startsWith("google/gemini"),
-      ),
-    ];
+    // Bezahlte / explizite Modelle (z. B. google/gemini-2.5-flash): nur dieses eine.
+    // Keine stille Kette auf Free-VL-Modelle – sonst wählt der Nutzer Gemini und sieht
+    // Timeouts von nemotron/… in der Fehlermeldung.
+    if (!isFreeModel(primary)) {
+      candidates = [primary];
+    } else {
+      candidates = [
+        primary,
+        ...MULTIMODAL_SAFE_FALLBACKS.filter(
+          (m) => m !== primary && !m.startsWith("google/gemini"),
+        ),
+      ];
+    }
   } else {
-    // Chat: Primary zuerst, dann alle Free-Modelle als Fallback (robust im Testmodus)
-    const freeFallbacks = ALL_FREE_MODELS.filter((m) => m !== primary);
-    candidates = [primary, ...freeFallbacks];
+    // Chat / reine Text-Calls: Bezahltes Modell → nur dieses (gleiche Logik wie Multimodal).
+    if (!isFreeModel(primary)) {
+      candidates = [primary];
+    } else {
+      const freeFallbacks = ALL_FREE_MODELS.filter((m) => m !== primary);
+      candidates = [primary, ...freeFallbacks];
+    }
   }
 
   return [...new Set(candidates.filter(Boolean))];

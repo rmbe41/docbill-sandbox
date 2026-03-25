@@ -6,6 +6,7 @@
  */
 
 import { fetchWithTimeout } from "./fetch-with-timeout.ts";
+import { extractZiffernFromText } from "./goae-catalog-json.ts";
 
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const EMBEDDING_TIMEOUT_MS = 30000;
@@ -15,6 +16,34 @@ const MATCH_COUNT = 10;
 const MATCH_THRESHOLD = 0.48;
 const MAX_ADMIN_TOKENS = 5000;
 const CHARS_PER_TOKEN = 4;
+
+function normalizeChunkBody(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+// #region agent log
+function debugAdminCtx(
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+) {
+  const payload = {
+    sessionId: "84bf6e",
+    hypothesisId,
+    location,
+    message,
+    data,
+    timestamp: Date.now(),
+  };
+  console.error("DOCBILL_INSTRUMENTATION_84BF6E admin-context", JSON.stringify(payload));
+  fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "84bf6e" },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+// #endregion
 
 async function getQueryEmbedding(query: string, apiKey: string): Promise<number[]> {
   const resp = await fetchWithTimeout(
@@ -58,6 +87,17 @@ export async function loadRelevantAdminContext(
   if (!sbUrl || !sbKey) return "";
 
   try {
+    const zExtracted = extractZiffernFromText(query);
+    const filterZiffern = zExtracted.length > 0 && zExtracted.length <= 48 ? zExtracted : null;
+    // #region agent log
+    debugAdminCtx("H_query", "admin-context.ts:preEmbed", "rag query + ziffern filter", {
+      queryLen: query.length,
+      queryHead: query.slice(0, 280),
+      filterZiffern,
+      zExtractedCount: zExtracted.length,
+    });
+    // #endregion
+
     const embedding = await getQueryEmbedding(query, apiKey);
 
     const rpcResp = await fetchWithTimeout(
@@ -73,15 +113,71 @@ export async function loadRelevantAdminContext(
           query_embedding: embedding,
           match_count: MATCH_COUNT,
           match_threshold: MATCH_THRESHOLD,
+          filter_ziffern: filterZiffern,
         }),
         timeoutMs: RPC_TIMEOUT_MS,
       },
     );
 
-    if (!rpcResp.ok) return loadFullAdminContextFallback(sbUrl, sbKey);
+    if (!rpcResp.ok) {
+      // #region agent log
+      debugAdminCtx("H_rag_empty", "admin-context.ts:rpcFail", "rpc not ok → fallback", {
+        status: rpcResp.status,
+      });
+      // #endregion
+      return loadFullAdminContextFallback(sbUrl, sbKey);
+    }
 
     const chunks = await rpcResp.json();
-    if (!Array.isArray(chunks) || chunks.length === 0) return loadFullAdminContextFallback(sbUrl, sbKey);
+    if (!Array.isArray(chunks) || chunks.length === 0) {
+      // #region agent log
+      debugAdminCtx("H_rag_empty", "admin-context.ts:noChunks", "zero chunks → fallback", {
+        chunksType: typeof chunks,
+      });
+      // #endregion
+      return loadFullAdminContextFallback(sbUrl, sbKey);
+    }
+
+    const topPreview = chunks.slice(0, 5).map((c: { similarity?: number; content?: string; chunk_index?: number }) => ({
+      sim: c?.similarity,
+      idx: c?.chunk_index,
+      head: typeof c?.content === "string" ? c.content.slice(0, 100) : null,
+    }));
+    const distinctHeads = new Set(
+      chunks.slice(0, 20).map((c: { content?: string }) =>
+        typeof c?.content === "string" ? c.content.slice(0, 80) : "",
+      ),
+    );
+    // #region agent log
+    debugAdminCtx("H_rag_polluted", "admin-context.ts:postRpc", "match_admin_context_chunks result", {
+      chunkCount: chunks.length,
+      topPreview,
+      distinctHeadCount: distinctHeads.size,
+    });
+    // #endregion
+
+    if (chunks.length >= 4 && distinctHeads.size <= 2) {
+      // #region agent log
+      debugAdminCtx("H_rag_polluted", "admin-context.ts:lowDiversity", "few distinct chunk heads → file fallback", {
+        chunkCount: chunks.length,
+        distinctHeadCount: distinctHeads.size,
+      });
+      // #endregion
+      return loadFullAdminContextFallback(sbUrl, sbKey);
+    }
+
+    const nonEmptyContents = chunks
+      .map((c: { content?: string }) => (typeof c?.content === "string" ? c.content : ""))
+      .filter((s: string) => s.length > 0);
+    const normalizedBodies = nonEmptyContents.map(normalizeChunkBody);
+    if (normalizedBodies.length > 1 && new Set(normalizedBodies).size === 1) {
+      // #region agent log
+      debugAdminCtx("H_rag_polluted", "admin-context.ts:dupChunks", "identical chunk bodies → file fallback", {
+        chunkCount: chunks.length,
+      });
+      // #endregion
+      return loadFullAdminContextFallback(sbUrl, sbKey);
+    }
 
     const maxChars = MAX_ADMIN_TOKENS * CHARS_PER_TOKEN;
     let totalChars = 0;
@@ -92,15 +188,33 @@ export async function loadRelevantAdminContext(
       if (typeof content !== "string") continue;
       if (totalChars + content.length > maxChars) break;
       const filename = c?.filename ?? "Unbekannt";
-      parts.push(`### ${filename} (Ausschnitt)\n${content}`);
+      const pg = c?.source_page;
+      const sp = c?.section_path;
+      const locParts: string[] = [];
+      if (pg != null) locParts.push(`S. ${pg}`);
+      if (typeof sp === "string" && sp.trim().length > 0) locParts.push(sp.trim());
+      const loc = locParts.length > 0 ? ` (${locParts.join(" · ")})` : "";
+      parts.push(`### ${filename}${loc}\n${content}`);
       totalChars += content.length;
     }
 
     if (parts.length === 0) return "";
-    return "\n\n## ADMIN-KONTEXT (relevante Ausschnitte):\n" + parts.join("\n\n");
+    const ragBlock =
+      "\n\n## ADMIN-KONTEXT (relevante Ausschnitte):\n" + parts.join("\n\n");
+    // #region agent log
+    debugAdminCtx("H_rag_polluted", "admin-context.ts:ragPath", "using RAG block", {
+      ragLen: ragBlock.length,
+      mentionsBlackie: ragBlock.includes("Blackie"),
+      mentionsBenRea: ragBlock.includes("Ben Rea"),
+    });
+    // #endregion
+    return ragBlock;
   } catch {
     const url = Deno.env.get("SUPABASE_URL");
     const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    // #region agent log
+    debugAdminCtx("H_rag_empty", "admin-context.ts:catch", "exception → fallback", {});
+    // #endregion
     return url && key ? loadFullAdminContextFallback(url, key) : "";
   }
 }
@@ -109,7 +223,7 @@ async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promi
   if (!sbUrl || !sbKey) return "";
   try {
     const ctxResp = await fetchWithTimeout(
-      `${sbUrl}/rest/v1/admin_context_files?select=filename,content_text&order=created_at.asc`,
+      `${sbUrl}/rest/v1/admin_context_files?select=filename,content_text&order=created_at.desc`,
       {
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
         timeoutMs: RPC_TIMEOUT_MS,
@@ -130,8 +244,21 @@ async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promi
       parts.push(`### ${f.filename}\n${text}`);
       total += text.length;
     }
-    return "\n\n## ADMIN-KONTEXT:\n" + parts.join("\n\n");
+    const fb = "\n\n## ADMIN-KONTEXT:\n" + parts.join("\n\n");
+    // #region agent log
+    debugAdminCtx("H_fallback", "admin-context.ts:fallback", "full-file fallback", {
+      fileCount: ctxFiles.length,
+      fbLen: fb.length,
+      mentionsBlackie: fb.includes("Blackie"),
+      mentionsBenRea: fb.includes("Ben Rea"),
+      filenames: (ctxFiles as { filename?: string }[]).map((f) => f?.filename).slice(0, 8),
+    });
+    // #endregion
+    return fb;
   } catch {
+    // #region agent log
+    debugAdminCtx("H_fallback", "admin-context.ts:fallbackCatch", "fallback failed", {});
+    // #endregion
     return "";
   }
 }

@@ -21,6 +21,80 @@ export function isPlausibleParseResult(
   return false;
 }
 
+/** Genug Text für eine zweite Extraktionsrunde (nur Text → JSON), vgl. isPlausibleParseResult. */
+const MIN_RAW_TEXT_FOR_POSITION_EXTRACT = 200;
+
+const POSITIONEN_FROM_RAWTEXT_PROMPT = `Du extrahierst alle GOÄ-Rechnungspositionen aus dem gegebenen Rohtext einer ärztlichen Rechnung.
+
+Antworte AUSSCHLIESSLICH mit JSON:
+{
+  "positionen": [
+    {
+      "nr": 1,
+      "ziffer": "1240",
+      "bezeichnung": "…",
+      "faktor": 2.3,
+      "betrag": 9.92,
+      "datum": "2025-01-15 oder weglassen",
+      "begruendung": null,
+      "anzahl": 1
+    }
+  ]
+}
+
+REGELN:
+- Eine Position pro abrechenbarer Zeile / Leistung mit erkennbarer oder ableitbarer GOÄ-Ziffer
+- ziffer als String, faktor und betrag numerisch (Punkt als Dezimaltrenner)
+- Wirklich keine Positionen erkennbar: "positionen": []`;
+
+/**
+ * Vision/PDF-Parser liefert oft rawText, aber leeres positionen-Array. Zweiter Aufruf nur mit Text
+ * (gleiches Nutzer-Modell, keine Multimodal-Fallbacks) behebt das ohne andere Modelle.
+ */
+async function tryFillPositionenFromRawText(
+  parsed: ParsedRechnung,
+  apiKey: string,
+  model: string,
+): Promise<ParsedRechnung> {
+  if (parsed.positionen.length > 0) return parsed;
+  const raw = (parsed.rawText || "").trim();
+  if (raw.length < MIN_RAW_TEXT_FOR_POSITION_EXTRACT) return parsed;
+
+  const truncated =
+    raw.length > 120_000 ? `${raw.slice(0, 120_000)}\n\n[… Text gekürzt …]` : raw;
+
+  try {
+    const rawLlm = await callLlm({
+      apiKey,
+      model,
+      systemPrompt: POSITIONEN_FROM_RAWTEXT_PROMPT,
+      userContent: [
+        {
+          type: "text",
+          text: `Rohtext der Rechnung:\n\n${truncated}`,
+        },
+      ],
+      jsonMode: true,
+      temperature: 0.05,
+      maxTokens: 8192,
+      skipFallbacks: true,
+    });
+    const partial = extractJson<{ positionen?: ParsedRechnung["positionen"] }>(rawLlm);
+    if (!Array.isArray(partial.positionen) || partial.positionen.length === 0) {
+      return parsed;
+    }
+    for (let i = 0; i < partial.positionen.length; i++) {
+      const pos = partial.positionen[i];
+      pos.anzahl = pos.anzahl || 1;
+      pos.ziffer = String(pos.ziffer ?? "");
+      if (pos.nr == null || Number.isNaN(Number(pos.nr))) pos.nr = i + 1;
+    }
+    return { ...parsed, positionen: partial.positionen };
+  } catch {
+    return parsed;
+  }
+}
+
 const PARSER_SYSTEM_PROMPT = `Du bist ein Dokumentenparser für ärztliche Rechnungen nach der Gebührenordnung für Ärzte (GOÄ).
 
 AUFGABE: Extrahiere ALLE strukturierten Daten aus dem hochgeladenen Rechnungsdokument – inklusive Stammdaten für den Rechnungsexport.
@@ -222,7 +296,10 @@ export async function parseDokumentWithRetry(
   for (let i = 0; i < Math.min(MAX_PARSER_RETRIES, modelsToTry.length); i++) {
     const model = modelsToTry[i];
     try {
-      const parsed = await parseDokument(files, apiKey, userModel, model);
+      let parsed = await parseDokument(files, apiKey, userModel, model);
+      if (!isPlausibleParseResult(parsed, hasFiles)) {
+        parsed = await tryFillPositionenFromRawText(parsed, apiKey, model);
+      }
       if (isPlausibleParseResult(parsed, hasFiles)) {
         return parsed;
       }

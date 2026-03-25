@@ -346,7 +346,7 @@ const HistoryPanel = ({
                     className="truncate text-sm font-medium min-h-[1.25rem]"
                     aria-label={titleDisplay || "Unbenannter Chat"}
                   >
-                    {titleDisplay ?? "\u00a0"}
+                    {titleDisplay ?? "Neuer Chat"}
                   </p>
                   {conv.source_filename && (
                     <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground/80">
@@ -422,7 +422,7 @@ const HistoryPanel = ({
                   className="truncate text-xs font-medium min-h-[1rem] text-foreground"
                   aria-label={titleDisplay || "Unbenannter Chat"}
                 >
-                  {titleDisplay ?? "\u00a0"}
+                  {titleDisplay ?? "Neuer Chat"}
                 </p>
                 {conv.source_filename && (
                   <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground/80">

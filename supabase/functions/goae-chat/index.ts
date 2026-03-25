@@ -1,14 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "jsr:@supabase/supabase-js@2/cors";
 
-import { GOAE_KATALOG } from "./goae-catalog.ts";
+import { buildChatSelectiveCatalogMarkdown } from "./goae-catalog-json.ts";
 import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
 import { GOAE_ANALOGE_BEWERTUNG, GOAE_BEGRUENDUNGEN, GOAE_ABSCHNITTE } from "./goae-regeln.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
 import { runSimplePipeline } from "./pipeline/simple-orchestrator.ts";
 import { runServiceBillingAsStream } from "./pipeline/service-billing-orchestrator.ts";
 import { extrahiereOptimizeFor } from "./pipeline/input-parser.ts";
-import { classifyIntent } from "./intent-classifier.ts";
+import { classifyByHeuristics, classifyIntent } from "./intent-classifier.ts";
 import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel, getReasoningConfigForStream } from "./model-resolver.ts";
 import { loadRelevantAdminContext, buildPipelineQuery, type LastResultContext } from "./admin-context.ts";
 
@@ -76,7 +76,11 @@ Deine Antwort nutzt **echte Markdown-Tabellen**, damit sie im Frontend als Tabel
 - **Zeitangabe bei Beratung**: Bei GOÄ 1–4 immer Dauer nennen (z.B. „Beratung von ca. 20 Min.").
 `;
 
-const SYSTEM_PROMPT = `${FORMATTING_RULES}
+function buildChatSystemPrompt(
+  messages: { role: string; content: unknown }[],
+): string {
+  const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, 100);
+  return `${FORMATTING_RULES}
 
 Du bist GOÄ-DocBill, ein KI-Experte für die Analyse und Optimierung von Arztrechnungen nach der Gebührenordnung für Ärzte (GOÄ).
 
@@ -122,11 +126,12 @@ ${GOAE_PARAGRAPHEN}
 
 ${GOAE_ABSCHNITTE}
 
-${GOAE_KATALOG}
+${goaeKatalogMarkdown}
 
 ${GOAE_ANALOGE_BEWERTUNG}
 
 ${GOAE_BEGRUENDUNGEN}`;
+}
 
 // ---------------------------------------------------------------------------
 // Admin-Kontext (RAG-basiert)
@@ -143,7 +148,7 @@ async function handleChatMode(
   adminContext: string,
   apiKey: string,
 ): Promise<Response> {
-  let systemContent = SYSTEM_PROMPT + adminContext;
+  let systemContent = buildChatSystemPrompt(messages) + adminContext;
   if (extraRules) {
     systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules}`;
   }
@@ -267,6 +272,8 @@ serve(async (req) => {
   }
 
   try {
+    // Suche in Dashboard: Edge Functions → goae-chat → Logs nach diesem String (beweist deployter Stand).
+    console.error("DOCBILL_INSTRUMENTATION_84BF6E goae-chat request");
     const { messages, files, model, extra_rules, engine_type, last_invoice_result, last_service_result } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
@@ -296,11 +303,11 @@ serve(async (req) => {
         ? { last_invoice_result: last_invoice_result, last_service_result: last_service_result }
         : undefined;
 
-    const getAdminContext = async (result?: { medizinischeAnalyse?: unknown; pruefung?: unknown }) =>
-      loadRelevantAdminContext(
-        buildPipelineQuery(userMessage, result, lastResult),
-        OPENROUTER_API_KEY,
-      );
+    const getAdminContext = async (result?: { medizinischeAnalyse?: unknown; pruefung?: unknown }) => {
+      const fullQuery = buildPipelineQuery(userMessage, result, lastResult);
+      const ragQuery = result != null ? fullQuery : (userMessage.trim() || fullQuery);
+      return loadRelevantAdminContext(ragQuery, OPENROUTER_API_KEY);
+    };
 
     // Fast path: Bei Dateien + kurzer/leerer Nachricht → Rechnung prüfen (spart ~10–20s LLM-Call)
     const msg = (userMessage || "").toLowerCase().trim();
@@ -308,13 +315,23 @@ serve(async (req) => {
       !hasFiles ||
       (msg.length > 60 && /abrechnen|was kann|leistung|durchgeführt|erbracht/.test(msg) && !/prüfen|rechnung|kontroll/.test(msg));
 
-    const { workflow: intent } = needsClassifier
+    let intentResult = needsClassifier
       ? await classifyIntent(
           { userMessage, hasFiles: !!hasFiles, recentMessages: messages },
           OPENROUTER_API_KEY,
           resolvedModel,
         )
       : { workflow: "rechnung_pruefen" as const, confidence: "hoch" as const };
+
+    let intent = intentResult.workflow;
+    if (!hasFiles && intent === "leistungen_abrechnen") {
+      const h = classifyByHeuristics({
+        userMessage,
+        hasFiles: !!hasFiles,
+        recentMessages: messages,
+      });
+      if (h === "frage") intent = "frage";
+    }
 
     let response: Response;
 

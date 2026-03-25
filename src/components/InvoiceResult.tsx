@@ -493,53 +493,6 @@ export default function InvoiceResult({ data, onDecisionsChange, onExportSuccess
     onDecisionsChange?.(decisions);
   }, [decisions, onDecisionsChange]);
 
-  useEffect(() => {
-    const perPosSuggestionCount: Record<string, number> = {};
-    for (const s of suggestions) {
-      if (s.pos?.nr != null) {
-        const k = String(s.pos.nr);
-        perPosSuggestionCount[k] = (perPosSuggestionCount[k] ?? 0) + 1;
-      }
-    }
-    const rowDebug = previewPositions.map((row) => {
-      const rs = getSuggestionsForPreviewRow(row, suggestions);
-      return {
-        displayNr: row.nr,
-        sourcePosNr: row.sourcePosNr,
-        sourcePosNrType: row.sourcePosNr != null ? typeof row.sourcePosNr : null,
-        sourceOptId: row.sourceOptSuggestionId ?? null,
-        isPendingOpt: !!row.isPendingOpt,
-        rowSuggestionsCount: rs.length,
-        suggestionIds: rs.map((x) => x.id),
-      };
-    });
-    // #region agent log
-    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "836585" },
-      body: JSON.stringify({
-        sessionId: "836585",
-        runId: "pre-fix",
-        hypothesisId: "H2-H5",
-        location: "InvoiceResult.tsx:InvoiceResult",
-        message: "preview rows vs suggestions mapping",
-        data: {
-          positionenNrs: positionen.map((p) => ({
-            nr: p.nr,
-            nrType: typeof p.nr,
-            ziffer: p.ziffer,
-            pruefungenWithVorschlag: p.pruefungen.filter((pr) => pr.vorschlag).length,
-          })),
-          perPosSuggestionCount,
-          rowDebug,
-          totalSuggestions: suggestions.length,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [positionen, suggestions, previewPositions]);
-
   const pendingCount = useMemo(
     () => suggestions.filter((s) => decisions[s.id] === "pending").length,
     [suggestions, decisions],

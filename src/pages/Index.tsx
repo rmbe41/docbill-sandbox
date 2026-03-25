@@ -156,6 +156,7 @@ const Index = () => {
     saveMessage,
     loadMessages,
     updateSourceFilename,
+    updateTitle,
     fetchConversations,
     userSettings,
     globalSettings,
@@ -248,14 +249,21 @@ const Index = () => {
     [mergeMessagesWithLiveStream, setActiveConversationId, markConversationRead]
   );
 
-  const handleNewConversation = useCallback(() => {
-    setActiveConversationId(null);
+  const handleNewConversation = useCallback(async () => {
     setMessages([]);
     setSidebarOpen(false);
     setAgentsSheetOpen(false);
     setMainView("chat");
+    if (user) {
+      const id = await createConversation("Neues Gespräch");
+      if (id) {
+        setActiveConversationId(id);
+        return;
+      }
+    }
+    setActiveConversationId(null);
     void fetchConversations();
-  }, [setActiveConversationId, fetchConversations]);
+  }, [user, createConversation, setActiveConversationId, fetchConversations]);
 
   const handleDeleteConversation = useCallback(
     async (id: string) => {

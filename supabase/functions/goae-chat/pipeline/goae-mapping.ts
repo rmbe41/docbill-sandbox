@@ -9,7 +9,7 @@
  */
 
 import { callLlm, extractJson, pickExtractionModel } from "./llm-client.ts";
-import { GOAE_KATALOG } from "../goae-catalog.ts";
+import { buildMappingCatalogMarkdown } from "../goae-catalog-json.ts";
 import type {
   ParsedRechnung,
   ExtrahierteLeistung,
@@ -108,12 +108,20 @@ async function suggestMappingsViaLlm(
 ): Promise<GoaeMappingResult> {
   const model = pickExtractionModel(userModel);
 
+  const leistungTexts = leistungen.flatMap((l) =>
+    [l.bezeichnung, l.beschreibung].filter(Boolean) as string[],
+  );
+  const katalogMd = buildMappingCatalogMarkdown({
+    leistungTexts,
+    fachgebiet: analyse.fachgebiet,
+    maxLines: 200,
+  });
   const prompt = [
     "## Nicht zugeordnete Leistungen:\n",
     ...leistungen.map((l, i) => `${i + 1}. ${l.bezeichnung}: ${l.beschreibung}`),
     `\n## Klinischer Kontext: ${analyse.klinischerKontext}`,
     `\n## Fachgebiet: ${analyse.fachgebiet}`,
-    `\n## GOÄ-Katalog (Auszug):\n${GOAE_KATALOG}`,
+    `\n## GOÄ-Katalog (Auszug):\n${katalogMd}`,
   ].join("\n");
 
   const raw = await callLlm({
