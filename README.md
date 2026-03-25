@@ -42,3 +42,16 @@ Supabase Edge Function secrets (im Dashboard setzen):
 ```
 OPENROUTER_API_KEY=...
 ```
+
+## Dokumentation
+
+- [docs/README.md](docs/README.md) – Inhaltsverzeichnis der technischen Doku
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) – Architektur und Umgebungen
+- [docs/PIPELINE.md](docs/PIPELINE.md) – Pipelines und Intent-Routing
+- [docs/API-goae-chat.md](docs/API-goae-chat.md) – API/SSE-Vertrag `goae-chat`
+- [docs/DATA_MODEL.md](docs/DATA_MODEL.md) – Datenmodell
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) – Fehlerbehebung
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) – Mitwirkung
+- [docs/SECURITY.md](docs/SECURITY.md) – Sicherheit und Datenschutz (Überblick)
+
+Setup und Deploy: [SUPABASE_SETUP.md](SUPABASE_SETUP.md), [DEPLOY_ANLEITUNG.md](DEPLOY_ANLEITUNG.md).
