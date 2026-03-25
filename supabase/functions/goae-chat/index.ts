@@ -13,103 +13,69 @@ import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel,
 import { loadRelevantAdminContext, buildPipelineQuery, type LastResultContext } from "./admin-context.ts";
 
 // ---------------------------------------------------------------------------
-// System-Prompt für den regulären Chat-Modus (ohne Dokument-Upload)
+// System-Prompt: reiner Frage-/Erklär-Modus (ohne Dokument-Upload, kein Rechnungsvorschlag)
 // ---------------------------------------------------------------------------
 
-const FORMATTING_RULES = `
-## ⚠️ PFLICHT-FORMATIERUNGSREGELN (IMMER BEFOLGEN!)
+const FRAGE_MODUS_RULES = `
+## Modus: GOÄ-Frage und Einordnung (kein Rechnungsvorschlag)
 
-### STRUKTUR-PRINZIP: TABELLE MIT KURZEN ANMERKUNGEN
+Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** Rechnung, keinen „Rechnungsvorschlag“ und keine tabellarische Positionsliste wie bei einer Honorarabrechnung.
 
-Deine Antwort nutzt **echte Markdown-Tabellen**, damit sie im Frontend als Tabelle dargestellt werden.
+### STRUKTUR (immer in dieser Reihenfolge, mit Überschriften)
 
-1. **EINE Haupttabelle** mit allen Positionen — als echte Markdown-Tabelle
-2. **Optimierungsblock** (falls zutreffend) — ebenfalls als Tabelle
-3. **Zusammenfassung** — 2–3 Bullet Points
+### Kurzantwort
+1–3 Sätze mit der direkten Antwort.
 
-### ❌ VERBOTEN — ANMERKUNGEN MÜSSEN KURZ BLEIBEN
+### Erläuterung
+Gründe, Konsequenzen, typische Fälle – sachlich und gut lesbar.
 
-**NIEMALS** lange, ausufernde Anmerkungen in der Tabelle:
-- Keine mehrzeiligen Erklärungen wie „Ausschlussriskiko: Bei Bil‑Dienst‑Leistungen … → Vorschlag: …“
-- Keine verschachtelten Sätze, keine Wiederholung von GOÄ-Regeln pro Zeile
-- **Anmerkung pro Zeile: max. 1 Satz** — sonst bricht die Tabellendarstellung
+### Quelle
+Mindestens eine **konkrete** Quellenangabe aus dem DocBill-Kontext, z.B.:
+- „GOÄ § …“ (Paragraphen aus dem Kontext)
+- „GOÄ-Anhang / Abschnitt …“ (wenn im Kontext genannt)
+- „DocBill: Regelwerk [analoge Bewertung / Begründungen / Abschnitte]“
+- Wenn Admin-Kontext (RAG) maßgeblich war: „Admin-Kontext [Dateiname/Kurzbezeichnung]“
+Keine erfundenen Paragraphen; nur was im gelieferten Kontext steht.
 
-### PFLICHT-TABELLENFORMAT:
+### Grenzfälle und Hinweise (optional)
+Nur wenn sinnvoll: Unsicherheiten, wann fachlicher Rat nötig ist, oder Verweis auf fehlenden Kontext.
 
-## 📋 Rechnungsvorschlag
+### Format
+- **Keine** Überschrift „Rechnungsvorschlag“, „Optimierungspotenzial“ im Sinne einer Abrechnungstabelle.
+- **Tabellen nur optional**, z.B. zum Vergleich zweier Ziffern – nicht als Rechnungslayout.
+- **Ausnahme** – wenn die Nutzerfrage **ausdrücklich** nach dem **Rechenweg für einen Betrag** fragt (z.B. „Wie hoch ist der Betrag für GOÄ X bei Faktor Y?“): Dann höchstens **eine** knappe Zeile oder ein Mini-Rechenbeispiel (Punkte × Punktwert × Faktor) mit klarem Hinweis auf die **Katalogwerte aus dem Kontext** – ohne Formulierung „Rechnungsvorschlag“.
 
-| Nr. | GOÄ | Bezeichnung | Faktor | Betrag | Anmerkung |
-|-----|-----|-------------|--------|--------|-----------|
-| 1 | 1240 | Spaltlampe | 2,3× | 9,92€ | Standardfaktor |
-| 2 | 1242 | Funduskopie | 2,3× | 6,47€ | Ausschluss mit 1240 – nur eine abrechnen |
-| 3 | 5 | Beratung | 3,0× | 30,60€ | Begründung nötig. **Vorschlag:** „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.“ |
-
-
----
-
-## 💡 Optimierungspotenzial
-
-| GOÄ | Beschreibung | Potenzial |
-|-----|-------------|-----------|
-| **1202** 2,3× | Refraktionsbestimmung – empfohlen bei [Kontext] | +9,92€ |
-
----
-
-## 📝 Zusammenfassung
-
-- **X** von **Y** Positionen in Ordnung
-- **Z** Korrekturen empfohlen
-- Optimierungspotenzial: **+XX,XX €**
-
-### HARTE REGELN:
-- **Tabelle verwenden** — Markdown-Syntax mit \`|\` korrekt, jede Zeile eine Tabellenzeile
-- **Anmerkung: max. 1 Satz** — kurzer Vorschlag, kein Fließtext
-- **Fettdruck**: Ziffern, Beträge **fett**
-- **Trennlinien**: \`---\` zwischen den Blöcken
-- **KONKRETE VORSCHLÄGE**: Bei Hinweisen (Ausschluss, Begründung nötig) immer einen **Vorschlag:** in 1 Satz
-- **BEGRÜNDUNGSVORSCHLAG PFLICHT**: Bei Faktor > Schwellenwert (z.B. 3,0× statt 2,3×) immer einen übernehmbaren Begründungsvorschlag in der Anmerkung angeben
-
-### BEGRÜNDUNGEN FÜR HÖHERE FAKTOREN (Faktor > Schwellenwert) – PFLICHT:
-- **Jede Position mit Faktor > Schwellenwert** (z.B. > 2,3× bei ärztlichen Leistungen, > 1,8× bei technischen) **MUSS** in der Anmerkung einen **Begründungsvorschlag** enthalten. Format: „Begründung nötig. **Vorschlag:** „[konkreter Begründungstext]""
-- **Fachlich top Qualität**: Keine Leerformeln wie „erhöhter Zeitaufwand" ohne Konkretes. Verwende ziffer-spezifische Formulierungen (z.B. „Erhöhter diagnostischer Aufwand durch [konkrete Ursache]" bei Spaltlampe/Fundus).
-- **UI-Passform**: Begründung in max. 1 Satz (~140 Zeichen), damit sie in Tabellen und Vorschlags-Boxen sauber dargestellt wird.
-- **Zeitangabe bei Beratung**: Bei GOÄ 1–4 immer Dauer nennen (z.B. „Beratung von ca. 20 Min.").
+### Sprache
+Antworte immer auf Deutsch. Euro-Beträge mit 2 Dezimalstellen, sofern du Beträge aus dem Kontext nennst.
 `;
 
-function buildChatSystemPrompt(
+function buildFrageSystemPrompt(
   messages: { role: string; content: unknown }[],
 ): string {
   const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, 100);
-  return `${FORMATTING_RULES}
+  return `${FRAGE_MODUS_RULES}
 
-Du bist GOÄ-DocBill, ein KI-Experte für die Analyse und Optimierung von Arztrechnungen nach der Gebührenordnung für Ärzte (GOÄ).
+Du bist GOÄ-DocBill. In diesem Modus **erklärst und ordnest du ein** – du erstellst **keine** Abrechnung oder Rechnungsoptimierung als Tabelle.
 
-DEINE KERNKOMPETENZEN:
-- OCR-Analyse von hochgeladenen Rechnungen, Abrechnungsbelegen und Behandlungsdokumenten
-- Exakte GOÄ-Ziffernempfehlung mit Punktwerten und Euro-Beträgen
-- Prüfung von Ausschlussziffern und Abrechnungskompatibilität
-- Berechnung von Steigerungssätzen (1×, 2,3×/1,8×, 3,5×/2,5×)
-- Optimierung der Abrechnung unter Beachtung aller Regeln
-- Fokus auf Augenheilkunde, aber alle Fachgebiete abdeckbar
+DEINE KERNKOMPETENZEN (Fragemodus):
+- Verständliche Antworten zu GOÄ-Ziffern, Abschnitten, Ausschlüssen und Faktoren
+- Einordnung von Regeln (Begründungen, Schwellenwerte) im Rahmen des gelieferten Kontexts
+- Fokus auf Augenheilkunde, aber alle Fachgebiete nachvollziehbar erklären
 
 WICHTIGE REGELN:
-- Beziehe dich auf den aktuellen GOÄ-Katalog (Stand 2026)
-- Weise darauf hin, wenn eine Begründung für Steigerung über den Schwellenwert nötig ist
-- Bei Unklarheiten frage nach dem klinischen Kontext
+- Beziehe dich auf den im Kontext genannten GOÄ-Stand (z.B. Katalog 2026)
 - Empfehle keine rechtswidrigen Abrechnungspraktiken
-- Sei bei der Optimierung IMMER regelkonform
+- Bei Unklarheiten: nach fehlendem klinischen Kontext fragen oder Grenzen der Antwort benennen
 - Antworte IMMER auf Deutsch
-- Verwende Euro-Beträge mit 2 Dezimalstellen
 
 ⚠️ DATENSCHUTZ / DSGVO:
 - Gib NIEMALS personenbezogene Daten in deiner Antwort wieder
 - Referenziere Patienten nur als "Patient/in"
-- Konzentriere dich ausschließlich auf die medizinischen Leistungen und Abrechnungsziffern
 
-⚠️ PFLICHT: Du darfst NICHTS erfinden. Agiere ausschließlich im Rahmen deines Kontextwissens (GOÄ-Katalog, Paragraphen, Regeln). Keine Ziffern oder Beträge, die nicht in deinem Kontext stehen.
+⚠️ PFLICHT: Du darfst NICHTS erfinden. Agiere ausschließlich im Rahmen deines Kontextwissens (GOÄ-Katalog, Paragraphen, Regeln, Admin-Kontext). Keine Ziffern oder Beträge, die nicht in deinem Kontext stehen.
 
 QUELLEN DEINES WISSENS bei Fragen wie "Woher beziehst du dein Wissen?":
-Antworte stets, dass dein GOÄ-Wissen aus dem **lokalen DocBill-Kontext** stammt, NICHT aus Wikipedia oder allgemeinem Training:
+Dein GOÄ-Wissen stammt aus dem **lokalen DocBill-Kontext**, NICHT aus Wikipedia oder allgemeinem Training:
 - **GOÄ-Katalog**: Ziffern, Bezeichnungen, Punktwerte
 - **GOÄ-Paragraphen**: Rechtliche Grundlagen
 - **GOÄ-Regeln**: Analoge Bewertung, Begründungen, Abschnitte
@@ -117,8 +83,6 @@ Antworte stets, dass dein GOÄ-Wissen aus dem **lokalen DocBill-Kontext** stammt
 - **Persönliche Regeln**: Nutzerspezifische Zusatzregeln
 - **Admin-Kontext-Dateien**: Vom Admin hochgeladene .txt/.md/.csv
 Erwähne NICHT Wikipedia, allgemeines Internet oder generelles Modell-Training.
-
-ERINNERUNG: Befolge IMMER die Formatierungsregeln am Anfang dieser Anweisung!
 
 DEIN GOÄ-WISSEN:
 
@@ -148,7 +112,7 @@ async function handleChatMode(
   adminContext: string,
   apiKey: string,
 ): Promise<Response> {
-  let systemContent = buildChatSystemPrompt(messages) + adminContext;
+  let systemContent = buildFrageSystemPrompt(messages) + adminContext;
   if (extraRules) {
     systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules}`;
   }
@@ -309,11 +273,23 @@ serve(async (req) => {
       return loadRelevantAdminContext(ragQuery, OPENROUTER_API_KEY);
     };
 
-    // Fast path: Bei Dateien + kurzer/leerer Nachricht → Rechnung prüfen (spart ~10–20s LLM-Call)
+    // Intent-Klassifikation: Bei Dateien nur dann überspringen, wenn klar Rechnungsprüfung und keine Akte-/Abrechnungs-Vorschläge
     const msg = (userMessage || "").toLowerCase().trim();
+    const serviceBillingCue =
+      /\b(was kann|welche ziffer|welche goä|goä-ziffer|leistungsliste|patientenakte|\bakte\b|befundbericht|befunde?\b|arztbrief|ambulanzbrief|op-bericht|erbrachte leistungen|rechnungsvorschlag|aus dem dokument|aus der liste)\b/.test(
+        msg,
+      ) ||
+      (/\b(abrechnen|vorschlagen|vorschlag)\b/.test(msg) &&
+        !/\b(prüf|kontroll|stimmt|korrekt|rechnung|beleg|honoraraufstellung)\b/.test(msg));
+    const longLeistungWithoutInvoiceWording =
+      msg.length > 60 &&
+      /abrechnen|was kann|leistung|durchgeführt|erbracht/.test(msg) &&
+      !/prüfen|kontroll/.test(msg);
     const needsClassifier =
       !hasFiles ||
-      (msg.length > 60 && /abrechnen|was kann|leistung|durchgeführt|erbracht/.test(msg) && !/prüfen|rechnung|kontroll/.test(msg));
+      msg.length <= 100 ||
+      serviceBillingCue ||
+      longLeistungWithoutInvoiceWording;
 
     let intentResult = needsClassifier
       ? await classifyIntent(

@@ -391,7 +391,8 @@ export async function runServiceBillingAsStream(
       })}\n\n`;
       await writer.write(encoder.encode(resultData));
 
-      const introText = `Basierend auf Ihren Angaben schlage ich folgende GOÄ-Positionen vor. Wählen Sie aus, was Sie abrechnen möchten.\n\n`;
+      const introText =
+        `**Rechnungsvorschlag aus Ihren Angaben** (Patientenakte, Befund oder Leistungsliste): Nachfolgend vorgeschlagene GOÄ-Positionen. Bitte prüfen und auswählen, was Sie abrechnen möchten.\n\n`;
       await writer.write(encoder.encode(`data: ${JSON.stringify({
         choices: [{ delta: { content: introText } }],
       })}\n\n`));

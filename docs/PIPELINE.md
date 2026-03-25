@@ -12,7 +12,15 @@ Der Klassifikator ([`intent-classifier.ts`](../supabase/functions/goae-chat/inte
 | `leistungen_abrechnen` | Erbrachte Leistungen beschreiben → GOÄ-Vorschläge (Service-Billing) |
 | `frage` | Allgemeine GOÄ-Frage (Chat ohne strukturierte Rechnungspipeline) |
 
-**Optimierung:** Wenn Dateien angehängt sind und die Nutzernachricht **kurz** ist bzw. kein „Leistungen abrechnen“-Muster trifft, wird der Klassifikator übersprungen und direkt `rechnung_pruefen` angenommen (schnellerer Pfad für klassisches „Rechnung hochladen“).
+## Nutzer-Cases (Produktlogik)
+
+| Case | Nutzersituation | Technischer Pfad |
+|------|-----------------|------------------|
+| 1 | Reine GOÄ-/Regelfrage, **kein** Rechnungsvorschlag | `frage` → `handleChatMode` mit **`buildFrageSystemPrompt`**: strukturierte Antwort (Kurzantwort, Erläuterung, **Quelle**), **kein** „Rechnungsvorschlag“-Layout |
+| 2 | **Bestehende Rechnung** hochladen: prüfen, korrigieren, verbessern | `rechnung_pruefen` → `runPipeline` oder `runSimplePipeline` (Simple-Prompt: Prüfung/Korrektur der extrahierten Positionen) |
+| 3 | **Akte, Befund, Leistungsliste** → GOÄ-/Rechnungsvorschlag ableiten | `leistungen_abrechnen` → `runServiceBillingAsStream` (Einleitung: „Rechnungsvorschlag aus Ihren Angaben …“) |
+
+**Wann läuft der Intent-Klassifikator?** Er wird **immer** ohne Dateien ausgeführt. **Mit Dateien** wird er ausgeführt, wenn mindestens eines zutrifft: Nachricht bis **100 Zeichen**, **Service-Billing-Cues** (z. B. Akte, Befund, „was kann ich abrechnen“, Leistungsliste, …), oder längere Nachricht mit Leistungs-/Abrechnungsmustern ohne Prüf-/Kontroll-Fokus. Nur bei **klar längeren** Nachrichten ohne solche Cues wird der Klassifikator übersprungen und direkt `rechnung_pruefen` angenommen (klassische lange „Rechnung bitte prüfen“-Anfrage).
 
 **Korrektur ohne Dateien:** Ist der Intent `leistungen_abrechnen`, aber es gibt **keine** Dateien, heuristisch erneut prüfen: wirkt es wie eine reine Frage → `frage`.
 
@@ -37,7 +45,7 @@ flowchart TD
   eng -->|default| full
 ```
 
-Quellcode: Verzweigung in [`index.ts`](../supabase/functions/goae-chat/index.ts) (nach `classifyIntent` bzw. Fast-Path).
+Quellcode: Verzweigung in [`index.ts`](../supabase/functions/goae-chat/index.ts) (nach `classifyIntent` bzw. `needsClassifier`).
 
 ## A) Service-Billing (`leistungen_abrechnen`)
 
@@ -82,7 +90,7 @@ Es wird **kein** `pipeline_result` gesendet; die UI hat keine strukturierte Rech
 
 ## C) Chat ohne Dateien (`frage`)
 
-[`handleChatMode`](../supabase/functions/goae-chat/index.ts): klassischer Chat mit Systemprompt (GOÄ-Katalogauszug, Regeln, Formatvorgaben), Admin-Kontext und Nutzer-/Assistentenverlauf. Antwort als **Streaming-Text** (keine DocBill-speziellen `type`-Events außer ggf. Parser-Fehlern aus dem allgemeinen Stream-Handling im Client).
+[`handleChatMode`](../supabase/functions/goae-chat/index.ts): Frage-/Erklär-Modus mit **`buildFrageSystemPrompt`** (GOÄ-Katalogauszug, Paragraphen, Regeln), Admin-Kontext und Chat-Verlauf. Antwort als **Streaming-Text** ohne Rechnungstabellen-Pflicht; vorgesehene Abschnitte inkl. **Quelle** (siehe `FRAGE_MODUS_RULES` in `index.ts`). Keine DocBill-speziellen `type`-Events außer ggf. allgemeinem Stream-Handling im Client.
 
 ## Kontext für Follow-ups
 

@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 
 /** Muss mit ConversationSidebar ICON_SLOT_ROW übereinstimmen (kein Springen) */
-const ICON_SLOT_ROW = "w-[3.6rem] min-w-[3.6rem] shrink-0 h-10 flex items-center justify-center";
+const ICON_SLOT_ROW = "w-[3.6rem] min-w-[3.6rem] shrink-0 h-11 flex items-center justify-center";
 
 function labelRail(collapsed: boolean) {
   return cn(
@@ -75,19 +75,19 @@ const UserProfileMenu = ({ collapsed, onAfterNavigate, onOpenProfile }: Props) =
           type="button"
           variant="ghost"
           data-sidebar-interactive
-          className="min-h-10 h-10 w-full flex items-center justify-start group shadow-none hover:bg-transparent hover:text-foreground px-0 min-w-0 cursor-pointer pointer-events-auto rounded-none"
+          className="min-h-11 h-11 w-full flex items-center justify-start group shadow-none hover:!bg-transparent hover:!text-foreground px-0 min-w-0 cursor-pointer pointer-events-auto rounded-none"
           title="Profil"
         >
           <div className={ICON_SLOT_ROW}>
-            <Avatar className="h-[26px] w-[26px] shrink-0">
+            <Avatar className="h-8 w-8 shrink-0">
               <AvatarImage src={avatarUrl} alt="" />
-              <AvatarFallback className="text-[10px] leading-none bg-muted">{getInitials(user)}</AvatarFallback>
+              <AvatarFallback className="text-xs leading-none bg-muted">{getInitials(user)}</AvatarFallback>
             </Avatar>
           </div>
-          <div className={cn(labelRail(collapsed), "min-h-10 flex items-center min-w-0")}>
+          <div className={cn(labelRail(collapsed), "min-h-11 flex items-center min-w-0")}>
             <span
               className={cn(
-                "block w-full text-left pr-2 text-sm text-muted-foreground/60 group-hover:text-accent-subtle-foreground transition-colors",
+                "block w-full text-left pr-2 text-sm text-muted-foreground/60 transition-colors group-hover:!text-foreground",
                 profileName ? "break-words whitespace-normal leading-snug line-clamp-2" : "truncate",
               )}
             >

@@ -8,12 +8,16 @@ import UserProfileMenu from "@/components/UserProfileMenu";
 /** Eine Fläche, keine Zonen-Hover / keine Trennlinien */
 const ASIDE_SURFACE = "bg-muted/50 dark:bg-muted/20";
 
-/** ~20 % größer als vorher (16px-Basis) */
-const ICON_CLASS = "w-[19px] h-[19px] text-muted-foreground/60 shrink-0";
+/**
+ * Button (ui/button) erzwingt [&_svg]:size-4 — ohne ! bleibt das Zahnrad klein.
+ * !size-6 = 24px. ghost hover wird mit hover:!text-foreground überschrieben.
+ */
+const SETTINGS_ICON_CLASS =
+  "shrink-0 !size-5 text-muted-foreground/60 transition-colors group-hover:!text-foreground";
 
 /** Feste Icon-Spalte: gleiche horizontale Position ein- / ausgeklappt */
 const ICON_SLOT_HEADER = "w-[3.6rem] min-w-[3.6rem] shrink-0 h-14 flex items-center justify-center";
-const ICON_SLOT_ROW = "w-[3.6rem] min-w-[3.6rem] shrink-0 h-10 flex items-center justify-center";
+const ICON_SLOT_ROW = "w-[3.6rem] min-w-[3.6rem] shrink-0 h-11 flex items-center justify-center";
 
 function labelRail(collapsed: boolean) {
   return cn(
@@ -103,15 +107,15 @@ const ConversationSidebar = ({
             type="button"
             variant="ghost"
             data-sidebar-interactive
-            className="min-h-10 h-10 w-full flex items-center justify-start group shadow-none hover:bg-transparent hover:text-foreground px-0 cursor-pointer pointer-events-auto rounded-none"
+            className="min-h-11 h-11 w-full flex items-center justify-start group shadow-none hover:!bg-transparent hover:!text-foreground px-0 cursor-pointer pointer-events-auto rounded-none"
             onClick={handleSettings}
             title="Einstellungen"
           >
             <div className={ICON_SLOT_ROW}>
-              <Settings className={cn(ICON_CLASS, "group-hover:text-accent-subtle-foreground transition-colors")} />
+              <Settings className={SETTINGS_ICON_CLASS} />
             </div>
-            <div className={cn(labelRail(collapsed), "min-h-10 flex items-center min-w-0")}>
-              <span className="block truncate text-left pr-2 text-sm text-muted-foreground/60 group-hover:text-accent-subtle-foreground transition-colors">
+            <div className={cn(labelRail(collapsed), "min-h-11 flex items-center min-w-0")}>
+              <span className="block truncate text-left pr-2 text-sm text-muted-foreground/60 transition-colors group-hover:!text-foreground">
                 Einstellungen
               </span>
             </div>

@@ -30,29 +30,26 @@ AUFGABE: Bestimme den Workflow-Intent aus der Nutzer-Nachricht. Antworte NUR mit
 
 WORKFLOW-DEFINITIONEN:
 
-1. rechnung_pruefen: Nutzer möchte eine bestehende Rechnung prüfen, kontrollieren oder korrigieren.
-   - Hat Dateien hochgeladen UND spricht von Rechnung/Prüfung/Kontrolle
-   - Oder: "prüfe meine Rechnung", "kontrolliere diese Abrechnung", "ist das korrekt?"
-   - Dateien sind typischerweise PDF/Bild einer fertigen Rechnung
+1. rechnung_pruefen: Nutzer möchte eine **bereits erstellte Rechnung/Abrechnung/Beleg/Honoraraufstellung** prüfen, korrigieren oder verbessern.
+   - Formulierungen wie: Rechnung prüfen/kontrollieren/korrigieren, „stimmt diese Abrechnung“, Beleg, Honorarliste
+   - Dateien: typischerweise fertige Rechnung als PDF/Bild
 
-2. leistungen_abrechnen: Nutzer beschreibt erbrachte Leistungen und möchte wissen, was er abrechnen kann.
-   - Beschreibung von Untersuchungen/Behandlungen: "habe gemacht", "durchgeführt", "was kann ich abrechnen"
-   - "Ich habe Funduskopie und IOD gemessen – was kann ich abrechnen?"
-   - Dateien können Behandlungsbericht/Arztbrief sein (keine Rechnung)
-   - Auch ohne Dateien: reine Textbeschreibung erbrachter Leistungen
+2. leistungen_abrechnen: Aus **Patientenakte, Arztbrief, Befund, OP-/Ambulanzbericht, Leistungsliste** oder Freitext zu **erbrachten Leistungen** soll ein **GOÄ-/Rechnungsvorschlag** abgeleitet werden (noch keine fertige Rechnung im Fokus).
+   - Akte, Befundbericht, Liste erbrachter Services, „was kann ich abrechnen“, „welche GOÄ-Ziffern“, „Rechnungsvorschlag aus dem Dokument“
+   - Dateien: klinische Dokumentation, keine Honorarrechnung zum Prüfen
+   - Auch ohne Dateien: Beschreibung erbrachter Leistungen inkl. Abrechnungswunsch
 
-3. frage: Nutzer stellt eine allgemeine GOÄ-Frage.
-   - "Wie oft darf ich GOÄ 401 im Quartal ansetzen?"
-   - "Was bedeutet Ziffer 1240?"
-   - "Darf ich X und Y nebeneinander abrechnen?"
-   - Fallback bei Unklarheit
+3. frage: Reine **informative GOÄ-Frage** ohne Upload und ohne Bitte um einen konkreten Rechnungsvorschlag aus Akte/Text.
+   - „Was bedeutet Ziffer 1240?“, „Darf ich X und Y nebeneinander abrechnen?“
+   - Fallback bei Unklarheit **ohne Datei**
+   - **Mit Datei:** fast nie „frage“ – dann meist leistungen_abrechnen oder rechnung_pruefen
 
-REGELN:
-- Bei Dateien + expliziter Rechnungsbezug → rechnung_pruefen
-- Bei Dateien + Beschreibung von Behandlungen/Leistungen (ohne Rechnungsbezug) → leistungen_abrechnen
-- Bei reinem Text + Beschreibung erbrachter Leistungen → leistungen_abrechnen
-- Bei reinem Text + Frageformat → frage
-- Bei Unklarheit → frage (sicherer Fallback)`;
+REGELN (Priorität):
+- **Datei + Akte/Befund/Bericht/Leistungsliste/abrechnen wollen** (ohne „Rechnung prüfen“) → leistungen_abrechnen
+- **Datei + Rechnung/Beleg prüfen/kontrollieren** → rechnung_pruefen
+- Kurze Nachricht + Datei ohne Kontext: wenn eher klinisches Dokument möglich → leistungen_abrechnen, wenn eher Rechnung → rechnung_pruefen; bei Zweifel **leistungen_abrechnen** wenn „abrechnen/was kann“ vorkommt, sonst rechnung_pruefen
+- Keine Datei + erbrachte Leistungen / Abrechnungswunsch → leistungen_abrechnen
+- Keine Datei + reine Wissensfrage → frage`;
 
 /** Heuristische Fallback-Logik, wenn LLM nicht verfügbar oder fehlschlägt */
 export function classifyByHeuristics(input: IntentClassifierInput): WorkflowIntent {
@@ -60,21 +57,47 @@ export function classifyByHeuristics(input: IntentClassifierInput): WorkflowInte
 
   // Rechnung prüfen: Dateien + Rechnungs-Keywords
   if (input.hasFiles) {
-    const rechnungKeywords = [
+    const rechnungPruefenKeywords = [
       "prüfen",
       "prüfe",
       "kontrollieren",
       "kontrolliere",
-      "rechnung",
-      "abrechnung",
       "korrigieren",
       "ist das korrekt",
       "stimmt das",
+      "rechnungsbeleg",
+      "honoraraufstellung",
     ];
-    if (rechnungKeywords.some((k) => msg.includes(k))) {
+    const hatRechnungsbezug =
+      /\brechnung\b/.test(msg) ||
+      /\babrechnungsbeleg\b/.test(msg) ||
+      /\bkv-abrechnung\b/.test(msg);
+    const akteOderLeistungsVorschlag = [
+      "patientenakte",
+      "akte",
+      "befund",
+      "arztbrief",
+      "ambulanz",
+      "leistungsliste",
+      "was kann ich",
+      "welche ziffer",
+      "welche goä",
+      "erbrachte",
+      "erbracht",
+      "durchgeführt",
+      "rechnungsvorschlag",
+      "bitte abrechnen",
+    ];
+    if (
+      akteOderLeistungsVorschlag.some((k) => msg.includes(k)) &&
+      !rechnungPruefenKeywords.some((k) => msg.includes(k)) &&
+      !(hatRechnungsbezug && /\b(prüf|kontroll|korrekt|stimmt)\b/.test(msg))
+    ) {
+      return "leistungen_abrechnen";
+    }
+    if (rechnungPruefenKeywords.some((k) => msg.includes(k)) || hatRechnungsbezug) {
       return "rechnung_pruefen";
     }
-    // Dateien ohne klaren Rechnungsbezug → Standard: Rechnung (Parser entscheidet später)
     return "rechnung_pruefen";
   }
 

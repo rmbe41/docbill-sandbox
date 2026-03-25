@@ -258,15 +258,19 @@ const Index = () => {
     setSidebarOpen(false);
     setAgentsSheetOpen(false);
     setMainView("chat");
+    const focusComposer = () =>
+      requestAnimationFrame(() => chatInputRef.current?.focusComposer());
     if (user) {
       const id = await createConversation("Neues Gespräch");
       if (id) {
         setActiveConversationId(id);
+        focusComposer();
         return;
       }
     }
     setActiveConversationId(null);
     void fetchConversations();
+    focusComposer();
   }, [user, createConversation, setActiveConversationId, fetchConversations]);
 
   const handleDeleteConversation = useCallback(

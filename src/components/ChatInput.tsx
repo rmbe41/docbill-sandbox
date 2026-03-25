@@ -22,6 +22,8 @@ function composerDraftStorageKey(conversationId: string | null | undefined) {
 
 export type ChatInputHandle = {
   openAttachmentPicker: () => void;
+  /** Cursor ins Nachrichtenfeld; z. B. nach „Neuer Chat“. */
+  focusComposer: () => void;
 };
 
 /** Outer height of the composer card when there are no file chips (border + py-3 + input row with min-h-[44px]). */
@@ -55,6 +57,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 
   useImperativeHandle(ref, () => ({
     openAttachmentPicker: () => fileInputRef.current?.click(),
+    focusComposer: () => {
+      textareaRef.current?.focus({ preventScroll: true });
+    },
   }), []);
 
   useEffect(() => {

@@ -1,9 +1,12 @@
 import React, { useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { User, FileText, ThumbsUp, ThumbsDown } from "lucide-react";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { FileText, ThumbsUp, ThumbsDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
+import { useAuth } from "@/hooks/useAuth";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import InvoiceResult, {
   type InvoiceResultData,
   type SuggestionDecision,
@@ -57,8 +60,33 @@ const markdownComponents = {
   ),
 };
 
+function displayNameFromUser(user: SupabaseUser): string | null {
+  const m = user.user_metadata ?? {};
+  const n =
+    (m.full_name as string | undefined)?.trim() ||
+    (m.display_name as string | undefined)?.trim() ||
+    (m.name as string | undefined)?.trim();
+  return n || null;
+}
+
+function chatBubbleUserInitials(user: SupabaseUser): string {
+  const name = displayNameFromUser(user);
+  if (name) {
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  }
+  const email = user.email;
+  if (!email) return "?";
+  const part = email.split("@")[0];
+  if (part.length >= 2) return part.slice(0, 2).toUpperCase();
+  return part.slice(0, 1).toUpperCase();
+}
+
 const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }: ChatBubbleProps) => {
   const isUser = message.role === "user";
+  const { user: authUser } = useAuth();
+  const userAvatarUrl = authUser?.user_metadata?.avatar_url as string | undefined;
   const [overlayFile, setOverlayFile] = useState<{
     src?: string;
     name: string;
@@ -377,8 +405,13 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
       </div>
 
       {isUser && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center mt-1">
-          <User className="w-4 h-4 text-primary-foreground" />
+        <div className="flex-shrink-0 mt-1">
+          <Avatar className="h-8 w-8 shrink-0 ring-2 ring-background">
+            <AvatarImage src={userAvatarUrl} alt="" />
+            <AvatarFallback className="text-[10px] leading-none bg-primary text-primary-foreground">
+              {authUser ? chatBubbleUserInitials(authUser) : "?"}
+            </AvatarFallback>
+          </Avatar>
         </div>
       )}
 

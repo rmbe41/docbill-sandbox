@@ -205,7 +205,13 @@ serve(async (req) => {
       );
     }
 
-    const body = await req.json() as { filename?: string; content_text?: string; migrate?: boolean; check_unindexed?: boolean };
+    const body = await req.json() as {
+      filename?: string;
+      content_text?: string;
+      file_base64?: string;
+      migrate?: boolean;
+      check_unindexed?: boolean;
+    };
 
     if (body?.check_unindexed === true) {
       const filesResp = await fetch(
@@ -318,140 +324,182 @@ serve(async (req) => {
       );
     }
 
-    agentLog("H3", "admin-context-upload:uploadPath", "upload path", {
-      filename,
-      textLen: text.length,
-      base64Len: typeof file_base64 === "string" ? file_base64.length : 0,
-    });
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        const writeProgress = (step: string, skipped = false) => {
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify(skipped ? { type: "progress", step, skipped: true } : { type: "progress", step }) +
+                "\n",
+            ),
+          );
+        };
+        try {
+          writeProgress("send");
+          agentLog("H3", "admin-context-upload:uploadPath", "upload path", {
+            filename,
+            textLen: text.length,
+            base64Len: typeof file_base64 === "string" ? file_base64.length : 0,
+          });
 
-    const maxC = effectiveMaxChunks();
-    const estChunks = Math.min(
-      maxC,
-      Math.ceil(text.length / Math.max(1, CHUNK_SIZE - CHUNK_OVERLAP)),
-    );
-    console.log(
-      `[admin-context-upload] preflight filename=${filename} chars=${text.length} est_chunks≤${estChunks} max_chunks=${maxC}`,
-    );
+          const maxC = effectiveMaxChunks();
+          const estChunks = Math.min(
+            maxC,
+            Math.ceil(text.length / Math.max(1, CHUNK_SIZE - CHUNK_OVERLAP)),
+          );
+          console.log(
+            `[admin-context-upload] preflight filename=${filename} chars=${text.length} est_chunks≤${estChunks} max_chunks=${maxC}`,
+          );
 
-    const { chunks, truncated } = chunkText(text);
-    if (chunks.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "No content chunks produced" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+          const { chunks, truncated } = chunkText(text);
+          if (chunks.length === 0) {
+            controller.enqueue(
+              encoder.encode(JSON.stringify({ type: "error", message: "No content chunks produced" }) + "\n"),
+            );
+            return;
+          }
+          writeProgress("chunk");
 
-    const embeddings = await createEmbeddings(chunks, openRouterKey);
-    agentLog("H3", "admin-context-upload:afterEmbed", "embeddings done", {
-      chunkCount: chunks.length,
-      embCount: embeddings.length,
-    });
-    const approxInputTokens = chunks.length * Math.ceil(CHUNK_SIZE / 4);
-    console.log(
-      `[admin-context-upload] embedding batches=1 chunks=${chunks.length} approx_input_tokens≈${approxInputTokens} truncated=${truncated}`,
-    );
+          const embeddings = await createEmbeddings(chunks, openRouterKey);
+          agentLog("H3", "admin-context-upload:afterEmbed", "embeddings done", {
+            chunkCount: chunks.length,
+            embCount: embeddings.length,
+          });
+          const approxInputTokens = chunks.length * Math.ceil(CHUNK_SIZE / 4);
+          console.log(
+            `[admin-context-upload] embedding batches=1 chunks=${chunks.length} approx_input_tokens≈${approxInputTokens} truncated=${truncated}`,
+          );
+          writeProgress("embed");
 
-    let storagePath: string | null = null;
-    const isPdf = filename.toLowerCase().endsWith(".pdf");
-    if (isPdf && typeof file_base64 === "string" && file_base64.length > 0) {
-      try {
-        const binary = Uint8Array.from(atob(file_base64), (c) => c.charCodeAt(0));
-        const path = `${userId}/${crypto.randomUUID()}.pdf`;
-        const supabase = createClient(sbUrl, sbKey);
-        const { error: uploadErr } = await supabase.storage
-          .from("admin-context")
-          .upload(path, binary, { contentType: "application/pdf", upsert: false });
-        if (!uploadErr) storagePath = path;
-      } catch (e) {
-        console.warn("PDF storage upload failed, continuing without preview:", e);
-      }
-    }
+          let storagePath: string | null = null;
+          const isPdf = filename.toLowerCase().endsWith(".pdf");
+          if (isPdf && typeof file_base64 === "string" && file_base64.length > 0) {
+            try {
+              const binary = Uint8Array.from(atob(file_base64), (c) => c.charCodeAt(0));
+              const path = `${userId}/${crypto.randomUUID()}.pdf`;
+              const supabase = createClient(sbUrl, sbKey);
+              const { error: uploadErr } = await supabase.storage
+                .from("admin-context")
+                .upload(path, binary, { contentType: "application/pdf", upsert: false });
+              if (!uploadErr) storagePath = path;
+            } catch (e) {
+              console.warn("PDF storage upload failed, continuing without preview:", e);
+            }
+          }
+          if (storagePath) {
+            writeProgress("store_pdf");
+          } else {
+            writeProgress("store_pdf", true);
+          }
 
-    const fileResp = await fetch(`${sbUrl}/rest/v1/admin_context_files`, {
-      method: "POST",
-      headers: {
-        apikey: sbKey,
-        Authorization: `Bearer ${sbKey}`,
-        "Content-Type": "application/json",
-        Prefer: "return=representation",
+          const fileResp = await fetch(`${sbUrl}/rest/v1/admin_context_files`, {
+            method: "POST",
+            headers: {
+              apikey: sbKey,
+              Authorization: `Bearer ${sbKey}`,
+              "Content-Type": "application/json",
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              filename,
+              content_text: text,
+              uploaded_by: userId,
+              storage_path: storagePath,
+            }),
+          });
+
+          if (!fileResp.ok) {
+            const err = await fileResp.text();
+            throw new Error(`Failed to create file record: ${err}`);
+          }
+
+          const fileRows = await fileResp.json();
+          const fileId = Array.isArray(fileRows) ? fileRows[0]?.id : fileRows?.id;
+          if (!fileId) {
+            throw new Error("No file id returned");
+          }
+          writeProgress("db_file");
+
+          for (let i = 0; i < chunks.length; i++) {
+            const emb = embeddings[i];
+            if (!emb) continue;
+            const chunkResp = await fetch(`${sbUrl}/rest/v1/admin_context_chunks`, {
+              method: "POST",
+              headers: {
+                apikey: sbKey,
+                Authorization: `Bearer ${sbKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                file_id: fileId,
+                filename,
+                chunk_index: i,
+                content: chunks[i],
+                embedding: emb,
+                ziffern: guessChunkZiffern(chunks[i]),
+              }),
+            });
+            if (!chunkResp.ok) {
+              const err = await chunkResp.text();
+              throw new Error(`Failed to insert chunk ${i}: ${err}`);
+            }
+          }
+          writeProgress("db_chunks");
+
+          try {
+            await fetch(`${sbUrl}/rest/v1/ingest_jobs`, {
+              method: "POST",
+              headers: {
+                apikey: sbKey,
+                Authorization: `Bearer ${sbKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                label: filename,
+                status: "completed",
+                chunks_created: chunks.length,
+                estimated_chunks: estChunks,
+                estimated_input_tokens: approxInputTokens,
+                truncated,
+                meta: { file_id: fileId, max_chunks: maxC },
+              }),
+            });
+          } catch {
+            /* Monitoring optional */
+          }
+
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                type: "complete",
+                ok: true,
+                file_id: fileId,
+                chunks: chunks.length,
+                truncated,
+                max_chunks: maxC,
+                estimated_input_tokens_approx: approxInputTokens,
+              }) + "\n",
+            ),
+          );
+        } catch (e) {
+          console.error("admin-context-upload stream error:", e);
+          const msg = e instanceof Error ? e.message : "Upload failed";
+          controller.enqueue(encoder.encode(JSON.stringify({ type: "error", message: msg }) + "\n"));
+        } finally {
+          controller.close();
+        }
       },
-      body: JSON.stringify({
-        filename,
-        content_text: text,
-        uploaded_by: userId,
-        storage_path: storagePath,
-      }),
     });
 
-    if (!fileResp.ok) {
-      const err = await fileResp.text();
-      throw new Error(`Failed to create file record: ${err}`);
-    }
-
-    const fileRows = await fileResp.json();
-    const fileId = Array.isArray(fileRows) ? fileRows[0]?.id : fileRows?.id;
-    if (!fileId) {
-      throw new Error("No file id returned");
-    }
-
-    for (let i = 0; i < chunks.length; i++) {
-      const emb = embeddings[i];
-      if (!emb) continue;
-      const chunkResp = await fetch(`${sbUrl}/rest/v1/admin_context_chunks`, {
-        method: "POST",
-        headers: {
-          apikey: sbKey,
-          Authorization: `Bearer ${sbKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          file_id: fileId,
-          filename,
-          chunk_index: i,
-          content: chunks[i],
-          embedding: emb,
-          ziffern: guessChunkZiffern(chunks[i]),
-        }),
-      });
-      if (!chunkResp.ok) {
-        const err = await chunkResp.text();
-        throw new Error(`Failed to insert chunk ${i}: ${err}`);
-      }
-    }
-
-    try {
-      await fetch(`${sbUrl}/rest/v1/ingest_jobs`, {
-        method: "POST",
-        headers: {
-          apikey: sbKey,
-          Authorization: `Bearer ${sbKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          label: filename,
-          status: "completed",
-          chunks_created: chunks.length,
-          estimated_chunks: estChunks,
-          estimated_input_tokens: approxInputTokens,
-          truncated,
-          meta: { file_id: fileId, max_chunks: maxC },
-        }),
-      });
-    } catch {
-      /* Monitoring optional */
-    }
-
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        file_id: fileId,
-        chunks: chunks.length,
-        truncated,
-        max_chunks: maxC,
-        estimated_input_tokens_approx: approxInputTokens,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/x-ndjson",
+        "Cache-Control": "no-store",
+      },
+    });
   } catch (e) {
     console.error("admin-context-upload error:", e);
     agentLog("H3", "admin-context-upload:catch", "handler error", {

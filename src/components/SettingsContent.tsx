@@ -18,7 +18,20 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { DEFAULT_GLOBAL_GUARDRAILS_RULES } from "@/data/default-global-rules";
 import { AVAILABLE_MODELS, MODEL_TAG_LABELS, MODEL_TAG_TOOLTIPS, type ModelTag } from "@/data/models";
-import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Eye, Loader2, Building2 } from "lucide-react";
+import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Eye, Loader2, Building2, ChevronDown } from "lucide-react";
+import ContextUploadProgress, {
+  applyStreamProgressToSteps,
+  buildStepStatesForStoredContextFile,
+  createInitialMigrateStepStates,
+  createInitialUploadStepStates,
+  markActiveStepAsError,
+  markMigrateActiveAsError,
+  type ContextMigrateStepId,
+  type ContextUploadStepId,
+  type ContextUploadStepStatus,
+} from "@/components/ContextUploadProgress";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { consumeAdminContextUploadStream } from "@/lib/admin-context-upload-stream";
 import FileOverlay from "@/components/FileOverlay";
 import TextPreviewOverlay from "@/components/TextPreviewOverlay";
 import { goaeCatalogMeta } from "@/data/goae-catalog-meta";
@@ -149,8 +162,26 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
   const [unindexedCount, setUnindexedCount] = useState<number | null>(null);
   const [indexedFileIds, setIndexedFileIds] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<{ filename: string; step: string } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    filename: string;
+    startedAt: number;
+    steps: Record<ContextUploadStepId, ContextUploadStepStatus>;
+  } | null>(null);
+  /** Letzter abgeschlossener Upload-Ablauf (nur gesetzt nach Upload/Migration, kein leerer Platzhalter). */
+  const [savedContextUploadSnapshot, setSavedContextUploadSnapshot] = useState<{
+    filename: string;
+    steps: Record<ContextUploadStepId, ContextUploadStepStatus>;
+  } | null>(null);
   const [migrating, setMigrating] = useState(false);
+  const [migrateProgress, setMigrateProgress] = useState<{
+    filename: string;
+    startedAt: number;
+    steps: Record<ContextMigrateStepId, ContextUploadStepStatus>;
+  } | null>(null);
+  const [savedMigrateSnapshot, setSavedMigrateSnapshot] = useState<{
+    filename: string;
+    steps: Record<ContextMigrateStepId, ContextUploadStepStatus>;
+  } | null>(null);
   const [previewFile, setPreviewFile] = useState<{ src: string; name: string; type: string } | null>(null);
   const [textPreview, setTextPreview] = useState<{ filename: string; content: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -363,83 +394,224 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
   const handleContextFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
+    let retainUploadProgressAfterFinish = false;
     setUploading(true);
-    setUploadStatus({ filename: file.name, step: "Text wird extrahiert…" });
+    const isPdf = file.name.toLowerCase().endsWith(".pdf");
+    const initialSteps = createInitialUploadStepStates();
+    initialSteps.pick = "done";
+    initialSteps.detect_type = "done";
+    initialSteps.read_raw = "active";
+    setUploadProgress({
+      filename: file.name,
+      startedAt: Date.now(),
+      steps: initialSteps,
+    });
 
     try {
       // #region agent log
       fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H5", location: "SettingsContent.tsx:handleContextFileUpload:start", message: "upload start", data: { name: file.name, size: file.size, isAdmin: !!isAdmin }, timestamp: Date.now() }) }).catch(() => {});
       // #endregion
-      const isPdf = file.name.toLowerCase().endsWith(".pdf");
       const text = isPdf ? await extractTextFromPdf(file) : await file.text();
       // #region agent log
       fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H1", location: "SettingsContent.tsx:handleContextFileUpload:afterRead", message: "content read", data: { isPdf, textLen: text?.length ?? 0, trimLen: text?.trim()?.length ?? 0 }, timestamp: Date.now() }) }).catch(() => {});
       // #endregion
+      setUploadProgress((p) =>
+        !p
+          ? p
+          : {
+              ...p,
+              steps: {
+                ...p.steps,
+                read_raw: "done",
+                extract_text: "done",
+                validate_text: "active",
+              },
+            },
+      );
+
       if (!text.trim()) {
+        retainUploadProgressAfterFinish = true;
         toast({ title: "Fehler", description: "Datei enthält keinen Text.", variant: "destructive" });
-        setUploading(false);
-        setUploadStatus(null);
+        setUploadProgress((p) =>
+          !p ? p : { ...p, steps: { ...p.steps, validate_text: "error" } },
+        );
         return;
       }
 
-      setUploadStatus({ filename: file.name, step: "Wird hochgeladen…" });
+      setUploadProgress((p) =>
+        !p
+          ? p
+          : {
+              ...p,
+              steps: {
+                ...p.steps,
+                validate_text: "done",
+                prepare_preview: "active",
+              },
+            },
+      );
 
       const body: { filename: string; content_text: string; file_base64?: string } = {
         filename: file.name,
         content_text: text,
       };
-      if (isPdf) body.file_base64 = await fileToBase64(file);
+      if (isPdf) {
+        body.file_base64 = await fileToBase64(file);
+        setUploadProgress((p) =>
+          !p
+            ? p
+            : {
+                ...p,
+                steps: { ...p.steps, prepare_preview: "done", send: "active" },
+              },
+        );
+      } else {
+        setUploadProgress((p) =>
+          !p
+            ? p
+            : {
+                ...p,
+                steps: { ...p.steps, prepare_preview: "skipped", send: "active" },
+              },
+        );
+      }
+
       // #region agent log
       fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H2", location: "SettingsContent.tsx:handleContextFileUpload:beforeInvoke", message: "before invoke", data: { contentLen: body.content_text.length, base64Len: body.file_base64?.length ?? 0 }, timestamp: Date.now() }) }).catch(() => {});
       // #endregion
 
-      const { data, error } = await invokeWithTimeout(
-        () => supabase.functions.invoke("admin-context-upload", { body }),
-        UPLOAD_TIMEOUT_MS,
-      );
-
-      // #region agent log
-      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H2-H5", location: "SettingsContent.tsx:handleContextFileUpload:afterInvoke", message: "invoke returned", data: { hasError: !!error, errorMsg: error?.message ?? null, dataType: data === null ? "null" : typeof data, dataKeys: data && typeof data === "object" ? Object.keys(data as object) : [], serverError: (data as { error?: string })?.error ?? null, fileId: (data as { file_id?: string })?.file_id ?? null, ok: (data as { ok?: boolean })?.ok }, timestamp: Date.now() }) }).catch(() => {});
-      // #endregion
-
-      if (error) {
-        throw new Error(error.message ?? "Upload fehlgeschlagen");
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+      if (!token) {
+        throw new Error("Nicht angemeldet");
       }
-      const result = data as { error?: string; file_id?: string };
-      if (result?.error) {
-        throw new Error(result.error);
+      if (!supabaseUrl || !anonKey) {
+        throw new Error("Supabase ist nicht konfiguriert");
+      }
+
+      const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/admin-context-upload`;
+      const ac = new AbortController();
+      const to = setTimeout(() => ac.abort(), UPLOAD_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            apikey: anonKey,
+          },
+          body: JSON.stringify(body),
+          signal: ac.signal,
+        });
+      } finally {
+        clearTimeout(to);
+      }
+
+      const result = await consumeAdminContextUploadStream(res, (step, skipped) => {
+        setUploadProgress((p) =>
+          !p ? p : { ...p, steps: applyStreamProgressToSteps(p.steps, step, skipped) },
+        );
+      });
+
+      if (!result.ok) {
+        setUploadProgress((p) =>
+          !p ? p : { ...p, steps: markActiveStepAsError(p.steps) },
+        );
+        throw new Error(result.message);
       }
 
       const { data: files } = await supabase
         .from("admin_context_files")
         .select("id, filename, created_at, storage_path")
         .order("created_at", { ascending: false });
+      setUploadProgress((p) =>
+        !p
+          ? p
+          : {
+              ...p,
+              steps: {
+                ...p.steps,
+                refresh_list: "done",
+                done: "active",
+              },
+            },
+      );
+
       if (files) setContextFiles(files);
 
-      if (result?.file_id) {
+      if (result.file_id) {
         setIndexedFileIds((prev) => new Set([...prev, result.file_id!]));
       }
 
+      setUploadProgress((p) =>
+        !p ? p : { ...p, steps: { ...p.steps, done: "done" } },
+      );
+
       toast({ title: "Hochgeladen", description: `${file.name} wurde als Kontext hinzugefügt.` });
     } catch (err) {
+      retainUploadProgressAfterFinish = true;
       // #region agent log
       fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "25aeaa" }, body: JSON.stringify({ sessionId: "25aeaa", hypothesisId: "H-catch", location: "SettingsContent.tsx:handleContextFileUpload:catch", message: "upload catch", data: { err: err instanceof Error ? err.message : String(err) }, timestamp: Date.now() }) }).catch(() => {});
       // #endregion
+      const msg =
+        err instanceof Error
+          ? err.name === "AbortError"
+            ? "Upload-Timeout – die Verbindung hat zu lange gedauert."
+            : err.message
+          : "Upload fehlgeschlagen.";
+      setUploadProgress((p) => {
+        if (!p) return p;
+        const hasErr = Object.values(p.steps).some((s) => s === "error");
+        return hasErr ? p : { ...p, steps: markActiveStepAsError(p.steps) };
+      });
       toast({
         title: "Fehler",
-        description: err instanceof Error ? err.message : "Upload fehlgeschlagen.",
+        description: msg,
         variant: "destructive",
       });
     } finally {
       setUploading(false);
-      setUploadStatus(null);
+      if (retainUploadProgressAfterFinish) {
+        setUploadProgress((current) => {
+          if (current) {
+            setSavedContextUploadSnapshot({
+              filename: current.filename,
+              steps: { ...current.steps },
+            });
+          }
+          return null;
+        });
+      } else {
+        window.setTimeout(() => {
+          setUploadProgress((current) => {
+            if (current) {
+              setSavedContextUploadSnapshot({
+                filename: current.filename,
+                steps: { ...current.steps },
+              });
+            }
+            return null;
+          });
+        }, 900);
+      }
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const migrateContextToRag = async () => {
     if (!user) return;
+    let retainMigrateProgress = false;
     setMigrating(true);
+    const ms = createInitialMigrateStepStates();
+    ms.migrate_run = "active";
+    setMigrateProgress({
+      filename: `Ohne RAG-Index: ${unindexedCount ?? "?"} Datei(en)`,
+      startedAt: Date.now(),
+      steps: ms,
+    });
     try {
       const { data, error } = await invokeWithTimeout(
         () => supabase.functions.invoke("admin-context-upload", { body: { migrate: true } }),
@@ -453,6 +625,9 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
       if (result?.error) {
         throw new Error(result.error);
       }
+      setMigrateProgress((p) =>
+        !p ? p : { ...p, steps: { ...p.steps, migrate_run: "done", migrate_list: "active" } },
+      );
       toast({ title: "Migration", description: `${result?.migrated ?? 0} Datei(en) für RAG indexiert.` });
       setUnindexedCount(0);
       const { data: refetchData } = await supabase.functions.invoke("admin-context-upload", {
@@ -462,7 +637,14 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
       if (Array.isArray(refetch?.indexed)) {
         setIndexedFileIds(new Set(refetch.indexed));
       }
+      setMigrateProgress((p) =>
+        !p ? p : { ...p, steps: { ...p.steps, migrate_list: "done" } },
+      );
     } catch (err) {
+      retainMigrateProgress = true;
+      setMigrateProgress((p) =>
+        !p ? p : { ...p, steps: markMigrateActiveAsError(p.steps) },
+      );
       toast({
         title: "Fehler",
         description: err instanceof Error ? err.message : "Migration fehlgeschlagen.",
@@ -470,6 +652,29 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
       });
     } finally {
       setMigrating(false);
+      if (retainMigrateProgress) {
+        setMigrateProgress((current) => {
+          if (current) {
+            setSavedMigrateSnapshot({
+              filename: current.filename,
+              steps: { ...current.steps },
+            });
+          }
+          return null;
+        });
+      } else {
+        window.setTimeout(() => {
+          setMigrateProgress((current) => {
+            if (current) {
+              setSavedMigrateSnapshot({
+                filename: current.filename,
+                steps: { ...current.steps },
+              });
+            }
+            return null;
+          });
+        }, 900);
+      }
     }
   };
 
@@ -1148,7 +1353,7 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
                       variant="outline"
                       size="sm"
                       onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
+                      disabled={uploading || migrating}
                       className="gap-2"
                     >
                       <Upload className="w-4 h-4" />
@@ -1159,7 +1364,7 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
                         variant="ghost"
                         size="sm"
                         onClick={migrateContextToRag}
-                        disabled={migrating}
+                        disabled={migrating || uploading}
                         className="gap-2"
                       >
                         <Database className="w-4 h-4" />
@@ -1179,48 +1384,91 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
                 Laden Sie Textdateien (.txt, .md, .csv) oder PDFs hoch, um den Wissenskontext der KI zu erweitern. Empfohlene Inhalte: fachspezifische Guidelines (z.B. Retinologie), Analog-Bewertungen, Begründungsbeispiele. Relevante Ausschnitte werden automatisch bei jeder Rechnungsprüfung abgerufen.
               </p>
 
-              {uploadStatus && (
-                <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-accent/10 border border-accent/20 text-sm">
-                  <Loader2 className="w-5 h-5 text-accent animate-spin shrink-0" />
-                  <div>
-                    <p className="font-medium text-foreground">{uploadStatus.filename}</p>
-                    <p className="text-xs text-muted-foreground">{uploadStatus.step}</p>
-                  </div>
+              {(uploadProgress ||
+                savedContextUploadSnapshot ||
+                migrateProgress ||
+                savedMigrateSnapshot) && (
+                <div className="space-y-3">
+                  {(uploadProgress || savedContextUploadSnapshot) && (
+                    <ContextUploadProgress
+                      variant="upload"
+                      filename={(uploadProgress ?? savedContextUploadSnapshot)!.filename}
+                      stepStates={(uploadProgress ?? savedContextUploadSnapshot)!.steps}
+                      startedAt={uploadProgress?.startedAt ?? null}
+                    />
+                  )}
+                  {(migrateProgress || savedMigrateSnapshot) && (
+                    <ContextUploadProgress
+                      variant="migrate"
+                      filename={(migrateProgress ?? savedMigrateSnapshot)!.filename}
+                      stepStates={(migrateProgress ?? savedMigrateSnapshot)!.steps}
+                      startedAt={migrateProgress?.startedAt ?? null}
+                    />
+                  )}
                 </div>
               )}
 
               {contextFiles.length > 0 && (
                 <div className="space-y-1 mt-4">
                   {contextFiles.map((f) => (
-                    <div key={f.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-muted/40">
-                      <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                      <span className="text-sm flex-1 truncate">{f.filename}</span>
-                      {indexedFileIds.has(f.id) && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 shrink-0">
-                          Aktiv
+                    <Collapsible key={f.id} className="group rounded-md bg-muted/40 overflow-hidden">
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                        <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                        <span className="text-sm flex-1 truncate">{f.filename}</span>
+                        {indexedFileIds.has(f.id) && (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 shrink-0">
+                            Aktiv
+                          </span>
+                        )}
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {new Date(f.created_at).toLocaleDateString("de-DE")}
                         </span>
-                      )}
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {new Date(f.created_at).toLocaleDateString("de-DE")}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 flex-shrink-0"
-                        onClick={() => openPreview(f)}
-                        title="Vorschau"
-                      >
-                        <Eye className="w-3 h-3 text-muted-foreground" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 flex-shrink-0"
-                        onClick={() => deleteContextFile(f.id, f.filename)}
-                      >
-                        <Trash2 className="w-3 h-3 text-destructive" />
-                      </Button>
-                    </div>
+                        <CollapsibleTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs gap-1 shrink-0 text-muted-foreground hover:text-foreground"
+                            type="button"
+                            title="Ablauf anzeigen"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                            Ablauf
+                          </Button>
+                        </CollapsibleTrigger>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 flex-shrink-0"
+                          onClick={() => openPreview(f)}
+                          title="Vorschau"
+                        >
+                          <Eye className="w-3 h-3 text-muted-foreground" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 flex-shrink-0"
+                          onClick={() => deleteContextFile(f.id, f.filename)}
+                        >
+                          <Trash2 className="w-3 h-3 text-destructive" />
+                        </Button>
+                      </div>
+                      <CollapsibleContent>
+                        <div className="px-2 pb-3 border-t border-border/50 bg-background/40">
+                          <ContextUploadProgress
+                            variant="upload"
+                            filename={f.filename}
+                            stepStates={buildStepStatesForStoredContextFile(
+                              f.filename,
+                              indexedFileIds.has(f.id),
+                              f.storage_path,
+                            )}
+                            startedAt={null}
+                            historicalNote="Rekonstruierter Stand aus dem gespeicherten Dokument (kein Live-Protokoll beim ursprünglichen Upload)."
+                          />
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
                   ))}
                 </div>
               )}
