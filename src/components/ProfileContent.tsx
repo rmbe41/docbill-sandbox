@@ -18,11 +18,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Upload, Trash2, KeyRound, Mail, Keyboard } from "lucide-react";
+import { Loader2, Upload, Trash2, KeyRound, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { KeyboardShortcutsReference } from "@/components/KeyboardShortcutsReference";
-import { KeyboardShortcutPrefsEditor } from "@/components/KeyboardShortcutPrefsEditor";
-import { useKeyboardShortcutPrefs } from "@/hooks/useKeyboardShortcutPrefs";
 
 function getInitials(email: string | undefined, name: string | undefined): string {
   if (name?.trim()) {
@@ -62,7 +59,6 @@ const ProfileContent = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleting, setDeleting] = useState(false);
-  const { prefs: shortcutPrefs, setPrefs: setShortcutPrefs, reset: resetShortcutPrefs } = useKeyboardShortcutPrefs();
 
   const syncFromUser = useCallback(() => {
     if (!user) return;
@@ -372,22 +368,6 @@ const ProfileContent = () => {
           </p>
         </section>
       )}
-
-      <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
-        <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          <Keyboard className="h-4 w-4" />
-          Tastenkürzel
-        </h2>
-        <KeyboardShortcutPrefsEditor
-          prefs={shortcutPrefs}
-          onChange={setShortcutPrefs}
-          onReset={resetShortcutPrefs}
-        />
-        <div className="border-t border-border pt-4">
-          <p className="text-xs font-medium text-muted-foreground mb-3">Übersicht</p>
-          <KeyboardShortcutsReference prefs={shortcutPrefs} />
-        </div>
-      </section>
 
       <section className="p-6 rounded-xl border border-destructive/40 bg-destructive/5 space-y-4">
         <h2 className="text-sm font-semibold text-destructive">Konto löschen</h2>

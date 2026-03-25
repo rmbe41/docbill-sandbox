@@ -370,7 +370,7 @@ const ContextUploadProgress = ({
           <AccordionItem value="migration" className="border-border/60 border-b-0">
             <AccordionTrigger className="py-3 text-sm hover:no-underline [&[data-state=open]]:pb-2 gap-2">
               <span className="flex flex-1 items-center justify-between gap-2 min-w-0 text-left">
-                <span className="font-medium text-foreground truncate">Ablauf</span>
+                <span className="font-medium text-foreground truncate">Status</span>
                 {(() => {
                   const stats = phaseStats(flatStates, CONTEXT_MIGRATE_STEP_ORDER);
                   return (

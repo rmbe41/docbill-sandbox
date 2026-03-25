@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import AppHeader from "@/components/AppHeader";
 import ChatBubble, { type ChatMessage } from "@/components/ChatBubble";
@@ -9,7 +9,6 @@ import ChatInput, {
   CHAT_COMPOSER_OUTER_HEIGHT_CLASS,
   type ChatInputHandle,
 } from "@/components/ChatInput";
-import { KeyboardShortcutsReference } from "@/components/KeyboardShortcutsReference";
 import AnalysisStopwatch from "@/components/AnalysisStopwatch";
 import PipelineProgress from "@/components/PipelineProgress";
 import WelcomeScreen from "@/components/WelcomeScreen";
@@ -52,13 +51,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useKeyboardShortcutPrefs } from "@/hooks/useKeyboardShortcutPrefs";
 import { loadKeyboardShortcutPrefs, matchShortcutToken, formatModCombo } from "@/lib/keyboardShortcutPrefs";
 
@@ -72,16 +64,20 @@ const Index = () => {
   const [agentsSheetOpen, setAgentsSheetOpen] = useState(false);
   const [freeExhaustedDialogOpen, setFreeExhaustedDialogOpen] = useState(false);
   const [freeExhaustedErrorDetails, setFreeExhaustedErrorDetails] = useState<string | null>(null);
-  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [pendingAttachmentPicker, setPendingAttachmentPicker] = useState(false);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { prefs: shortcutPrefs } = useKeyboardShortcutPrefs();
   const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null; engine_type: string | null }>({ selected_model: null, custom_rules: null, engine_type: null });
   const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "simple" });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"user" | "display" | "global" | undefined>(undefined);
+  const [settingsOpenSeq, setSettingsOpenSeq] = useState(0);
+  const settingsPanelHydration = useMemo(
+    () => ({ global: globalSettings, user: userSettings }),
+    [globalSettings, userSettings],
+  );
   const [sessionModelOverride, setSessionModelOverride] = useState<string | null>(null);
   /** Bumps on „Neuer Chat“ so WelcomeScreen remounts and fade-in runs again. */
   const [emptyChatAnimKey, setEmptyChatAnimKey] = useState(0);
@@ -134,6 +130,12 @@ const Index = () => {
     }
   }, [location.pathname, location.state, navigate]);
 
+  useEffect(() => {
+    if (mainView !== "settings" || !isAdmin) return;
+    if (settingsInitialTab !== undefined) return;
+    setSettingsInitialTab("global");
+  }, [mainView, isAdmin, settingsInitialTab]);
+
   const effectiveModel = sessionModelOverride ?? userSettings.selected_model ?? globalSettings.default_model;
 
   const onFreeModelsExhausted = useCallback((details: string | null) => {
@@ -176,14 +178,12 @@ const Index = () => {
     mainView,
     isChatBusy,
     freeExhaustedDialogOpen,
-    shortcutsHelpOpen,
     agentsSheetOpen,
   });
   shortcutsBlockRef.current = {
     mainView,
     isChatBusy,
     freeExhaustedDialogOpen,
-    shortcutsHelpOpen,
     agentsSheetOpen,
   };
 
@@ -302,9 +302,10 @@ const Index = () => {
   );
 
   const handleSettings = useCallback(() => {
-    setSettingsInitialTab(undefined);
+    setSettingsInitialTab(isAdmin ? "global" : undefined);
+    setSettingsOpenSeq((n) => n + 1);
     setMainView("settings");
-  }, []);
+  }, [isAdmin]);
 
   const handleProfile = useCallback(() => {
     setMainView("profile");
@@ -329,7 +330,7 @@ const Index = () => {
 
     const onKeyDown = (e: KeyboardEvent) => {
       const s = shortcutsBlockRef.current;
-      if (s.freeExhaustedDialogOpen || s.shortcutsHelpOpen || s.agentsSheetOpen) return;
+      if (s.freeExhaustedDialogOpen || s.agentsSheetOpen) return;
       if (document.documentElement.hasAttribute("data-docbill-capture-shortcut")) return;
 
       const prefs = loadKeyboardShortcutPrefs();
@@ -341,8 +342,7 @@ const Index = () => {
         return;
       }
 
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
+      if (!(e.metaKey || e.ctrlKey || e.altKey)) return;
 
       if (matchShortcutToken(e, prefs.keys.newChat)) {
         e.preventDefault();
@@ -356,7 +356,9 @@ const Index = () => {
       }
       if (matchShortcutToken(e, prefs.keys.help)) {
         e.preventDefault();
-        setShortcutsHelpOpen(true);
+        setSettingsInitialTab("user");
+        setSettingsOpenSeq((n) => n + 1);
+        setMainView("settings");
         return;
       }
       if (matchShortcutToken(e, prefs.keys.upload) && !isForeignFormField()) {
@@ -426,7 +428,7 @@ const Index = () => {
         <div
           ref={scrollRef}
           className={cn(
-            "flex-1 overflow-y-auto pt-14 min-h-0",
+            "flex-1 overflow-y-auto pt-14 min-h-0 [scrollbar-gutter:stable]",
             mainView === "chat" ? "pb-44 sm:pb-40" : "pb-24"
           )}
         >
@@ -467,7 +469,12 @@ const Index = () => {
           )}
           {mainView === "settings" && (
             <div className="pb-16">
-              <SettingsContent onSettingsSaved={loadSettings} initialTab={settingsInitialTab} />
+              <SettingsContent
+                onSettingsSaved={loadSettings}
+                initialTab={settingsInitialTab}
+                openSeq={settingsOpenSeq}
+                chatSettingsHydration={settingsPanelHydration}
+              />
             </div>
           )}
           {mainView === "profile" && (
@@ -503,7 +510,7 @@ const Index = () => {
               <div className={cn("flex items-center justify-between gap-3", CHAT_COMPOSER_DOCK_BELOW_CARD)}>
                 <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 shrink min-w-0 px-2.5 py-1 rounded-md bg-muted">
                   <AlertTriangle className="w-3 h-3 shrink-0 text-muted-foreground/80" />
-                  Alle Ergebnisse müssen vor der Verwendung fachlich geprüft werden.
+                  KI-generierte Ergebnisse vor Verwendung fachlich prüfen!
                 </p>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -636,6 +643,8 @@ const Index = () => {
             <AlertDialogCancel>Abbrechen</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
+                setSettingsInitialTab(isAdmin ? "global" : undefined);
+                setSettingsOpenSeq((n) => n + 1);
                 setMainView("settings");
                 setSidebarOpen(true);
               }}
@@ -647,18 +656,6 @@ const Index = () => {
       </AlertDialog>
 
       <AgentsSidebar onNew={handleNewConversation} {...historyPanelProps} />
-
-      <Dialog open={shortcutsHelpOpen} onOpenChange={setShortcutsHelpOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Tastenkürzel</DialogTitle>
-            <DialogDescription className="sr-only">
-              Übersicht der Tastenkürzel in der App.
-            </DialogDescription>
-          </DialogHeader>
-          <KeyboardShortcutsReference prefs={shortcutPrefs} className="pt-2" />
-        </DialogContent>
-      </Dialog>
 
       <Sheet open={agentsSheetOpen} onOpenChange={setAgentsSheetOpen}>
         <SheetContent

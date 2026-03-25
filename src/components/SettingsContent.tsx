@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -18,7 +18,10 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { DEFAULT_GLOBAL_GUARDRAILS_RULES } from "@/data/default-global-rules";
 import { AVAILABLE_MODELS, MODEL_TAG_LABELS, MODEL_TAG_TOOLTIPS, type ModelTag } from "@/data/models";
-import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Eye, Loader2, Building2, ChevronDown } from "lucide-react";
+import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Loader2, Building2, ChevronDown, Keyboard } from "lucide-react";
+import { KeyboardShortcutsReference } from "@/components/KeyboardShortcutsReference";
+import { KeyboardShortcutPrefsEditor } from "@/components/KeyboardShortcutPrefsEditor";
+import { useKeyboardShortcutPrefs } from "@/hooks/useKeyboardShortcutPrefs";
 import ContextUploadProgress, {
   applyStreamProgressToSteps,
   buildStepStatesForStoredContextFile,
@@ -126,20 +129,74 @@ const parseGlobalRuleFields = (value: string): string[] => {
   return [value];
 };
 
-type SettingsContentProps = {
-  onSettingsSaved?: () => void;
-  initialTab?: "user" | "display" | "global";
+/** Von Index übergeben: bereits geladene global/user Settings → kein blockierendes „Laden…“ beim Panel-Öffnen. */
+export type SettingsChatHydration = {
+  global: { default_model: string; default_rules: string; default_engine: string };
+  user: { selected_model: string | null; custom_rules: string | null; engine_type: string | null };
 };
 
-const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) => {
+function initialStateFromChatHydration(h: SettingsChatHydration | undefined) {
+  if (!h) {
+    return {
+      globalModel: "openrouter/free",
+      globalEngine: "complex" as const,
+      globalRules: "",
+      globalRuleFields: [DEFAULT_GLOBAL_GUARDRAILS_RULES],
+      userModel: null as string | null,
+      userEngine: null as "simple" | "complex" | null,
+      userRules: null as string | null,
+    };
+  }
+  const eng = h.user.engine_type;
+  return {
+    globalModel: h.global.default_model,
+    globalEngine: h.global.default_engine === "simple" ? ("simple" as const) : ("complex" as const),
+    globalRules: h.global.default_rules,
+    globalRuleFields: parseGlobalRuleFields(h.global.default_rules),
+    userModel: h.user.selected_model,
+    userEngine: eng === "simple" ? "simple" : eng === "complex" ? "complex" : null,
+    userRules: h.user.custom_rules,
+  };
+}
+
+type SettingsContentProps = {
+  onSettingsSaved?: () => void;
+  /** `display` öffnet „Meine Einstellungen“ mit dem Bereich Darstellung (kein eigener Tab mehr). */
+  initialTab?: "user" | "display" | "global";
+  /** Bei jedem Öffnen der Einstellungen erhöhen (z. B. Index), damit der aktive Tab erneut gesetzt wird. */
+  openSeq?: number;
+  /** Aus dem Chat: gleiche Daten wie `loadSettings` im Parent → UI sofort sichtbar, Sync im Hintergrund. */
+  chatSettingsHydration?: SettingsChatHydration;
+};
+
+const SettingsContent = ({
+  onSettingsSaved,
+  initialTab,
+  openSeq = 0,
+  chatSettingsHydration,
+}: SettingsContentProps) => {
   const { user, isAdmin } = useAuth();
   const { toast } = useToast();
+  const { prefs: shortcutPrefs, setPrefs: setShortcutPrefs, reset: resetShortcutPrefs } = useKeyboardShortcutPrefs();
+  /** Pro Mount: aus In-App-Chat kommt Hydration → kein Vollbild-Loader bei Sync. */
+  const skipBlockingLoaderRef = useRef(!!chatSettingsHydration);
 
-  const [activeTab, setActiveTab] = useState<"user" | "display" | "global" | "praxis">(initialTab ?? "user");
+  const [activeTab, setActiveTab] = useState<"user" | "global" | "praxis">(() =>
+    initialTab === "display" ? "user" : initialTab ?? "user",
+  );
 
   useEffect(() => {
+    if (initialTab === "display") {
+      setActiveTab("user");
+      return;
+    }
     if (initialTab) setActiveTab(initialTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    if (openSeq <= 0) return;
+    setActiveTab(initialTab === "display" ? "user" : initialTab ?? "user");
+  }, [openSeq, initialTab]);
 
   const [uiScale, setUiScale] = useState(() => {
     const saved = localStorage.getItem("ui-scale");
@@ -148,14 +205,20 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
   const [darkMode, setDarkMode] = useState(() => {
     return document.documentElement.classList.contains("dark");
   });
-  const [globalModel, setGlobalModel] = useState("openrouter/free");
-  const [globalEngine, setGlobalEngine] = useState<"simple" | "complex">("complex");
-  const [globalRules, setGlobalRules] = useState("");
-  const [globalRuleFields, setGlobalRuleFields] = useState<string[]>([DEFAULT_GLOBAL_GUARDRAILS_RULES]);
-  const [userModel, setUserModel] = useState<string | null>(null);
-  const [userEngine, setUserEngine] = useState<"simple" | "complex" | null>(null);
-  const [userRules, setUserRules] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const boot = useMemo(
+    () => initialStateFromChatHydration(chatSettingsHydration),
+    // Nur erster Mount: aktuelle Hydration vom Parent beim Öffnen des Panels
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const [globalModel, setGlobalModel] = useState(boot.globalModel);
+  const [globalEngine, setGlobalEngine] = useState<"simple" | "complex">(boot.globalEngine);
+  const [globalRules, setGlobalRules] = useState(boot.globalRules);
+  const [globalRuleFields, setGlobalRuleFields] = useState<string[]>(boot.globalRuleFields);
+  const [userModel, setUserModel] = useState<string | null>(boot.userModel);
+  const [userEngine, setUserEngine] = useState<"simple" | "complex" | null>(boot.userEngine);
+  const [userRules, setUserRules] = useState<string | null>(boot.userRules);
+  const [loading, setLoading] = useState(() => !chatSettingsHydration);
   const rulesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
@@ -200,40 +263,38 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
       setLoading(false);
       return;
     }
+    const blockUi = !skipBlockingLoaderRef.current;
     const load = async () => {
-      setLoading(true);
-      const { data: gData } = await supabase
-        .from("global_settings")
-        .select("*")
-        .limit(1)
-        .single();
-      if (gData) {
-        setGlobalModel(gData.default_model);
-        setGlobalEngine((gData as { default_engine?: string }).default_engine === "simple" ? "simple" : "complex");
-        setGlobalRules(gData.default_rules);
-        setGlobalRuleFields(parseGlobalRuleFields(gData.default_rules));
+      if (blockUi) setLoading(true);
+      try {
+        const [{ data: gData }, { data: uData }] = await Promise.all([
+          supabase.from("global_settings").select("*").limit(1).single(),
+          supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle(),
+        ]);
+        if (gData) {
+          setGlobalModel(gData.default_model);
+          setGlobalEngine((gData as { default_engine?: string }).default_engine === "simple" ? "simple" : "complex");
+          setGlobalRules(gData.default_rules);
+          setGlobalRuleFields(parseGlobalRuleFields(gData.default_rules));
+        }
+        if (uData) {
+          setUserModel(uData.selected_model);
+          const eng = (uData as { engine_type?: string | null }).engine_type;
+          setUserEngine(eng === "simple" ? "simple" : eng === "complex" ? "complex" : null);
+          setUserRules(uData.custom_rules);
+          const ps = (uData as { praxis_stammdaten?: PraxisStammdaten }).praxis_stammdaten as PraxisStammdaten | undefined;
+          setPraxisStammdaten(ps && typeof ps === "object" ? ps : {});
+        }
+        if (isAdmin) {
+          const { data: files } = await supabase
+            .from("admin_context_files")
+            .select("id, filename, created_at, storage_path")
+            .order("created_at", { ascending: false });
+          if (files) setContextFiles(files);
+        }
+      } finally {
+        if (blockUi) setLoading(false);
       }
-      const { data: uData } = await supabase
-        .from("user_settings")
-        .select("*")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (uData) {
-        setUserModel(uData.selected_model);
-        const eng = (uData as { engine_type?: string | null }).engine_type;
-        setUserEngine(eng === "simple" ? "simple" : eng === "complex" ? "complex" : null);
-        setUserRules(uData.custom_rules);
-        const ps = (uData as { praxis_stammdaten?: PraxisStammdaten }).praxis_stammdaten as PraxisStammdaten | undefined;
-        setPraxisStammdaten(ps && typeof ps === "object" ? ps : {});
-      }
-      if (isAdmin) {
-        const { data: files } = await supabase
-          .from("admin_context_files")
-          .select("id, filename, created_at, storage_path")
-          .order("created_at", { ascending: false });
-        if (files) setContextFiles(files);
-      }
-      setLoading(false);
     };
     load();
   }, [user, isAdmin]);
@@ -695,27 +756,124 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
 
   const openPreview = async (f: ContextFile) => {
     const isPdf = f.filename.toLowerCase().endsWith(".pdf");
+    const hasStoragePath = !!f.storage_path;
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+      body: JSON.stringify({
+        sessionId: "c66662",
+        hypothesisId: "H1",
+        location: "SettingsContent.tsx:openPreview:entry",
+        message: "openPreview start",
+        data: { fileId: f.id, filename: f.filename, isPdf, hasStoragePath },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     if (isPdf && f.storage_path) {
       const { data, error } = await supabase.storage
         .from("admin-context")
         .createSignedUrl(f.storage_path, 3600);
+      const signedOk = !error && !!data?.signedUrl;
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+        body: JSON.stringify({
+          sessionId: "c66662",
+          hypothesisId: "H1",
+          location: "SettingsContent.tsx:openPreview:signedUrl",
+          message: "PDF signed URL result",
+          data: {
+            signedOk,
+            errMsg: error?.message ?? null,
+            urlHost: data?.signedUrl ? (() => { try { return new URL(data.signedUrl).hostname; } catch { return "parse_error"; } })() : null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (error || !data?.signedUrl) {
         toast({ title: "Fehler", description: "PDF-Vorschau konnte nicht geladen werden.", variant: "destructive" });
         return;
       }
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+        body: JSON.stringify({
+          sessionId: "c66662",
+          hypothesisId: "H4",
+          location: "SettingsContent.tsx:openPreview:setPreviewFile",
+          message: "calling setPreviewFile",
+          data: { name: f.filename },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setPreviewFile({ src: data.signedUrl, name: f.filename, type: "application/pdf" });
       return;
     }
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+      body: JSON.stringify({
+        sessionId: "c66662",
+        hypothesisId: "H3",
+        location: "SettingsContent.tsx:openPreview:textBranch",
+        message: "using content_text branch",
+        data: { isPdf, hasStoragePath },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     const { data, error } = await supabase
       .from("admin_context_files")
       .select("content_text")
       .eq("id", f.id)
       .single();
-    if (error || !data?.content_text) {
+    const contentLen = data?.content_text != null ? String(data.content_text).length : -1;
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+      body: JSON.stringify({
+        sessionId: "c66662",
+        hypothesisId: "H3",
+        location: "SettingsContent.tsx:openPreview:dbSelect",
+        message: "admin_context_files select result",
+        data: {
+          hasRow: data != null,
+          hasError: !!error,
+          errMsg: error?.message ?? null,
+          errCode: (error as { code?: string })?.code ?? null,
+          contentLen,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    if (error || data == null) {
       toast({ title: "Fehler", description: "Inhalt konnte nicht geladen werden.", variant: "destructive" });
       return;
     }
-    setTextPreview({ filename: f.filename, content: data.content_text });
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+      body: JSON.stringify({
+        sessionId: "c66662",
+        hypothesisId: "H5",
+        location: "SettingsContent.tsx:openPreview:setTextPreview",
+        message: "calling setTextPreview",
+        data: { filename: f.filename, contentLen },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    setTextPreview({ filename: f.filename, content: data.content_text ?? "" });
   };
 
   if (loading) {
@@ -727,10 +885,9 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
   }
 
   const tabs = [
+    ...(isAdmin ? [{ key: "global" as const, label: "Admin", icon: Globe }] : []),
     { key: "user" as const, label: "Meine Einstellungen", icon: User },
     { key: "praxis" as const, label: "Praxis & Bank", icon: Building2 },
-    { key: "display" as const, label: "Darstellung", icon: Type },
-    ...(isAdmin ? [{ key: "global" as const, label: "Admin / Global", icon: Globe }] : []),
   ];
 
   const currentModel = activeTab === "global" ? globalModel : (userModel ?? "");
@@ -851,86 +1008,6 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
           </button>
         ))}
       </div>
-
-      {activeTab === "display" && (
-        <div className="space-y-10">
-          <p className="text-sm text-muted-foreground">
-            Passen Sie Darstellung und Erscheinungsbild an.
-          </p>
-
-          <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
-            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              {darkMode ? <Moon className="w-4 h-4 text-accent" /> : <Sun className="w-4 h-4 text-accent" />}
-              Erscheinungsbild
-            </h3>
-            <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-card">
-            <div className="flex items-center gap-3">
-              {darkMode ? <Moon className="w-5 h-5 text-accent" /> : <Sun className="w-5 h-5 text-accent" />}
-              <div>
-                <p className="text-sm font-medium text-foreground">Dark Mode</p>
-                <p className="text-xs text-muted-foreground">Dunkles Erscheinungsbild aktivieren</p>
-              </div>
-            </div>
-            <Switch
-              checked={darkMode}
-              onCheckedChange={(checked) => {
-                setDarkMode(checked);
-                if (checked) {
-                  document.documentElement.classList.add("dark");
-                  localStorage.setItem("theme", "dark");
-                } else {
-                  document.documentElement.classList.remove("dark");
-                  localStorage.setItem("theme", "light");
-                }
-                handleDisplayChange("Darstellung aktualisiert.");
-              }}
-            />
-          </div>
-          </section>
-
-          <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
-            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Type className="w-4 h-4 text-accent" />
-              UI-Größe: {uiScale}%
-            </h3>
-            <Slider
-              value={[uiScale]}
-              onValueChange={(v) => {
-                const val = v[0];
-                setUiScale(val);
-                localStorage.setItem("ui-scale", String(val));
-                document.documentElement.style.fontSize = `${val}%`;
-              }}
-              onValueCommit={() => handleDisplayChange("Darstellung aktualisiert.")}
-              min={75}
-              max={150}
-              step={5}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Klein (75%)</span>
-              <span>Normal (100%)</span>
-              <span>Groß (150%)</span>
-            </div>
-            <div className="mt-4 p-4 rounded-xl border border-border bg-card">
-              <p className="text-sm font-medium mb-1">Vorschau</p>
-              <p className="text-muted-foreground">So sieht Ihr Text bei {uiScale}% aus. Alle UI-Elemente skalieren entsprechend mit.</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setUiScale(100);
-                localStorage.setItem("ui-scale", "100");
-                document.documentElement.style.fontSize = "100%";
-                handleDisplayChange("Darstellung aktualisiert.");
-              }}
-            >
-              Auf Standard zurücksetzen
-            </Button>
-          </section>
-        </div>
-      )}
 
       {activeTab === "praxis" && (
         <div className="space-y-10">
@@ -1318,6 +1395,111 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
             )}
           </section>
 
+          {activeTab === "user" && (
+            <div className="space-y-10">
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Type className="w-4 h-4 text-accent" />
+                  Darstellung
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Passen Sie Darstellung und Erscheinungsbild an.
+                </p>
+              </div>
+
+              <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
+                <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  {darkMode ? <Moon className="w-4 h-4 text-accent" /> : <Sun className="w-4 h-4 text-accent" />}
+                  Erscheinungsbild
+                </h4>
+                <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-card">
+                  <div className="flex items-center gap-3">
+                    {darkMode ? <Moon className="w-5 h-5 text-accent" /> : <Sun className="w-5 h-5 text-accent" />}
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Dark Mode</p>
+                      <p className="text-xs text-muted-foreground">Dunkles Erscheinungsbild aktivieren</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={darkMode}
+                    onCheckedChange={(checked) => {
+                      setDarkMode(checked);
+                      if (checked) {
+                        document.documentElement.classList.add("dark");
+                        localStorage.setItem("theme", "dark");
+                      } else {
+                        document.documentElement.classList.remove("dark");
+                        localStorage.setItem("theme", "light");
+                      }
+                      handleDisplayChange("Darstellung aktualisiert.");
+                    }}
+                  />
+                </div>
+              </section>
+
+              <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">
+                <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Type className="w-4 h-4 text-accent" />
+                  UI-Größe: {uiScale}%
+                </h4>
+                <Slider
+                  value={[uiScale]}
+                  onValueChange={(v) => {
+                    const val = v[0];
+                    setUiScale(val);
+                    localStorage.setItem("ui-scale", String(val));
+                    document.documentElement.style.fontSize = `${val}%`;
+                  }}
+                  onValueCommit={() => handleDisplayChange("Darstellung aktualisiert.")}
+                  min={75}
+                  max={150}
+                  step={5}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Klein (75%)</span>
+                  <span>Normal (100%)</span>
+                  <span>Groß (150%)</span>
+                </div>
+                <div className="mt-4 p-4 rounded-xl border border-border bg-card">
+                  <p className="text-sm font-medium mb-1">Vorschau</p>
+                  <p className="text-muted-foreground">So sieht Ihr Text bei {uiScale}% aus. Alle UI-Elemente skalieren entsprechend mit.</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUiScale(100);
+                    localStorage.setItem("ui-scale", "100");
+                    document.documentElement.style.fontSize = "100%";
+                    handleDisplayChange("Darstellung aktualisiert.");
+                  }}
+                >
+                  Auf Standard zurücksetzen
+                </Button>
+              </section>
+
+              <section
+                id="docbill-tastenkurzel"
+                className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4"
+              >
+                <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Keyboard className="w-4 h-4 text-accent" />
+                  Tastenkürzel
+                </h4>
+                <KeyboardShortcutPrefsEditor
+                  prefs={shortcutPrefs}
+                  onChange={setShortcutPrefs}
+                  onReset={resetShortcutPrefs}
+                />
+                <div className="border-t border-border pt-4">
+                  <p className="text-xs font-medium text-muted-foreground mb-3">Übersicht</p>
+                  <KeyboardShortcutsReference prefs={shortcutPrefs} />
+                </div>
+              </section>
+            </div>
+          )}
+
           {activeTab === "global" && isAdmin && (
             <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-5">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -1413,13 +1595,16 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
                   {contextFiles.map((f) => (
                     <Collapsible key={f.id} className="group rounded-md bg-muted/40 overflow-hidden">
                       <div className="flex items-center gap-2 px-2 py-1.5">
-                        <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                        <span className="text-sm flex-1 truncate">{f.filename}</span>
-                        {indexedFileIds.has(f.id) && (
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 shrink-0">
-                            Aktiv
-                          </span>
-                        )}
+                        <Button
+                          variant="ghost"
+                          type="button"
+                          className="h-auto min-h-7 py-1 px-1.5 -ml-1 flex-1 justify-start gap-2 min-w-0 text-sm font-normal text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                          onClick={() => openPreview(f)}
+                          title="Vorschau öffnen"
+                        >
+                          <FileText className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                          <span className="truncate text-left">{f.filename}</span>
+                        </Button>
                         <span className="text-xs text-muted-foreground shrink-0">
                           {new Date(f.created_at).toLocaleDateString("de-DE")}
                         </span>
@@ -1427,23 +1612,30 @@ const SettingsContent = ({ onSettingsSaved, initialTab }: SettingsContentProps) 
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 px-2 text-xs gap-1 shrink-0 text-muted-foreground hover:text-foreground"
+                            className="h-7 px-2 text-xs gap-1.5 shrink-0 text-muted-foreground hover:text-foreground"
                             type="button"
-                            title="Ablauf anzeigen"
+                            title="Indexstatus und Ablauf anzeigen"
+                            aria-label={
+                              indexedFileIds.has(f.id)
+                                ? "Aktiv – Indexstatus und Ablauf anzeigen"
+                                : "Noch nicht indexiert – Ablauf anzeigen"
+                            }
                           >
                             <ChevronDown className="w-3.5 h-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-                            Ablauf
+                            <span className="flex items-center gap-1.5">
+                              {indexedFileIds.has(f.id) ? "Aktiv" : null}
+                              <span
+                                className={cn(
+                                  "w-2 h-2 rounded-full shrink-0",
+                                  indexedFileIds.has(f.id)
+                                    ? "bg-emerald-600 dark:bg-emerald-400"
+                                    : "bg-muted-foreground/45",
+                                )}
+                                aria-hidden
+                              />
+                            </span>
                           </Button>
                         </CollapsibleTrigger>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 flex-shrink-0"
-                          onClick={() => openPreview(f)}
-                          title="Vorschau"
-                        >
-                          <Eye className="w-3 h-3 text-muted-foreground" />
-                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"

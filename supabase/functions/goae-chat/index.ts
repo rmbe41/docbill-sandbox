@@ -61,6 +61,7 @@ DEINE KERNKOMPETENZEN (Fragemodus):
 - Verständliche Antworten zu GOÄ-Ziffern, Abschnitten, Ausschlüssen und Faktoren
 - Einordnung von Regeln (Begründungen, Schwellenwerte) im Rahmen des gelieferten Kontexts
 - Fokus auf Augenheilkunde, aber alle Fachgebiete nachvollziehbar erklären
+- **Admin-Wissensdateien:** Steht im gelieferten Kontext ein Abschnitt **„ADMIN-KONTEXT“** mit Text aus hochgeladenen Dateien und beantwortet dieser Text die Nutzerfrage (auch **ohne** GOÄ-Bezug, z.B. allgemeine Fakten): dann antworte in derselben Struktur (Kurzantwort / Erläuterung / Quelle) **auf Basis dieses Texts** und nenne unter **Quelle** den **Dateinamen** aus dem Admin-Kontext. Eine ablehnende Antwort nur deshalb, weil das Thema „nicht GOÄ“ ist, ist **unzulässig**, solange die Fakten im mitgelieferten Admin-Text stehen.
 
 WICHTIGE REGELN:
 - Beziehe dich auf den im Kontext genannten GOÄ-Stand (z.B. Katalog 2026)
@@ -105,6 +106,30 @@ ${GOAE_BEGRUENDUNGEN}`;
 // Chat-Modus (reguläre Fragen ohne Dokument-Upload)
 // ---------------------------------------------------------------------------
 
+// #region agent log
+function debugCcb4cf(
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+) {
+  const payload = {
+    sessionId: "ccb4cf",
+    hypothesisId,
+    location,
+    message,
+    data: { ...data, runId: "post-fix" },
+    timestamp: Date.now(),
+  };
+  console.error("DOCBILL_DEBUG_CCB4CF", JSON.stringify(payload));
+  fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ccb4cf" },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+// #endregion
+
 async function handleChatMode(
   messages: { role: string; content: string }[],
   model: string,
@@ -112,10 +137,22 @@ async function handleChatMode(
   adminContext: string,
   apiKey: string,
 ): Promise<Response> {
-  let systemContent = buildFrageSystemPrompt(messages) + adminContext;
+  const frageBase = buildFrageSystemPrompt(messages);
+  let systemContent = frageBase + adminContext;
   if (extraRules) {
     systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules}`;
   }
+
+  // #region agent log
+  debugCcb4cf("H3", "goae-chat/handleChatMode:systemBuilt", "system prompt composition", {
+    systemLen: systemContent.length,
+    frageBaseLen: frageBase.length,
+    adminLen: adminContext.length,
+    adminIdx: systemContent.indexOf("ADMIN-KONTEXT"),
+    systemHasCatKnowledge: /cat\s*knowledge/i.test(systemContent),
+    systemHasKatze: /\bkatze\b/i.test(systemContent.toLowerCase()),
+  });
+  // #endregion
 
   const apiMessages: unknown[] = [{ role: "system", content: systemContent }];
   for (const msg of messages) {
@@ -310,6 +347,14 @@ serve(async (req) => {
     }
 
     // #region agent log
+    debugCcb4cf("H2", "goae-chat/index.ts:intentFinal", "routing intent", {
+      intent,
+      hasFiles: !!hasFiles,
+      userHead: userMessage.slice(0, 160),
+    });
+    // #endregion
+
+    // #region agent log
     {
       const _dbgPayload = {
         sessionId: "c81fbe",
@@ -394,7 +439,17 @@ serve(async (req) => {
       // ═══════════════════════════════════════════════════════
       // CHAT-MODUS: Reguläre GOÄ-Fragen
       // ═══════════════════════════════════════════════════════
+      const ragForLog = userMessage.trim() || buildPipelineQuery(userMessage, undefined, lastResult);
       const adminContext = await getAdminContext();
+      // #region agent log
+      debugCcb4cf("H1", "goae-chat/index.ts:chatBranch", "admin RAG payload (Fragemodus)", {
+        ragForLog: ragForLog.slice(0, 220),
+        adminLen: adminContext.length,
+        adminHasAdminHeader: adminContext.includes("ADMIN-KONTEXT"),
+        adminHasCatKnowledge: /cat\s*knowledge/i.test(adminContext),
+        adminHasKatze: /\bkatze\b/i.test(adminContext.toLowerCase()),
+      });
+      // #endregion
       response = await handleChatMode(
         messages,
         resolvedModel,

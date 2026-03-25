@@ -38,9 +38,9 @@
 
     --radius: 0.625rem;
 
-    /* Custom tokens */
-    --chat-user: 210 40% 18%;
-    --chat-user-foreground: 210 20% 98%;
+    /* Custom tokens — user bubble: soft tint (lighter than old primary fill), distinct from white assistant */
+    --chat-user: 210 38% 90%;
+    --chat-user-foreground: 215 30% 18%;
     --chat-assistant: 0 0% 100%;
     --chat-assistant-foreground: 215 25% 15%;
     --chat-assistant-border: 210 18% 89%;
@@ -81,8 +81,8 @@
     --border: 215 18% 18%;
     --input: 215 18% 18%;
     --ring: 222 70% 55%;
-    --chat-user: 222 70% 55%;
-    --chat-user-foreground: 0 0% 100%;
+    --chat-user: 222 24% 22%;
+    --chat-user-foreground: 210 20% 93%;
     --chat-assistant: 215 22% 14%;
     --chat-assistant-foreground: 210 20% 92%;
     --chat-assistant-border: 215 18% 18%;
@@ -101,6 +101,8 @@
 @layer base {
   * {
     @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
   }
 
   body {
@@ -111,6 +113,31 @@
   code, pre {
     font-family: 'JetBrains Mono', monospace;
   }
+}
+
+/* Thin scrollbars (WebKit): transparent track, pill thumb — matches Firefox thin via * rules above */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.28);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.42);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 @layer utilities {

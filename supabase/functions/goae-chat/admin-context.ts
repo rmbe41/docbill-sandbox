@@ -21,6 +21,23 @@ function normalizeChunkBody(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+/** Filename token → substrings that may appear in a German (or mixed) user query. */
+const STEM_TOKEN_ALIASES: Record<string, string[]> = {
+  cat: ["katze", "katzen", "kater", "cats", "kitty"],
+  cats: ["katze", "katzen", "kater"],
+  knowledge: ["wissen", "kenntnis"],
+};
+
+function queryCoversStemToken(q: string, token: string): boolean {
+  const t = token.toLowerCase();
+  if (t.length < 2) return false;
+  if (q.includes(t)) return true;
+  for (const alt of STEM_TOKEN_ALIASES[t] ?? []) {
+    if (q.includes(alt)) return true;
+  }
+  return false;
+}
+
 /** True if the user query clearly refers to this admin file name (stem / words). */
 function filenameStemMatchesQuery(filename: string, query: string): boolean {
   const q = query.toLowerCase();
@@ -28,8 +45,122 @@ function filenameStemMatchesQuery(filename: string, query: string): boolean {
   if (!stem || stem.length < 2) return false;
   if (q.includes(stem)) return true;
   const words = stem.split(/[\s_\-–—.]+/).filter((w) => w.length >= 2);
-  if (words.length < 2) return words.length === 1 && q.includes(words[0]);
-  return words.every((w) => q.includes(w));
+  if (words.length < 2) {
+    const w0 = words[0] ?? stem;
+    return queryCoversStemToken(q, w0);
+  }
+  return words.every((w) => queryCoversStemToken(q, w));
+}
+
+/** Funktionswörter (DE, Länge ≥4), keine inhaltstragenden Begriffe wie „leben“. */
+const QUERY_OVERLAP_STOPWORDS = new Set([
+  "alle",
+  "also",
+  "auch",
+  "auf",
+  "aus",
+  "beim",
+  "bei",
+  "bist",
+  "bis",
+  "dass",
+  "dem",
+  "den",
+  "der",
+  "des",
+  "die",
+  "diese",
+  "diesem",
+  "diesen",
+  "dieser",
+  "dieses",
+  "durch",
+  "ein",
+  "eine",
+  "einem",
+  "einen",
+  "einer",
+  "eines",
+  "etwa",
+  "etwas",
+  "euro",
+  "gibt",
+  "habe",
+  "haben",
+  "hast",
+  "hat",
+  "hatte",
+  "hätt",
+  "ihnen",
+  "ihre",
+  "ihrem",
+  "ihren",
+  "ihrer",
+  "ihres",
+  "kann",
+  "kein",
+  "keine",
+  "keinem",
+  "keinen",
+  "keiner",
+  "mach",
+  "macht",
+  "mehr",
+  "mein",
+  "meine",
+  "mich",
+  "mir",
+  "mit",
+  "muss",
+  "nach",
+  "noch",
+  "nur",
+  "oder",
+  "sich",
+  "sie",
+  "sind",
+  "soll",
+  "sollen",
+  "somit",
+  "sondern",
+  "über",
+  "und",
+  "uns",
+  "viel",
+  "viele",
+  "vom",
+  "von",
+  "vor",
+  "war",
+  "was",
+  "weg",
+  "weil",
+  "welche",
+  "welchem",
+  "welcher",
+  "welches",
+  "wenig",
+  "wer",
+  "werd",
+  "werden",
+  "wie",
+  "wies",
+  "wird",
+  "wollen",
+  "worden",
+  "wurde",
+  "zum",
+  "zur",
+]);
+
+function significantTermsFromQuery(query: string): string[] {
+  const raw = query
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .split(/[^a-z0-9]+/i)
+    .filter((w) => w.length >= 4 && !QUERY_OVERLAP_STOPWORDS.has(w));
+  return [...new Set(raw)];
 }
 
 function adminBlockCoversFilename(adminHtml: string, filename: string): boolean {
@@ -37,7 +168,11 @@ function adminBlockCoversFilename(adminHtml: string, filename: string): boolean 
   return new RegExp(`^###\\s+${esc}(\\s|\\(|\\.|$)`, "im").test(adminHtml);
 }
 
-async function loadFilenameMatchSections(
+/**
+ * Lädt volle Dateiinhalte, wenn (a) Dateiname zur Anfrage passt inkl. Sprach-Aliase oder
+ * (b) signifikante Wörter der Anfrage im Klartext der Datei vorkommen (ein REST-Call).
+ */
+async function loadAdminSectionMatches(
   query: string,
   sbUrl: string,
   sbKey: string,
@@ -45,7 +180,7 @@ async function loadFilenameMatchSections(
   if (!query?.trim()) return [];
 
   const listResp = await fetchWithTimeout(
-    `${sbUrl}/rest/v1/admin_context_files?select=id,filename`,
+    `${sbUrl}/rest/v1/admin_context_files?select=filename,content_text`,
     {
       headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
       timeoutMs: RPC_TIMEOUT_MS,
@@ -53,27 +188,35 @@ async function loadFilenameMatchSections(
   );
   if (!listResp.ok) return [];
 
-  const files = (await listResp.json()) as { id: string; filename: string }[];
-  const matched = files.filter((f) => filenameStemMatchesQuery(f.filename, query));
-  if (matched.length === 0) return [];
-
+  const rows = (await listResp.json()) as { filename?: string; content_text?: string }[];
+  const terms = significantTermsFromQuery(query);
   const out: { filename: string; section: string }[] = [];
-  for (const f of matched) {
-    const rowResp = await fetchWithTimeout(
-      `${sbUrl}/rest/v1/admin_context_files?id=eq.${f.id}&select=filename,content_text`,
-      {
-        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
-        timeoutMs: RPC_TIMEOUT_MS,
-      },
-    );
-    if (!rowResp.ok) continue;
-    const rows = (await rowResp.json()) as { filename?: string; content_text?: string }[];
-    const row = rows[0];
+  let filenameHits = 0;
+  let overlapHits = 0;
+  let overlapOnlyCount = 0;
+  const MAX_OVERLAP_ONLY_FILES = 5;
+  for (const row of rows) {
+    const fn = (row?.filename ?? "").trim();
     const text = (row?.content_text ?? "").trim();
-    if (!text) continue;
-    const fn = row?.filename ?? f.filename;
+    if (!fn || !text) continue;
+    const hay = text.toLowerCase();
+    const byName = filenameStemMatchesQuery(fn, query);
+    const byOverlap = terms.length > 0 && terms.some((t) => hay.includes(t));
+    if (!byName && !byOverlap) continue;
+    if (!byName && byOverlap && overlapOnlyCount >= MAX_OVERLAP_ONLY_FILES) continue;
+    if (!byName && byOverlap) overlapOnlyCount++;
+    if (byName) filenameHits++;
+    else overlapHits++;
     out.push({ filename: fn, section: `### ${fn}\n${text}` });
   }
+  // #region agent log
+  debugAdminCtx("H_overlap", "admin-context.ts:adminSectionMatches", "filename vs content overlap", {
+    filenameHits,
+    overlapHits,
+    termCount: terms.length,
+    termSample: terms.slice(0, 8),
+  });
+  // #endregion
   return out;
 }
 
@@ -84,7 +227,7 @@ async function mergeFilenameMatchedSections(
   sbKey: string,
 ): Promise<string> {
   const maxChars = MAX_ADMIN_TOKENS * CHARS_PER_TOKEN;
-  const sections = await loadFilenameMatchSections(query, sbUrl, sbKey);
+  const sections = await loadAdminSectionMatches(query, sbUrl, sbKey);
   const uncovered = sections.filter((s) => !adminBlockCoversFilename(base, s.filename));
   // #region agent log
   debugAdminCtx("H_fname", "admin-context.ts:filenameMerge", "filename-aligned admin sections", {
@@ -360,7 +503,8 @@ async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promi
     const maxChars = MAX_ADMIN_TOKENS * CHARS_PER_TOKEN;
     let total = 0;
     const parts: string[] = [];
-    for (const f of ctxFiles) {
+    // Älteste Einträge zuerst: sonst füllen wenige neue Großdateien das Budget und ältere Kontextdateien fehlen.
+    for (const f of [...ctxFiles].reverse()) {
       const text = f?.content_text ?? "";
       if (total + text.length > maxChars) {
         parts.push(`### ${f.filename}\n${text.slice(0, maxChars - total)}...`);

@@ -2,9 +2,11 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import SettingsContent from "@/components/SettingsContent";
+import { useAuth } from "@/hooks/useAuth";
 
 const Settings = () => {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
 
   return (
     <div className="min-h-screen bg-background">
@@ -15,7 +17,7 @@ const Settings = () => {
         <h1 className="text-base font-semibold text-foreground">Einstellungen</h1>
       </header>
 
-      <SettingsContent />
+      <SettingsContent initialTab={isAdmin ? "global" : undefined} />
     </div>
   );
 };

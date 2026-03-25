@@ -149,7 +149,7 @@ export function pruefeRechnung(
             nachricht: deutetAufStarkenAufwand
               ? `Begründung deutet auf sehr hohen Aufwand. Höchstsatz ${eintrag.hoechstfaktor}× kann gerechtfertigt sein.`
               : `Begründung deutet auf höheren Aufwand. Schwellenwert: ${eintrag.schwellenfaktor}×, Höchstsatz: ${eintrag.hoechstfaktor}×.`,
-            vorschlag: `Faktor auf ${zielFaktor}× erhöhen → ${formatEuro(betragBeiZiel)}. Begründung: „${begruendungText}"`,
+            vorschlag: `Faktor auf ${zielFaktor}× erhöhen → ${formatEuro(betragBeiZiel)}.`,
             begruendungVorschlag: begruendungText,
             neueFaktor: zielFaktor,
             neuerBetrag: betragBeiZiel,

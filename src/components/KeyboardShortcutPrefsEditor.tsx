@@ -12,6 +12,7 @@ import {
   shortcutKeysConflict,
   modKeyLabel,
   formatModCombo,
+  isDocbillDesktopShell,
 } from "@/lib/keyboardShortcutPrefs";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,9 @@ export function KeyboardShortcutPrefsEditor({ prefs, onChange, onReset }: Props)
   const { toast } = useToast();
   const [recording, setRecording] = useState<ShortcutActionId | null>(null);
   const mod = modKeyLabel();
+  const webHint =
+    !isDocbillDesktopShell() &&
+    "Im Browser: „Neuer Chat“ ist standardmäßig Strg+N (Mac: Taste „ctrl“/„^“, nicht Command). Manche Tastenkombinationen fängt der Browser trotzdem ab — dann eine andere Belegung wählen.";
 
   useEffect(() => {
     if (!recording) {
@@ -53,10 +57,16 @@ export function KeyboardShortcutPrefsEditor({ prefs, onChange, onReset }: Props)
       }
 
       let token: string | null = null;
-      if (e.key === ",") token = ",";
-      else if (e.key === "/" || e.code === "Slash") token = "/";
-      else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) token = normalizeShortcutKeyToken(e.key);
-      else {
+      if (e.key === ",")
+        token = e.altKey ? "alt+," : e.ctrlKey && !e.metaKey ? "ctrl+," : ",";
+      else if (e.key === "/" || e.code === "Slash")
+        token = e.altKey ? "alt+/" : e.ctrlKey && !e.metaKey ? "ctrl+/" : "/";
+      else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) {
+        const k = normalizeShortcutKeyToken(e.key);
+        if (e.altKey) token = `alt+${k}`;
+        else if (e.ctrlKey && !e.metaKey) token = `ctrl+${k}`;
+        else token = k;
+      } else {
         toast({
           title: "Taste nicht unterstützt",
           description: "Nur Buchstaben, Ziffern, Komma oder Schrägstrich.",
@@ -93,9 +103,13 @@ export function KeyboardShortcutPrefsEditor({ prefs, onChange, onReset }: Props)
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
-        Klicken Sie auf „Neue Taste“, halten Sie {mod} und drücken Sie die gewünschte Taste. Escape bricht ab.
-      </p>
+      <div className="space-y-1.5 text-xs text-muted-foreground">
+        <p>
+          Klicken Sie auf „Neue Taste“, halten Sie {mod} (oder nur Strg / „ctrl“ auf dem Mac für eine Strg-Kombination)
+          und drücken Sie die gewünschte Taste. Optional zusätzlich Alt (⌥). Escape bricht ab.
+        </p>
+        {webHint ? <p>{webHint}</p> : null}
+      </div>
       <ul className="space-y-3">
         {(Object.keys(SHORTCUT_ACTION_LABELS) as ShortcutActionId[]).map((id) => (
           <li

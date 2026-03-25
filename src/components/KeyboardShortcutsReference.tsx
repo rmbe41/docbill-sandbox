@@ -4,7 +4,11 @@ import {
   type KeyboardShortcutPrefs,
   isApplePlatform,
   isWindowsPlatform,
+  isDocbillDesktopShell,
   modKeyLabel,
+  ctrlKeyLabel,
+  shortcutTokenUsesAlt,
+  shortcutTokenUsesCtrl,
 } from "@/lib/keyboardShortcutPrefs";
 
 function Kbd({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -42,13 +46,27 @@ type Props = {
 
 export function KeyboardShortcutsReference({ className, prefs }: Props) {
   const mod = modKeyLabel();
+  const ctrlMod = ctrlKeyLabel();
   const apple = isApplePlatform();
   const windows = isWindowsPlatform();
 
   const appRows: Row[] = useMemo(() => {
     const comboFor = (token: string) => {
-      const t = token === "," ? "," : token === "/" ? "/" : token.toUpperCase();
-      return <Combo parts={[<Kbd key="m">{mod}</Kbd>, <Kbd key="k">{t}</Kbd>]} />;
+      const usesAlt = shortcutTokenUsesAlt(token);
+      const usesCtrl = shortcutTokenUsesCtrl(token);
+      const rest = usesAlt ? token.slice(4) : usesCtrl ? token.slice(5) : token;
+      const t = rest === "," ? "," : rest === "/" ? "/" : rest.toUpperCase();
+      const parts: React.ReactNode[] = [];
+      if (usesAlt) {
+        parts.push(<Kbd key="alt">{apple ? "⌥" : "Alt"}</Kbd>);
+      }
+      if (usesCtrl) {
+        parts.push(<Kbd key="c">{ctrlMod}</Kbd>);
+      } else {
+        parts.push(<Kbd key="m">{mod}</Kbd>);
+      }
+      parts.push(<Kbd key="k">{t}</Kbd>);
+      return <Combo parts={parts} />;
     };
 
     const rows: Row[] = [
@@ -68,7 +86,7 @@ export function KeyboardShortcutsReference({ className, prefs }: Props) {
       });
     }
     return rows;
-  }, [mod, prefs.escapeStopsAnalysis, prefs.keys]);
+  }, [mod, ctrlMod, apple, prefs.escapeStopsAnalysis, prefs.keys]);
 
   const composerRows: Row[] = useMemo(
     () => [
@@ -167,6 +185,20 @@ export function KeyboardShortcutsReference({ className, prefs }: Props) {
             <Kbd className="mx-0.5">Strg</Kbd> (Ctrl) plus Taste — links unten auf der Tastatur, oft mit „Strg“ oder „Ctrl“ beschriftet.
           </p>
         )}
+        {!isDocbillDesktopShell() ? (
+          <>
+            <p>
+              Im normalen Browser nutzt <span className="text-foreground">Neuer Chat</span> standardmäßig{" "}
+              <Kbd className="mx-0.5">{ctrlMod}</Kbd>+<Kbd className="mx-0.5">N</Kbd>
+              {apple ? " (auf dem Mac die Control-Taste „^“, nicht Command)" : ""}, damit das Kürzel nicht mit „neues
+              Fenster“ kollidiert.
+            </p>
+            <p>
+              Welche Kombinationen reserviert sind, hängt vom Browser ab — ein Kürzel kann in den Einstellungen
+              gespeichert sein, wirkt aber nicht, wenn der Browser es zuerst abfängt.
+            </p>
+          </>
+        ) : null}
       </div>
       <div className="space-y-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">App</h3>

@@ -52,6 +52,8 @@ WICHTIG:
 
 NUR 2–4 Bullet-Punkte mit \`- \`. Konkrete Handlungsempfehlungen in einem Satz pro Bullet. KEINE Wiederholung der Vorschläge aus der strukturierten Ansicht.
 
+Wiederhole NICHT denselben Wortlaut wie unter „Grund:“ bei Optimierungsvorschlägen oder bereits tabellarisch angezeigte Begründungen – verweise höchstens kurz darauf (z.B. „fehlende Ziffer prüfen“), ohne den Text zu duplizieren.
+
 **PFLICHT bei Faktor > Schwellenwert:** Bei jeder Erwähnung eines Steigerungsfaktors über dem Schwellenwert (z.B. 3,0× statt 2,3×) IMMER einen Begründungsvorschlag nennen – z.B. „Begründung ergänzen: [konkreter Vorschlag]".
 
 **Beispiel:**

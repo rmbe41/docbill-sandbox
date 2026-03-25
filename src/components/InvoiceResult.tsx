@@ -129,6 +129,23 @@ function suggestionHasMeaningfulNumericalChange(s: FlatSuggestion): boolean {
   return !faktorGleich || !betragGleich;
 }
 
+function collapseWhitespace(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/** Begründungs-Box nur, wenn der Text nicht schon in der Positionszeile steht (MECE). */
+function begruendungVorschlagForDisplay(
+  s: FlatSuggestion,
+  rowBegruendung: string | undefined,
+): string | undefined {
+  const v = s.begruendungVorschlag?.trim();
+  if (!v) return undefined;
+  if (rowBegruendung && collapseWhitespace(v) === collapseWhitespace(rowBegruendung)) {
+    return undefined;
+  }
+  return s.begruendungVorschlag;
+}
+
 /** Prüft, ob ein Vorschlag tatsächlich eine Änderung vorschlägt (nicht identisch mit Rechnung). */
 function isMeaningfulSuggestion(
   p: Pruefung,
@@ -214,13 +231,12 @@ function buildSuggestions(data: InvoiceResultData): FlatSuggestion[] {
       kind: "optimierung",
       ziffer: o.ziffer,
       bezeichnung: o.bezeichnung,
-      vorschlag: o.begruendung,
+      vorschlag: "",
       vorherFaktor: undefined,
       vorherBetrag: undefined,
       vorherBegruendung: undefined,
       nachherFaktor: o.faktor,
       nachherBetrag: o.betrag,
-      begruendungVorschlag: o.begruendung,
       opt: o,
     });
   }
@@ -285,6 +301,7 @@ function UnifiedPositionCard({
         const hasVorher = s.kind === "korrektur" && (s.vorherFaktor != null || s.vorherBetrag != null);
         const hasNachher = s.nachherFaktor != null || s.nachherBetrag != null;
         const showNumericalChange = suggestionHasMeaningfulNumericalChange(s);
+        const begrBoxText = begruendungVorschlagForDisplay(s, row.begruendung);
         return (
           <div key={s.id} className="space-y-1.5 text-xs mt-2 pt-2 first:mt-0 first:pt-0">
             {isPending && hasVorher && hasNachher && showNumericalChange && (
@@ -303,10 +320,10 @@ function UnifiedPositionCard({
                 {s.nachherBetrag != null && <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">{formatEuro(s.nachherBetrag)}</span>}
               </div>
             )}
-            {s.begruendungVorschlag && (
+            {begrBoxText && (
               <div className="p-2 rounded-md bg-emerald-50/60 dark:bg-emerald-950/20">
                 <p className="text-[10px] uppercase font-medium text-emerald-800 dark:text-emerald-300 mb-0.5">Begründung:</p>
-                <p className="leading-relaxed">{s.begruendungVorschlag}</p>
+                <p className="leading-relaxed">{begrBoxText}</p>
               </div>
             )}
             {isPending ? (
@@ -399,6 +416,7 @@ function UnifiedPositionRow({
               const hasVorher = s.kind === "korrektur" && (s.vorherFaktor != null || s.vorherBetrag != null);
               const hasNachher = s.nachherFaktor != null || s.nachherBetrag != null;
               const showNumericalChange = suggestionHasMeaningfulNumericalChange(s);
+              const begrBoxText = begruendungVorschlagForDisplay(s, row.begruendung);
               return (
                 <div key={s.id} className="text-xs space-y-1">
                   {isPending && hasVorher && hasNachher && showNumericalChange && (
@@ -413,9 +431,9 @@ function UnifiedPositionRow({
                       {s.nachherBetrag != null && formatEuro(s.nachherBetrag)}
                     </div>
                   )}
-                  {s.begruendungVorschlag && (
+                  {begrBoxText && (
                     <div className="p-1.5 rounded bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px]">
-                      {s.begruendungVorschlag}
+                      {begrBoxText}
                     </div>
                   )}
                   {isPending && (

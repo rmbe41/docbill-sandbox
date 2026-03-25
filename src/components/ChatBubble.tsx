@@ -220,7 +220,7 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
           className={cn(
             "rounded-2xl px-4 py-3 text-sm leading-relaxed",
             isUser
-              ? "bg-chat-user text-chat-user-foreground rounded-br-md"
+              ? "bg-chat-user text-chat-user-foreground border border-border/80 rounded-br-md"
               : "chat-bubble-assistant rounded-bl-md"
           )}
         >

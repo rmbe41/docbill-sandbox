@@ -1,7 +1,5 @@
 # GOÄ-Abrechnung: Gut begründet zum höheren Steigerungsfaktor
 
-Quelle: https://blog.pvs-suedwest.de/blog/goae-steigerungsfaktor
-
 ---
 
 Wer immer alles zum Schwellenwert abrechnet, verschenkt Geld! Wir zeigen, wie Sie im Rahmen der GOÄ-Vorgaben mit dem richtigen Steigerungsfaktor arbeiten können, und liefern Ihnen eine Reihe von Beispielen für geeignete Begründungen.

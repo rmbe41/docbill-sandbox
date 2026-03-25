@@ -24,8 +24,25 @@ export default function TextPreviewOverlay({ filename, content, onClose }: TextP
     };
   }, [handleKeyDown]);
 
+  useEffect(() => {
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+      body: JSON.stringify({
+        sessionId: "c66662",
+        hypothesisId: "H5",
+        location: "TextPreviewOverlay.tsx:mount",
+        message: "text preview overlay mounted",
+        data: { filename, contentLen: content?.length ?? 0 },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [filename, content]);
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/80 backdrop-blur-sm"
         onClick={onClose}

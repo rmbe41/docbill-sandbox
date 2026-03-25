@@ -1,7 +1,5 @@
 import { useEffect, useCallback, useState } from "react";
 import { X, ZoomIn, ZoomOut, RotateCw, FileText } from "lucide-react";
-import { cn } from "@/lib/utils";
-
 interface FileOverlayProps {
   src?: string;
   name: string;
@@ -12,9 +10,104 @@ interface FileOverlayProps {
 export default function FileOverlay({ src, name, type, onClose }: FileOverlayProps) {
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfFetchState, setPdfFetchState] = useState<"idle" | "loading" | "error" | "ready">("idle");
 
   const isImage = type.startsWith("image/") || /\.(jpe?g|png|gif|bmp|tiff?|heic)$/i.test(name);
   const isPdf = type === "application/pdf" || name.toLowerCase().endsWith(".pdf");
+
+  /** Cross-origin storage URLs often never fire iframe onLoad / stay blank; blob: same-origin fixes inline PDF. */
+  useEffect(() => {
+    if (!isPdf || !src) {
+      setPdfBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setPdfFetchState("idle");
+      return;
+    }
+
+    let alive = true;
+    setPdfFetchState("loading");
+
+    // #region agent log
+    let host = "none";
+    try {
+      host = new URL(src).hostname;
+    } catch {
+      host = "invalid_url";
+    }
+    fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+      body: JSON.stringify({
+        sessionId: "c66662",
+        hypothesisId: "H2",
+        location: "FileOverlay.tsx:pdfMount",
+        message: "PDF fetch start (blob preview)",
+        data: { name, urlHost: host, srcLength: src.length, runId: "post-fix" },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    fetch(src)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        if (!alive) return;
+        const u = URL.createObjectURL(blob);
+        setPdfBlobUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return u;
+        });
+        setPdfFetchState("ready");
+        // #region agent log
+        fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+          body: JSON.stringify({
+            sessionId: "c66662",
+            hypothesisId: "H2",
+            location: "FileOverlay.tsx:pdfBlobReady",
+            message: "PDF blob URL created",
+            data: { name, blobSize: blob.size, runId: "post-fix" },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setPdfFetchState("error");
+        setPdfBlobUrl(null);
+        // #region agent log
+        fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+          body: JSON.stringify({
+            sessionId: "c66662",
+            hypothesisId: "H2",
+            location: "FileOverlay.tsx:pdfFetchError",
+            message: "PDF blob fetch failed",
+            data: { err: e instanceof Error ? e.message : String(e), runId: "post-fix" },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      });
+
+    return () => {
+      alive = false;
+      setPdfBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setPdfFetchState("idle");
+    };
+  }, [isPdf, src, name]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -44,7 +137,7 @@ export default function FileOverlay({ src, name, type, onClose }: FileOverlayPro
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="fixed inset-0 z-[300] flex items-center justify-center">
       {/* Backdrop – Klick schließt Overlay */}
       <div
         className="absolute inset-0 bg-black/80 backdrop-blur-sm"
@@ -103,11 +196,36 @@ export default function FileOverlay({ src, name, type, onClose }: FileOverlayPro
           />
         )}
 
-        {isPdf && src && (
+        {isPdf && src && pdfFetchState === "loading" && (
+          <p className="text-white/90 text-sm pointer-events-auto">PDF wird geladen…</p>
+        )}
+        {isPdf && src && pdfFetchState === "error" && (
+          <div className="flex flex-col items-center gap-2 text-white/90 text-sm pointer-events-auto max-w-md text-center">
+            <p>Die PDF-Vorschau konnte nicht geladen werden (Netzwerk oder Browser).</p>
+            <p className="text-white/50 text-xs">Sie können die Datei über den Kontext-Export erneut prüfen.</p>
+          </div>
+        )}
+        {isPdf && pdfBlobUrl && (
           <iframe
-            src={src}
+            src={pdfBlobUrl}
             title={name}
             className="w-full max-w-4xl h-[85vh] rounded-lg border border-white/10 bg-white pointer-events-auto"
+            onLoad={() => {
+              // #region agent log
+              fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c66662" },
+                body: JSON.stringify({
+                  sessionId: "c66662",
+                  hypothesisId: "H2",
+                  location: "FileOverlay.tsx:pdfIframeOnLoad",
+                  message: "PDF iframe load event",
+                  data: { name, runId: "post-fix" },
+                  timestamp: Date.now(),
+                }),
+              }).catch(() => {});
+              // #endregion
+            }}
           />
         )}
 
