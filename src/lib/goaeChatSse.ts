@@ -37,9 +37,9 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
     if (jsonStr.includes('"engine3_result"') || jsonStr.includes("engine3_result")) {
       fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c5a6a3" },
         body: JSON.stringify({
-          sessionId: "a85cc5",
+          sessionId: "c5a6a3",
           location: "goaeChatSse.ts:jsonParseFail",
           message: "JSON.parse failed on line mentioning engine3_result",
           data: { jsonStrLen: jsonStr.length, jsonStrHead: jsonStr.slice(0, 120) },
@@ -61,9 +61,9 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
     // #region agent log
     fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c5a6a3" },
       body: JSON.stringify({
-        sessionId: "a85cc5",
+        sessionId: "c5a6a3",
         location: "goaeChatSse.ts:progress",
         message: "goae SSE progress",
         data: { sseType: type, step, totalSteps: total, labelHead: label.slice(0, 80) },
@@ -145,13 +145,14 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
       const sm = summ && typeof summ === "object" && !Array.isArray(summ) ? (summ as Record<string, unknown>) : null;
       fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c5a6a3" },
         body: JSON.stringify({
-          sessionId: "a85cc5",
+          sessionId: "c5a6a3",
           location: "goaeChatSse.ts:engine3_result",
           message: "engine3_result received",
           data: {
             parseOk: !!parsedData,
+            assistantTrimLenAfter: ctx.state.assistantContent.trim().length,
             rawDataType: rawData === null ? "null" : Array.isArray(rawData) ? "array" : typeof rawData,
             modusKind: d ? typeof d.modus : "n/a",
             posIsArr: Array.isArray(d?.positionen),
@@ -162,7 +163,7 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
             jsonStrLen: jsonStr.length,
           },
           timestamp: Date.now(),
-          hypothesisId: "H2",
+          hypothesisId: "H1",
         }),
       }).catch(() => {});
     }
@@ -177,9 +178,9 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
     // #region agent log
     fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c5a6a3" },
       body: JSON.stringify({
-        sessionId: "a85cc5",
+        sessionId: "c5a6a3",
         location: "goaeChatSse.ts:engine3_error",
         message: "engine3_error SSE",
         data: {
@@ -231,6 +232,28 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
   }
 
   const c = (parsed.choices as { delta?: { content?: string } }[] | undefined)?.[0]?.delta?.content;
+  // #region agent log
+  if (parsed.choices != null && ctx.state.engine3Data != null) {
+    const empty = typeof c !== "string" || c.length === 0;
+    if (empty) {
+      fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c5a6a3" },
+        body: JSON.stringify({
+          sessionId: "c5a6a3",
+          location: "goaeChatSse.ts:choicesDelta",
+          message: "empty or missing delta while engine3Data set",
+          data: {
+            contentKind: c === undefined ? "undefined" : typeof c,
+            assistantTrimLen: ctx.state.assistantContent.trim().length,
+          },
+          timestamp: Date.now(),
+          hypothesisId: "H2",
+        }),
+      }).catch(() => {});
+    }
+  }
+  // #endregion
   if (typeof c === "string" && c) {
     ctx.state.assistantContent += c;
     ctx.onDelta();

@@ -3,6 +3,7 @@ import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { generateInvoicePdf, type PdfPosition } from "@/lib/pdf-invoice";
 import { cn } from "@/lib/utils";
+import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
 import type { Engine3ResultData, Engine3Position } from "@/lib/engine3Result";
 
 export type { Engine3ResultData } from "@/lib/engine3Result";
@@ -64,6 +65,7 @@ export default function Engine3Result({ data }: Engine3ResultProps) {
 
   const hinweiseShown = data.hinweise.slice(0, HINWEISE_MAX);
   const hinweiseRest = data.hinweise.length - hinweiseShown.length;
+  const quellen = filterExplicitQuellenEntries(data.quellen?.filter(Boolean) ?? []);
 
   return (
     <div className="space-y-3 rounded-xl border border-border/80 bg-card/40 p-4 shadow-sm">
@@ -77,6 +79,13 @@ export default function Engine3Result({ data }: Engine3ResultProps) {
           PDF
         </Button>
       </div>
+
+      {quellen.length > 0 ? (
+        <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs">
+          <p className="font-medium text-muted-foreground uppercase mb-1">Grundlagen</p>
+          <p className="text-muted-foreground">{quellen.join(" · ")}</p>
+        </div>
+      ) : null}
 
       {data.hinweise.length > 0 ? (
         <div className="space-y-2">
@@ -115,7 +124,8 @@ export default function Engine3Result({ data }: Engine3ResultProps) {
               <th className="py-2 pr-2">Bezeichnung</th>
               <th className="py-2 pr-2">Faktor</th>
               <th className="py-2 pr-2 text-right">Betrag</th>
-              <th className="py-2">Status</th>
+              <th className="py-2 pr-2">Status</th>
+              <th className="py-2 min-w-[140px]">Quelle</th>
             </tr>
           </thead>
           <tbody>
@@ -128,10 +138,19 @@ export default function Engine3Result({ data }: Engine3ResultProps) {
                 </td>
                 <td className="py-2 pr-2 whitespace-nowrap">{String(p.faktor).replace(".", ",")}</td>
                 <td className="py-2 pr-2 text-right whitespace-nowrap">{formatEuro(p.betrag)}</td>
-                <td className="py-2">
+                <td className="py-2 pr-2">
                   <span className={cn("inline-block rounded px-1.5 py-0.5 text-[10px] font-medium", statusBadgeClass(p.status))}>
                     {p.status}
                   </span>
+                </td>
+                <td className="py-2 text-muted-foreground max-w-[260px]">
+                  {p.quelleText?.trim() ? (
+                    <span className="line-clamp-3" title={p.quelleText}>
+                      {p.quelleText}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                 </td>
               </tr>
             ))}
@@ -150,7 +169,8 @@ export default function Engine3Result({ data }: Engine3ResultProps) {
                 <th className="py-2 pr-2">Bezeichnung</th>
                 <th className="py-2 pr-2">Faktor</th>
                 <th className="py-2 pr-2 text-right">Betrag</th>
-                <th className="py-2">Status</th>
+                <th className="py-2 pr-2">Status</th>
+                <th className="py-2 min-w-[140px]">Quelle</th>
               </tr>
             </thead>
             <tbody>
@@ -163,10 +183,19 @@ export default function Engine3Result({ data }: Engine3ResultProps) {
                   </td>
                   <td className="py-2 pr-2 whitespace-nowrap">{String(p.faktor).replace(".", ",")}</td>
                   <td className="py-2 pr-2 text-right whitespace-nowrap">{formatEuro(p.betrag)}</td>
-                  <td className="py-2">
+                  <td className="py-2 pr-2">
                     <span className={cn("inline-block rounded px-1.5 py-0.5 text-[10px] font-medium", statusBadgeClass(p.status))}>
                       {p.status}
                     </span>
+                  </td>
+                  <td className="py-2 text-muted-foreground max-w-[260px]">
+                    {p.quelleText?.trim() ? (
+                      <span className="line-clamp-3" title={p.quelleText}>
+                        {p.quelleText}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 </tr>
               ))}

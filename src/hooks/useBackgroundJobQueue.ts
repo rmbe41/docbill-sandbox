@@ -495,6 +495,24 @@ export function useBackgroundJobQueue({
           undefined,
           state.frageStructured,
         );
+        // #region agent log
+        if (state.engine3Data != null && !state.assistantContent?.trim()) {
+          fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c5a6a3" },
+            body: JSON.stringify({
+              sessionId: "c5a6a3",
+              location: "useBackgroundJobQueue.ts:afterSse",
+              message: "job complete: engine3 without assistant text",
+              data: {
+                persistPlaceholderLen: state.engine3Data ? "[DocBill: Engine 3 – strukturiertes Ergebnis]".length : 0,
+              },
+              timestamp: Date.now(),
+              hypothesisId: "H3",
+            }),
+          }).catch(() => {});
+        }
+        // #endregion
 
         const assistantStructured = buildAssistantStructuredContent({
           invoiceResult: state.invoiceData,

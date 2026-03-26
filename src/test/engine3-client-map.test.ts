@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  enforceEngine3Quellenbezug,
   toClientEngine3Result,
   type Engine3ResultData,
 } from "../../supabase/functions/goae-chat/pipeline/engine3/validate.ts";
@@ -51,7 +52,7 @@ function fullBase(overrides: Partial<Engine3ResultData> = {}): Engine3ResultData
 }
 
 describe("toClientEngine3Result", () => {
-  it("strips Positions-Extras, Metadaten und Info-Hinweise", () => {
+  it("liefert quelleText, quellen; entfernt Info-Hinweise und übrige Metadaten", () => {
     const slim = toClientEngine3Result(fullBase());
     expect(slim).toEqual({
       modus: "rechnung_pruefung",
@@ -65,6 +66,7 @@ describe("toClientEngine3Result", () => {
           faktor: 2.3,
           betrag: 12.34,
           status: "korrekt",
+          quelleText: "Zeile 1 Rechnung",
         },
       ],
       hinweise: [
@@ -87,7 +89,27 @@ describe("toClientEngine3Result", () => {
         fehler: 1,
         warnungen: 3,
       },
+      quellen: ["Systemquelle"],
     });
+  });
+
+  it("enforceEngine3Quellenbezug ergänzt fehlendes quelleText", () => {
+    const raw = fullBase({
+      positionen: [
+        {
+          nr: 1,
+          ziffer: "1",
+          bezeichnung: "Beratung",
+          faktor: 2.3,
+          betrag: 12.34,
+          status: "korrekt",
+        },
+      ],
+    });
+    const fixed = enforceEngine3Quellenbezug(raw);
+    expect(fixed.positionen[0]?.quelleText).toContain("GOÄ-Katalog");
+    expect(fixed.positionen[0]?.status).toBe("warnung");
+    expect(fixed.positionen[0]?.anmerkung).toContain("quelleText");
   });
 
   it("lässt optimierungen weg wenn leer", () => {

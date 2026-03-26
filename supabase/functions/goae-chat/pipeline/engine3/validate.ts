@@ -61,7 +61,7 @@ export interface Engine3ResultData {
   quellen?: string[];
 }
 
-/** SSE / Client: ohne Quellen-Metadaten, ohne Positions-Zusatzfelder; nur Fehler-/Warn-Hinweise. */
+/** SSE / Client: schlanke Position; Quelle optional für UI (immer gesetzt nach Server-Enforcement). */
 export interface Engine3ClientPosition {
   nr: number;
   ziffer: string;
@@ -69,6 +69,7 @@ export interface Engine3ClientPosition {
   faktor: number;
   betrag: number;
   status: Engine3PositionStatus;
+  quelleText?: string;
 }
 
 export interface Engine3ClientHinweis {
@@ -85,6 +86,8 @@ export interface Engine3ClientResultData {
   hinweise: Engine3ClientHinweis[];
   optimierungen?: Engine3ClientPosition[];
   zusammenfassung: Engine3Summary;
+  /** System: GOÄ-Blöcke, Katalog, Eingabe, RAG-Dateien */
+  quellen?: string[];
 }
 
 export function toClientEngine3Result(data: Engine3ResultData): Engine3ClientResultData {
@@ -95,6 +98,9 @@ export function toClientEngine3Result(data: Engine3ResultData): Engine3ClientRes
     faktor: p.faktor,
     betrag: p.betrag,
     status: p.status,
+    ...(typeof p.quelleText === "string" && p.quelleText.trim()
+      ? { quelleText: p.quelleText.trim() }
+      : {}),
   });
   const hinweise = data.hinweise
     .filter((h) => h.schwere === "fehler" || h.schwere === "warnung")
@@ -108,6 +114,7 @@ export function toClientEngine3Result(data: Engine3ResultData): Engine3ClientRes
     hinweise,
     ...(optimierungen?.length ? { optimierungen } : {}),
     zusammenfassung: data.zusammenfassung,
+    ...(data.quellen?.length ? { quellen: data.quellen } : {}),
   };
 }
 
@@ -462,6 +469,25 @@ export function applyEngine3AusschlussPass(data: Engine3ResultData): Engine3Resu
     if (z && z !== "?" && katalog.has(z)) rows.push({ ziffer: z, list: "opt", idx });
   });
 
+  // #region agent log
+  fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "63d268" },
+    body: JSON.stringify({
+      sessionId: "63d268",
+      hypothesisId: "H2-H4-H5",
+      location: "validate.ts:applyEngine3AusschlussPass:rows",
+      message: "ausschluss candidate rows",
+      data: {
+        modus: data.modus,
+        ziffern: rows.map((r) => `${r.list}:${r.ziffer}`),
+        rawPosZiffern: data.positionen.map((p) => normZiffer(p.ziffer)),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+
   const pairSeen = new Set<string>();
   const affected = new Set<string>();
   const neueHinweise: Engine3Hinweis[] = [];
@@ -470,6 +496,32 @@ export function applyEngine3AusschlussPass(data: Engine3ResultData): Engine3Resu
     for (let j = i + 1; j < rows.length; j++) {
       const a = rows[i].ziffer;
       const b = rows[j].ziffer;
+      // #region agent log
+      if (
+        (a === "1201" && b === "1202") ||
+        (a === "1202" && b === "1201")
+      ) {
+        const ea = katalog.get(a);
+        const eb = katalog.get(b);
+        const coll = regelZiffernKollidieren(katalog, a, b);
+        fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "63d268" },
+          body: JSON.stringify({
+            sessionId: "63d268",
+            hypothesisId: "H1",
+            location: "validate.ts:applyEngine3AusschlussPass:pair1201_1202",
+            message: "collision check 1201/1202",
+            data: {
+              coll,
+              ausschlA: ea?.ausschlussziffern ?? null,
+              ausschlB: eb?.ausschlussziffern ?? null,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
       if (!regelZiffernKollidieren(katalog, a, b)) continue;
       const pKey = a < b ? `${a}|${b}` : `${b}|${a}`;
       if (pairSeen.has(pKey)) continue;
@@ -534,4 +586,49 @@ export function applyEngine3AusschlussPass(data: Engine3ResultData): Engine3Resu
 function appendAnmerkung(prev: string | undefined, add: string): string {
   const t = (prev ?? "").trim();
   return t ? `${t} ${add}` : add;
+}
+
+function isQuelleTextMissing(s: string | undefined): boolean {
+  const t = (s ?? "").trim();
+  if (t.length < 2) return true;
+  const lower = t.toLowerCase();
+  if (/^(n\/?a|keine|keiner|-+|—+|\.{2,}|…+)$/i.test(lower)) return true;
+  return false;
+}
+
+function syntheticQuelleForPosition(p: Engine3Position, modus: Engine3Modus): string {
+  const entry = katalogEintrag(p.ziffer);
+  const bez = (entry?.bezeichnung ?? p.bezeichnung ?? "").trim().slice(0, 120);
+  const z = normZiffer(p.ziffer);
+  if (modus === "rechnung_pruefung") {
+    return `GOÄ-Katalog (Auszug): ${z}${bez ? ` — ${bez}` : ""}; kein Rechnungs-/Aktenbezug im Modell-JSON (systemseitig ergänzt).`;
+  }
+  return `GOÄ-Katalog (Auszug): ${z}${bez ? ` — ${bez}` : ""}; kein Dokument-/Freitextbezug im Modell-JSON (systemseitig ergänzt).`;
+}
+
+const NOTE_QUELLE_SYNTH =
+  "Hinweis: quelleText fehlte oder war unbrauchbar; Katalogbezug vom System gesetzt — Eingabe bitte prüfen.";
+
+function enforceQuelleOnPosition(p: Engine3Position, modus: Engine3Modus): Engine3Position {
+  if (!isQuelleTextMissing(p.quelleText)) return p;
+  const quelleText = syntheticQuelleForPosition(p, modus);
+  const prevNote = (p.anmerkung ?? "").trim();
+  const anmerkung = prevNote ? `${prevNote} ${NOTE_QUELLE_SYNTH}` : NOTE_QUELLE_SYNTH;
+  if (p.status === "korrekt") {
+    return { ...p, quelleText, status: "warnung", anmerkung };
+  }
+  return { ...p, quelleText, anmerkung };
+}
+
+/** Jede Position braucht einen nachvollziehbaren Quellenbezug (Katalog/Eingabe); Lücken werden deterministisch geschlossen. */
+export function enforceEngine3Quellenbezug(data: Engine3ResultData): Engine3ResultData {
+  const positionen = data.positionen.map((p) => enforceQuelleOnPosition(p, data.modus));
+  const optimierungen = data.optimierungen?.map((p) => enforceQuelleOnPosition(p, data.modus));
+  const next: Engine3ResultData = {
+    ...data,
+    positionen,
+    ...(optimierungen?.length ? { optimierungen } : {}),
+  };
+  next.zusammenfassung = summarize(next);
+  return next;
 }

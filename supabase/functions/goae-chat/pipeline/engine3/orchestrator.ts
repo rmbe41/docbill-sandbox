@@ -22,9 +22,11 @@ import { analysiereMedizinisch } from "../medizinisches-nlp.ts";
 import { callLlm, extractJson, pickExtractionModel } from "../llm-client.ts";
 import { buildFallbackModels } from "../../model-resolver.ts";
 import type { FilePayload, ParsedRechnung } from "../types.ts";
+import { buildEngine3AssistantMarkdown } from "./markdown-narrative.ts";
 import {
   applyEngine3AusschlussPass,
   applyRecalcAndConsistency,
+  enforceEngine3Quellenbezug,
   parseEngine3ResultJson,
   toClientEngine3Result,
   type Engine3Modus,
@@ -121,7 +123,8 @@ Du erhältst extrahierte Rechnungsdaten (JSON), optional **klinischeDokumentatio
 - **Ausschlüsse:** Jede Kombination von Positionsziffern anhand der **Ausschl:**-Angaben der Katalogzeilen prüfen; Konflikt → **hinweise** (schwere fehler/warnung) mit **regelReferenz** „Ausschlussziffern GOÄ-Katalog“.
 - **Steigerung:** Schwellen-/Höchstfaktor aus Katalogzeile; über Schwelle → **begruendung** mit konkretem Sachbezug (Dauer Min., Erschwernis), § 5 Abs. 2 GOÄ; keine Leerformeln (siehe Regelblock Begründungen).
 - **Sonderbereiche** (Leichenschau, Zuschläge, Akupunktur): nur, wenn die Ziffer im Auszug steht; sonst Lücke in **hinweise**.
-- **BÄK / Auslegung / GOÄ-Kommentar:** Nur mit konkretem Nachweis im **ADMIN-KONTEXT** (Dateiname); Fundstellen ggf. in **adminQuellen** nennen. Ohne Treffer: Unsicherheit in **hinweise**, nichts erfinden.
+- **BÄK / Auslegung / GOÄ-Kommentar:** Nur mit konkretem Nachweis im **ADMIN-KONTEXT** (Dateiname); jede inhaltlich verwendete Admin-Datei **mindestens einmal** in **adminQuellen** (kurzer Dateiname) aufführen. Ohne Treffer: Unsicherheit in **hinweise**, nichts erfinden.
+- **Hinweise:** Behauptet ein Eintrag eine konkrete Regel oder Auslegung, **muss** **regelReferenz** gesetzt sein (z. B. „GOÄ-Katalogauszug, Ziffer …“ oder „ADMIN-KONTEXT: [Dateiname]“).
 
 **System-Nachbearbeitung (verbindlich):** Nach deiner Antwort wendet DocBill **deterministische** Prüfungen an (u. a. Ausschlusspaare, Beträge aus Punkten × Punktwert). Dieses Ergebnis ist **maßgeblich**. Setze **keine** Position auf **korrekt**, wenn der Katalogausschnitt einen Ausschlusszwang zu einer anderen abgerechneten Ziffer zeigt; verwende **fehler**/**warnung** und passende **hinweise**. Widerspricht dein Entwurf dem Katalog, korrigiere ihn vor der Ausgabe.
 
@@ -184,7 +187,7 @@ Markiere unsichere Zuordnungen mit status "warnung" und erkläre in anmerkung.
 - **Ausschlüsse:** alle vorgeschlagenen Ziffern paarweise gegen die Ausschl-Angaben im Auszug prüfen; Konflikte → **hinweise** + ggf. Position „warnung“/„fehler“.
 - **Steigerung:** Faktor innerhalb Katalograhmen; über Schwellenwert → ausführliche **begruendung** (§ 5 Abs. 2 GOÄ), konkret und prüfernah.
 - **Sonderfälle** ( Leichenschau, Not-/Zeitzuschläge, Akupunktur): nur mit Ziffer im Auszug; sonst **hinweis** auf unvollständigen Kontext.
-- **BÄK / GOÄ-Kommentar:** Nur wenn **ADMIN-KONTEXT** eine belegbare Fundstelle liefert (Dateiname, ggf. **adminQuellen**); sonst Grenze benennen.
+- **BÄK / GOÄ-Kommentar:** Nur wenn **ADMIN-KONTEXT** eine belegbare Fundstelle liefert; jede verwendete Admin-Datei in **adminQuellen** nennen. Behauptete Regeln in **hinweise** mit **regelReferenz** belegen („GOÄ-Katalogauszug …“ oder „ADMIN-KONTEXT: …“).
 
 **System-Nachbearbeitung:** Deterministische Regeln (Ausschlüsse, Betrag aus Punkten) können dein JSON anpassen; das ausgelieferte Ergebnis entspricht diesem **finalen** Stand. Keine vorgeschlagenen Ziffernkombinationen widersprüchlich zum **Ausschl:** im Auszug ausgeben.
 
@@ -227,7 +230,7 @@ ${katalogMd}
 
 const CRITIQUE_PROMPT = `Du prüfst ein bereits erzeugtes Engine-3-JSON auf Widersprüche zum GOÄ-Katalogausschnitt und zur Rechnungs-/Leistungslogik.
 Gib das **vollständige korrigierte JSON** zurück (gleiche Keys, gleiche modus-Logik im Inhalt). Entferne unmögliche Ziffern. Korrigiere offensichtliche Doppelabrechnungen gemäß **Ausschl-** und Ausschluss-Hinweisen im Katalog (insb. Kombinationen, die sich gegenseitig ausschließen).
-Auslegungsbehauptungen (BÄK, GOÄ-Kommentar) nur, wenn sie im **ADMIN-KONTEXT** mit Dateinamen belegbar sind; sonst entfernen oder durch ehrliche Unsicherheit in **hinweise** ersetzen.
+Auslegungsbehauptungen (BÄK, GOÄ-Kommentar) nur, wenn sie im **ADMIN-KONTEXT** mit Dateinamen belegbar sind; sonst entfernen oder durch ehrliche Unsicherheit in **hinweise** ersetzen. **adminQuellen** und **regelReferenz** in **hinweise** müssen zu echten Fundstellen passen.
 Wenn unsicher: setze status auf warnung und erkläre in anmerkung.
 Erhalte **quelleText** je Position (Rechnungsprüfung und Leistungsmodus); fehlt es, ergänze einen sachlichen Bezug zur Eingabe statt das Feld zu löschen.
 Hinweis: Unmittelbar nach dieser Runde können **systemseitige** Regeln (Ausschlüsse, Betragsrechenregeln) das JSON nochmals anpassen – deine Ausgabe soll bereits mit dem Katalogausschnitt **konsistent** sein.`;
@@ -408,7 +411,7 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
 Punktwert GOÄ: 0,0582873 EUR pro Punkt. Betrag = Punkte × Punktwert × Faktor (auf Cent runden).
 Keine personenbezogenen Daten in Freitextfeldern wiederholen. Patient nur als „Patient/in“.
 Auslegungsfragen (z. B. BÄK): nur mit konkreter Fundstelle aus dem mitgelieferten **ADMIN-KONTEXT**; ohne solche Quelle keine behauptete amtliche Position.
-Alle GOÄ-Ziffern-, Punktwert- und Auslegungsaussagen beziehen sich ausschließlich auf die mitgelieferten Blöcke (GOÄ-Regeltext, Katalogauszug, ADMIN-KONTEXT, Eingabedaten). Keine frei erfundenen Paragraphen oder externen Behauptungen; eine ergänzende Quellenliste liefert das System.
+Alle GOÄ-Ziffern-, Punktwert- und Auslegungsaussagen beziehen sich ausschließlich auf die mitgelieferten Blöcke (GOÄ-Regeltext, Katalogauszug, ADMIN-KONTEXT, Eingabedaten). Keine frei erfundenen Paragraphen oder externen Behauptungen; eine einheitliche **Quellen**-Liste setzt das System nach deiner Antwort. Jede **Position** braucht ein nicht leeres **quelleText** (Bezug zur Eingabe); bei Auslegung aus dem Admin-Kontext **adminQuellen** mit Dateinamen füllen.
 ${
         input.lastEngine3Result != null
           ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(input.lastEngine3Result).slice(0, 8000)}`
@@ -489,6 +492,31 @@ ${
       finalData = await critiqueRefineIfNeeded(apiKey, input.model, finalData, katalogMd);
       finalData = applyRecalcAndConsistency(finalData);
       finalData = applyEngine3AusschlussPass(finalData);
+      finalData = enforceEngine3Quellenbezug(finalData);
+
+      // #region agent log
+      {
+        const nz = (z: string) => String(z ?? "").trim();
+        const snap = finalData.positionen
+          .filter((p) => nz(p.ziffer) === "1201" || nz(p.ziffer) === "1202")
+          .map((p) => ({ nr: p.nr, ziffer: nz(p.ziffer), status: p.status }));
+        const optSnap = (finalData.optimierungen ?? [])
+          .filter((p) => nz(p.ziffer) === "1201" || nz(p.ziffer) === "1202")
+          .map((p) => ({ nr: p.nr, ziffer: nz(p.ziffer), status: p.status, list: "opt" }));
+        fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "63d268" },
+          body: JSON.stringify({
+            sessionId: "63d268",
+            hypothesisId: "H3",
+            location: "orchestrator.ts:runEngine3AsStream:finalSnap",
+            message: "final 1201/1202 statuses",
+            data: { snap, optSnap, hinweiseAusschluss: finalData.hinweise.filter((h) => h.titel.includes("1201") || h.titel.includes("1202")).map((h) => h.titel) },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
 
       finalData.goaeStandHinweis = finalData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
       if (adminQuellenHint.length > 0) {
@@ -504,11 +532,17 @@ ${
       })}\n\n`;
       await writer.write(encoder.encode(resultEvent));
 
-      await writer.write(
-        encoder.encode(
-          `data: ${JSON.stringify({ choices: [{ delta: { content: "" } }] })}\n\n`,
-        ),
-      );
+      const narrativeMd = buildEngine3AssistantMarkdown(finalData);
+      const chunkSize = 120;
+      for (let i = 0; i < narrativeMd.length; i += chunkSize) {
+        await writer.write(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: narrativeMd.slice(i, i + chunkSize) } }],
+            })}\n\n`,
+          ),
+        );
+      }
 
       await writer.write(encoder.encode("data: [DONE]\n\n"));
       await writer.close();
