@@ -21,6 +21,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { MessageStructuredContentV1 } from "@/lib/messageStructuredContent";
+import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
+import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
 
 export type ChatMessage = {
   id: string;
@@ -30,6 +32,7 @@ export type ChatMessage = {
   invoiceResult?: InvoiceResultData;
   serviceBillingResult?: ServiceBillingResultData;
   analysisTimeSeconds?: number;
+  frageAnswer?: FrageAnswerStructured;
   suggestionDecisions?: {
     invoice?: Record<string, string>;
     service?: Record<string, string>;
@@ -67,6 +70,51 @@ function displayNameFromUser(user: SupabaseUser): string | null {
     (m.display_name as string | undefined)?.trim() ||
     (m.name as string | undefined)?.trim();
   return n || null;
+}
+
+function FrageStructuredReply({ data }: { data: FrageAnswerStructured }) {
+  const quellen = filterExplicitQuellenEntries(data.quellen?.filter(Boolean) ?? []);
+  return (
+    <div className="space-y-4 not-prose text-foreground">
+      <section className="rounded-lg border border-border/80 bg-muted/30 px-4 py-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+          Kurzantwort
+        </h3>
+        <p className="text-sm leading-relaxed">{data.kurzantwort}</p>
+      </section>
+      <section>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+          Erläuterung
+        </h3>
+        <div className="text-sm leading-relaxed whitespace-pre-wrap">{data.erlaeuterung}</div>
+      </section>
+      {data.grenzfaelle_hinweise?.trim() ? (
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+            Grenzfälle und Hinweise
+          </h3>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">{data.grenzfaelle_hinweise}</p>
+        </section>
+      ) : null}
+      {quellen.length > 0 ? (
+        <footer className="mt-1 pt-3 border-t border-border/30">
+          <p className="text-[11px] leading-snug text-muted-foreground/70 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+            <span className="shrink-0 font-medium text-muted-foreground/55 tracking-wide">Quellen</span>
+            {quellen.map((q, i) => (
+              <React.Fragment key={i}>
+                {i > 0 ? (
+                  <span className="shrink-0 text-muted-foreground/35 select-none" aria-hidden>
+                    ·
+                  </span>
+                ) : null}
+                <span className="min-w-0 break-words">{q}</span>
+              </React.Fragment>
+            ))}
+          </p>
+        </footer>
+      ) : null}
+    </div>
+  );
 }
 
 function chatBubbleUserInitials(user: SupabaseUser): string {
@@ -303,9 +351,11 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
                 }
               />
             )}
+            {message.frageAnswer && <FrageStructuredReply data={message.frageAnswer} />}
             {(message.content ||
               (message.invoiceResult && !message.content) ||
-              (message.serviceBillingResult && !message.content)) && (
+              (message.serviceBillingResult && !message.content)) &&
+              !message.frageAnswer && (
               <div className="markdown-output prose prose-sm max-w-none pt-1">
                 {(message.invoiceResult || message.serviceBillingResult) && message.content && (
                   <p className="text-xs font-medium text-muted-foreground not-prose mb-2">Detaillierte Erklärung</p>

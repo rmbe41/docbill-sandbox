@@ -1,6 +1,7 @@
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import type { Json } from "@/integrations/supabase/types";
+import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
 
 export const MESSAGE_STRUCTURED_VERSION = 1 as const;
 
@@ -11,6 +12,7 @@ export type MessageStructuredContentV1 = {
   invoiceResult?: InvoiceResultData;
   serviceBillingResult?: ServiceBillingResultData;
   analysisTimeSeconds?: number;
+  frageAnswer?: FrageAnswerStructured;
   suggestionDecisions?: {
     invoice?: Record<string, string>;
     service?: Record<string, string>;
@@ -52,12 +54,14 @@ export function buildAssistantStructuredContent(params: {
   invoiceResult?: InvoiceResultData;
   serviceBillingResult?: ServiceBillingResultData;
   analysisTimeSeconds?: number;
+  frageAnswer?: FrageAnswerStructured;
   suggestionDecisions?: MessageStructuredContentV1["suggestionDecisions"];
 }): MessageStructuredContentV1 | null {
   if (
     params.invoiceResult == null &&
     params.serviceBillingResult == null &&
-    params.analysisTimeSeconds == null
+    params.analysisTimeSeconds == null &&
+    params.frageAnswer == null
   ) {
     return null;
   }
@@ -66,6 +70,7 @@ export function buildAssistantStructuredContent(params: {
     invoiceResult: params.invoiceResult,
     serviceBillingResult: params.serviceBillingResult,
     analysisTimeSeconds: params.analysisTimeSeconds,
+    frageAnswer: params.frageAnswer,
     suggestionDecisions: params.suggestionDecisions,
   };
 }

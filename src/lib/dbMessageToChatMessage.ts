@@ -21,6 +21,7 @@ export function dbRowToChatMessage(m: {
       invoiceResult: s.invoiceResult,
       serviceBillingResult: s.serviceBillingResult,
       analysisTimeSeconds: s.analysisTimeSeconds,
+      frageAnswer: s.frageAnswer,
       suggestionDecisions: s.suggestionDecisions,
     };
   }

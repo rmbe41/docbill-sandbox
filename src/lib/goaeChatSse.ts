@@ -1,5 +1,7 @@
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
+import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
+import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
 
 export type PipelineProgressPayload = {
   step: number;
@@ -11,6 +13,7 @@ export type SseAccumState = {
   assistantContent: string;
   invoiceData?: InvoiceResultData;
   serviceBillingData?: ServiceBillingResultData;
+  frageStructured?: FrageAnswerStructured;
 };
 
 export type SseHandlerContext = {
@@ -95,6 +98,32 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
     return true;
   }
 
+  if (type === "frage_structured") {
+    const raw = parsed.data as Record<string, unknown> | undefined;
+    if (raw && typeof raw === "object") {
+      const kurz = raw.kurzantwort;
+      const erl = raw.erlaeuterung;
+      let quellen = raw.quellen;
+      if (typeof quellen === "string") quellen = [quellen];
+      if (!Array.isArray(quellen)) quellen = [];
+      const quellenStr = filterExplicitQuellenEntries(
+        quellen.filter((x): x is string => typeof x === "string"),
+      );
+      const grenzRaw = raw.grenzfaelle_hinweise;
+      const grenz = typeof grenzRaw === "string" ? grenzRaw : "";
+      if (typeof kurz === "string" && typeof erl === "string") {
+        ctx.state.frageStructured = {
+          kurzantwort: kurz,
+          erlaeuterung: erl,
+          quellen: quellenStr,
+          grenzfaelle_hinweise: grenz,
+        };
+        ctx.onDelta();
+      }
+    }
+    return true;
+  }
+
   if (parsed.error) {
     const errMsg = (parsed.error as { message?: string })?.message ?? parsed.error;
     ctx.state.assistantContent += `\n\n❌ **Stream-Fehler:** ${typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg)}`;
@@ -119,6 +148,7 @@ export function assistantContentHasSseError(content: string): boolean {
 /** True when the stream produced something we can show (text or a structured result event). */
 export function sseAccumStateHasDeliverable(state: SseAccumState): boolean {
   if ((state.assistantContent ?? "").trim().length > 0) return true;
+  if (state.frageStructured != null) return true;
   if (state.serviceBillingData != null) return true;
   if (state.invoiceData != null) return true;
   return false;

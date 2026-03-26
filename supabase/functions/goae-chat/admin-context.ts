@@ -38,18 +38,86 @@ function queryCoversStemToken(q: string, token: string): boolean {
   return false;
 }
 
+/** z.B. CatKnowledge → Cat Knowledge; 2pdf → 2 pdf */
+function expandBasenameBoundaries(base: string): string {
+  return base
+    .replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")
+    .replace(/(\p{L})(\p{N})/gu, "$1 $2")
+    .replace(/(\p{N})(\p{L})/gu, "$1 $2");
+}
+
+/**
+ * Ein zusammenhängender Dateiname in Kleinbuchstaben (catknowledge): optional in zwei Teile
+ * schneiden, wenn beide Teile (je ≥3) per Token/Alias in der Anfrage vorkommen.
+ */
+function splitSingleStemAgainstQuery(q: string, word: string): boolean {
+  const w = word.toLowerCase();
+  if (w.length < 6) return false;
+  for (let i = 3; i <= w.length - 3; i++) {
+    const a = w.slice(0, i);
+    const b = w.slice(i);
+    if (queryCoversStemToken(q, a) && queryCoversStemToken(q, b)) return true;
+  }
+  return false;
+}
+
 /** True if the user query clearly refers to this admin file name (stem / words). */
 function filenameStemMatchesQuery(filename: string, query: string): boolean {
   const q = query.toLowerCase();
-  const stem = filename.replace(/\.[^/.]+$/, "").trim().toLowerCase();
-  if (!stem || stem.length < 2) return false;
-  if (q.includes(stem)) return true;
-  const words = stem.split(/[\s_\-–—.]+/).filter((w) => w.length >= 2);
+  const base = filename.replace(/\.[^/.]+$/, "").trim();
+  if (base.length < 2) return false;
+  const stemLower = base.toLowerCase();
+  if (q.includes(stemLower)) return true;
+
+  const expanded = expandBasenameBoundaries(base);
+  const words = expanded
+    .toLowerCase()
+    .split(/[\s_\-–—.]+/)
+    .filter((w) => w.length >= 2);
+
+  if (words.length === 0) return false;
+
+  let compoundHit = false;
+  let result: boolean;
   if (words.length < 2) {
-    const w0 = words[0] ?? stem;
-    return queryCoversStemToken(q, w0);
+    const w0 = words[0]!;
+    compoundHit = splitSingleStemAgainstQuery(q, w0);
+    result = queryCoversStemToken(q, w0) || compoundHit;
+  } else {
+    result = words.every((w) => queryCoversStemToken(q, w));
   }
-  return words.every((w) => queryCoversStemToken(q, w));
+  // #region agent log
+  if (/cat/i.test(filename) && /knowledge/i.test(filename)) {
+    const h1Payload = {
+      sessionId: "631fa3",
+      hypothesisId: "H1",
+      location: "admin-context.ts:filenameStemMatchesQuery",
+      message: "cat-knowledge filename stem vs query",
+      data: {
+        filename,
+        stemLower,
+        expanded,
+        words,
+        queryHead: query.slice(0, 200),
+        wordChecks: words.map((w) => ({ w, ok: queryCoversStemToken(q, w) })),
+        compoundHit,
+        result,
+      },
+      timestamp: Date.now(),
+      runId: "repro-1",
+    };
+    console.log(
+      "[DOCBILL_INSTRUMENTATION] hypothesisId=H1 location=admin-context.ts:filenameStemMatchesQuery message=cat_knowledge_stem",
+    );
+    console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(h1Payload));
+    fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
+      body: JSON.stringify(h1Payload),
+    }).catch(() => {});
+  }
+  // #endregion
+  return result;
 }
 
 /** Funktionswörter (DE, Länge ≥4), keine inhaltstragenden Begriffe wie „leben“. */
@@ -176,7 +244,7 @@ async function loadAdminSectionMatches(
   query: string,
   sbUrl: string,
   sbKey: string,
-): Promise<{ filename: string; section: string }[]> {
+): Promise<{ filename: string; section: string; byName: boolean }[]> {
   if (!query?.trim()) return [];
 
   const listResp = await fetchWithTimeout(
@@ -190,7 +258,7 @@ async function loadAdminSectionMatches(
 
   const rows = (await listResp.json()) as { filename?: string; content_text?: string }[];
   const terms = significantTermsFromQuery(query);
-  const out: { filename: string; section: string }[] = [];
+  const out: { filename: string; section: string; byName: boolean }[] = [];
   let filenameHits = 0;
   let overlapHits = 0;
   let overlapOnlyCount = 0;
@@ -207,7 +275,7 @@ async function loadAdminSectionMatches(
     if (!byName && byOverlap) overlapOnlyCount++;
     if (byName) filenameHits++;
     else overlapHits++;
-    out.push({ filename: fn, section: `### ${fn}\n${text}` });
+    out.push({ filename: fn, section: `### ${fn}\n${text}`, byName });
   }
   // #region agent log
   debugAdminCtx("H_overlap", "admin-context.ts:adminSectionMatches", "filename vs content overlap", {
@@ -215,6 +283,7 @@ async function loadAdminSectionMatches(
     overlapHits,
     termCount: terms.length,
     termSample: terms.slice(0, 8),
+    byNameFiles: out.filter((s) => s.byName).map((s) => s.filename),
   });
   // #endregion
   return out;
@@ -228,12 +297,20 @@ async function mergeFilenameMatchedSections(
 ): Promise<string> {
   const maxChars = MAX_ADMIN_TOKENS * CHARS_PER_TOKEN;
   const sections = await loadAdminSectionMatches(query, sbUrl, sbKey);
-  const uncovered = sections.filter((s) => !adminBlockCoversFilename(base, s.filename));
+  /** Namens-Treffer: immer Volltext liefern, auch wenn RAG schon einen ###-Snippet-Header gleichen Namens gesetzt hat. */
+  const uncovered = sections.filter(
+    (s) => s.byName || !adminBlockCoversFilename(base, s.filename),
+  );
   // #region agent log
-  debugAdminCtx("H_fname", "admin-context.ts:filenameMerge", "filename-aligned admin sections", {
+  debugAdminCtx("H2", "admin-context.ts:filenameMerge", "filename-aligned admin sections", {
     matchedFiles: sections.map((s) => s.filename),
     uncoveredFiles: uncovered.map((s) => s.filename),
+    skippedDueToRagHeaderOnly: sections
+      .filter((s) => !s.byName && adminBlockCoversFilename(base, s.filename))
+      .map((s) => s.filename),
     baseLen: base.length,
+    catKnowledgeInSections: sections.some((s) => /cat/i.test(s.filename) && /knowledge/i.test(s.filename)),
+    catKnowledgeInUncovered: uncovered.some((s) => /cat/i.test(s.filename) && /knowledge/i.test(s.filename)),
   });
   // #endregion
   if (uncovered.length === 0) return base;
@@ -259,17 +336,22 @@ function debugAdminCtx(
   data: Record<string, unknown>,
 ) {
   const payload = {
-    sessionId: "c81fbe",
+    sessionId: "631fa3",
     hypothesisId,
     location,
     message,
-    data,
+    data: { ...data, runId: data.runId ?? "repro-1" },
     timestamp: Date.now(),
   };
+  // Supabase Edge Logs: stdout zuverlässiger sichtbar als nur stderr; hypothesisId am Anfang für Volltextsuche.
+  console.log(
+    `[DOCBILL_INSTRUMENTATION] hypothesisId=${hypothesisId} location=${location} message=${message}`,
+  );
+  console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(payload));
   console.error("DOCBILL_INSTRUMENTATION admin-context", JSON.stringify(payload));
-  fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+  fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c81fbe" },
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
     body: JSON.stringify(payload),
   }).catch(() => {});
 }
@@ -306,18 +388,31 @@ async function getQueryEmbedding(query: string, apiKey: string): Promise<number[
   return embedding;
 }
 
+export type LoadRelevantAdminContextOptions = {
+  /**
+   * Nur für Embedding + GOÄ-Ziffern-Filter: oft die **letzte** Nutzerzeile, damit ein
+   * mehrzeiliger Merge-Query (mehrere Turns) den Vektor nicht verwässert und der Verlauf
+   * die pgvector-Treffer nicht „wegzieht“.
+   */
+  vectorQuery?: string;
+};
+
 export async function loadRelevantAdminContext(
-  query: string,
+  mergeQuery: string,
   apiKey: string,
+  options?: LoadRelevantAdminContextOptions,
 ): Promise<string> {
-  if (!query?.trim()) {
+  const mq = mergeQuery?.trim() ?? "";
+  if (!mq) {
     // #region agent log
     debugAdminCtx("H3", "admin-context.ts:emptyQuery", "skip admin context (empty rag query)", {
-      queryPresent: typeof query === "string",
+      queryPresent: typeof mergeQuery === "string",
     });
     // #endregion
     return "";
   }
+
+  const vectorQ = (options?.vectorQuery?.trim() || mq).trim();
 
   const sbUrl = Deno.env.get("SUPABASE_URL");
   const sbKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -332,18 +427,22 @@ export async function loadRelevantAdminContext(
   }
 
   try {
-    const zExtracted = extractZiffernFromText(query);
+    const zExtracted = extractZiffernFromText(vectorQ);
     const filterZiffern = zExtracted.length > 0 && zExtracted.length <= 48 ? zExtracted : null;
     // #region agent log
-    debugAdminCtx("H_query", "admin-context.ts:preEmbed", "rag query + ziffern filter", {
-      queryLen: query.length,
-      queryHead: query.slice(0, 280),
+    debugAdminCtx("H_embed_split", "admin-context.ts:preEmbed", "merge vs vector query (RAG)", {
+      mergeLen: mq.length,
+      vectorLen: vectorQ.length,
+      vectorDiffersFromMerge: mq !== vectorQ,
+      vectorHead: vectorQ.slice(0, 280),
+      mergeTail: mq.slice(-280),
       filterZiffern,
       zExtractedCount: zExtracted.length,
+      filterZiffernActive: filterZiffern != null && filterZiffern.length > 0,
     });
     // #endregion
 
-    const embedding = await getQueryEmbedding(query, apiKey);
+    const embedding = await getQueryEmbedding(vectorQ, apiKey);
 
     const rpcResp = await fetchWithTimeout(
       `${sbUrl}/rest/v1/rpc/match_admin_context_chunks`,
@@ -371,7 +470,7 @@ export async function loadRelevantAdminContext(
       });
       // #endregion
       return await mergeFilenameMatchedSections(
-        query,
+        mq,
         await loadFullAdminContextFallback(sbUrl, sbKey),
         sbUrl,
         sbKey,
@@ -386,7 +485,7 @@ export async function loadRelevantAdminContext(
       });
       // #endregion
       return await mergeFilenameMatchedSections(
-        query,
+        mq,
         await loadFullAdminContextFallback(sbUrl, sbKey),
         sbUrl,
         sbKey,
@@ -420,7 +519,7 @@ export async function loadRelevantAdminContext(
       });
       // #endregion
       return await mergeFilenameMatchedSections(
-        query,
+        mq,
         await loadFullAdminContextFallback(sbUrl, sbKey),
         sbUrl,
         sbKey,
@@ -438,7 +537,7 @@ export async function loadRelevantAdminContext(
       });
       // #endregion
       return await mergeFilenameMatchedSections(
-        query,
+        mq,
         await loadFullAdminContextFallback(sbUrl, sbKey),
         sbUrl,
         sbKey,
@@ -465,7 +564,7 @@ export async function loadRelevantAdminContext(
     }
 
     if (parts.length === 0) {
-      return await mergeFilenameMatchedSections(query, "", sbUrl, sbKey);
+      return await mergeFilenameMatchedSections(mq, "", sbUrl, sbKey);
     }
     const ragBlock =
       "\n\n## ADMIN-KONTEXT (relevante Ausschnitte):\n" + parts.join("\n\n");
@@ -475,7 +574,7 @@ export async function loadRelevantAdminContext(
       blockMentionsCatKnowledge: /cat\s*knowledge/i.test(ragBlock),
     });
     // #endregion
-    return await mergeFilenameMatchedSections(query, ragBlock, sbUrl, sbKey);
+    return await mergeFilenameMatchedSections(mq, ragBlock, sbUrl, sbKey);
   } catch {
     const url = Deno.env.get("SUPABASE_URL");
     const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -483,7 +582,7 @@ export async function loadRelevantAdminContext(
     debugAdminCtx("H_rag_empty", "admin-context.ts:catch", "exception → fallback", {});
     // #endregion
     const fb = url && key ? await loadFullAdminContextFallback(url, key) : "";
-    return await mergeFilenameMatchedSections(query, fb, sbUrl, sbKey);
+    return await mergeFilenameMatchedSections(mq, fb, sbUrl, sbKey);
   }
 }
 
@@ -516,7 +615,7 @@ async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promi
     const fb = "\n\n## ADMIN-KONTEXT:\n" + parts.join("\n\n");
     const allNames = (ctxFiles as { filename?: string }[]).map((f) => f?.filename ?? "");
     // #region agent log
-    debugAdminCtx("H_budget", "admin-context.ts:fallback", "full-file fallback", {
+    debugAdminCtx("H4", "admin-context.ts:fallback", "full-file fallback", {
       fileCount: ctxFiles.length,
       fbLen: fb.length,
       partsCount: parts.length,
@@ -524,6 +623,10 @@ async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promi
       partsIncluded: parts.length,
       maxChars,
       blockMentionsCatKnowledge: /cat\s*knowledge/i.test(fb),
+      partFilenames: parts.map((p) => {
+        const m = /^###\s+([^\n]+)/.exec(p);
+        return m ? m[1].slice(0, 80) : "";
+      }),
     });
     // #endregion
     return fb;
@@ -597,4 +700,27 @@ export function buildPipelineQuery(
   parts.push("optimierung analog begründung");
   const query = parts.join("\n");
   return query.trim() || "GOÄ Arztrechnung Augenheilkunde";
+}
+
+const FRAGE_ADMIN_RAG_MAX_CHARS = 12000;
+const FRAGE_ADMIN_RAG_MAX_USER_TURNS = 5;
+
+/**
+ * Admin-RAG im Fragemodus: letzte Nutzer-Turns bündeln, damit Folgefragen weiterhin
+ * Dateinamen-/Wissens-Cues aus dem Verlauf matchen (reine letzte Nachricht reicht oft nicht).
+ */
+export function buildFrageAdminRagQuery(
+  messages: { role: string; content: unknown }[] | undefined,
+  lastUserMessage: string,
+  pipelineFallbackWhenLastEmpty: string,
+): string {
+  const last = lastUserMessage.trim();
+  if (!last) return pipelineFallbackWhenLastEmpty;
+  const userTurns = (messages ?? [])
+    .filter((m) => m.role === "user")
+    .map((m) => String(m.content ?? "").trim())
+    .filter((s) => s.length > 0);
+  const recent = userTurns.slice(-FRAGE_ADMIN_RAG_MAX_USER_TURNS);
+  if (recent.length <= 1) return last;
+  return recent.join("\n\n").slice(0, FRAGE_ADMIN_RAG_MAX_CHARS);
 }

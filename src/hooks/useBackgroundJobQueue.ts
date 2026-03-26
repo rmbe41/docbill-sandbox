@@ -9,6 +9,7 @@ import {
   buildUserStructuredContent,
   type MessageStructuredContentV1,
 } from "@/lib/messageStructuredContent";
+import { frageAnswerToMarkdown } from "@/lib/frageAnswerStructured";
 import {
   assistantContentHasSseError,
   sseAccumStateHasDeliverable,
@@ -127,7 +128,14 @@ export function useBackgroundJobQueue({
   const liveAssistantByConvRef = useRef(
     new Map<
       string,
-      Pick<ChatMessage, "content" | "invoiceResult" | "serviceBillingResult" | "analysisTimeSeconds">
+      Pick<
+        ChatMessage,
+        | "content"
+        | "invoiceResult"
+        | "serviceBillingResult"
+        | "analysisTimeSeconds"
+        | "frageAnswer"
+      >
     >(),
   );
 
@@ -304,12 +312,16 @@ export function useBackgroundJobQueue({
         serviceBillingData?: ChatMessage["serviceBillingResult"],
         analysisTimeSeconds?: number,
         messageId?: string,
+        frageAnswer?: ChatMessage["frageAnswer"],
       ) => {
+        const prevLive = liveAssistantByConvRef.current.get(conversationId);
+        const mergedFrage = frageAnswer !== undefined ? frageAnswer : prevLive?.frageAnswer;
         liveAssistantByConvRef.current.set(conversationId, {
           content: assistantContent,
           invoiceResult: invoiceData,
           serviceBillingResult: serviceBillingData,
           ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
+          ...(mergedFrage !== undefined ? { frageAnswer: mergedFrage } : {}),
         });
         if (activeConversationIdRef.current !== conversationId) return;
         setMessages((prev) => {
@@ -324,6 +336,7 @@ export function useBackgroundJobQueue({
                     invoiceResult: invoiceData,
                     serviceBillingResult: serviceBillingData,
                     ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
+                    ...(frageAnswer !== undefined ? { frageAnswer } : {}),
                   }
                 : m,
             );
@@ -337,6 +350,7 @@ export function useBackgroundJobQueue({
               invoiceResult: invoiceData,
               serviceBillingResult: serviceBillingData,
               ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
+              ...(frageAnswer !== undefined ? { frageAnswer } : {}),
             },
           ];
         });
@@ -365,6 +379,9 @@ export function useBackgroundJobQueue({
               state.assistantContent,
               state.invoiceData,
               state.serviceBillingData,
+              undefined,
+              undefined,
+              state.frageStructured,
             );
           },
           onFreeModelsExhausted: onFreeModelsExhausted,
@@ -422,19 +439,29 @@ export function useBackgroundJobQueue({
           state.invoiceData,
           state.serviceBillingData,
           analysisTimeSeconds,
+          undefined,
+          state.frageStructured,
         );
 
         const assistantStructured = buildAssistantStructuredContent({
           invoiceResult: state.invoiceData,
           serviceBillingResult: state.serviceBillingData,
           analysisTimeSeconds,
+          frageAnswer: state.frageStructured,
         });
-        const hasAssistantText = Boolean(state.assistantContent?.trim());
+        const hasAssistantText =
+          Boolean(state.assistantContent?.trim()) || Boolean(state.frageStructured);
+        const contentToPersist =
+          state.assistantContent?.trim()
+            ? state.assistantContent
+            : state.frageStructured
+              ? frageAnswerToMarkdown(state.frageStructured)
+              : "";
         if (hasAssistantText || assistantStructured) {
           const savedId = await saveMessage(
             conversationId,
             "assistant",
-            hasAssistantText ? state.assistantContent : "",
+            contentToPersist,
             assistantStructured ?? undefined,
           );
           if (savedId) {
@@ -444,12 +471,14 @@ export function useBackgroundJobQueue({
               state.serviceBillingData,
               analysisTimeSeconds,
               savedId,
+              state.frageStructured,
             );
           }
         }
 
         const preview =
           state.assistantContent.trim().slice(0, 160) ||
+          state.frageStructured?.kurzantwort.trim().slice(0, 160) ||
           (state.invoiceData ? "Rechnungsprüfung abgeschlossen" : "") ||
           (state.serviceBillingData ? "Leistungsvorschläge erstellt" : "");
 
@@ -806,7 +835,13 @@ export function useBackgroundJobQueue({
       const db = await loadMessages(conversationId);
       const base: ChatMessage[] = db.map((m) => dbRowToChatMessage(m));
       const live = liveAssistantByConvRef.current.get(conversationId);
-      if (!live || (!live.content?.trim() && !live.invoiceResult && !live.serviceBillingResult)) {
+      if (
+        !live ||
+        (!live.content?.trim() &&
+          !live.invoiceResult &&
+          !live.serviceBillingResult &&
+          !live.frageAnswer)
+      ) {
         return base;
       }
       const last = base[base.length - 1];
@@ -817,6 +852,7 @@ export function useBackgroundJobQueue({
         invoiceResult: live.invoiceResult,
         serviceBillingResult: live.serviceBillingResult,
         analysisTimeSeconds: live.analysisTimeSeconds,
+        frageAnswer: live.frageAnswer,
       };
       if (last?.role === "assistant") {
         return [...base.slice(0, -1), mergedLast];

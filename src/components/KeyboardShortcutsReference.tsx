@@ -9,6 +9,8 @@ import {
   ctrlKeyLabel,
   shortcutTokenUsesAlt,
   shortcutTokenUsesCtrl,
+  shortcutTokenPrimaryKeyLabel,
+  pageUpKeyLabel,
 } from "@/lib/keyboardShortcutPrefs";
 
 function Kbd({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -54,8 +56,7 @@ export function KeyboardShortcutsReference({ className, prefs }: Props) {
     const comboFor = (token: string) => {
       const usesAlt = shortcutTokenUsesAlt(token);
       const usesCtrl = shortcutTokenUsesCtrl(token);
-      const rest = usesAlt ? token.slice(4) : usesCtrl ? token.slice(5) : token;
-      const t = rest === "," ? "," : rest === "/" ? "/" : rest.toUpperCase();
+      const t = shortcutTokenPrimaryKeyLabel(token);
       const parts: React.ReactNode[] = [];
       if (usesAlt) {
         parts.push(<Kbd key="alt">{apple ? "⌥" : "Alt"}</Kbd>);
@@ -186,18 +187,12 @@ export function KeyboardShortcutsReference({ className, prefs }: Props) {
           </p>
         )}
         {!isDocbillDesktopShell() ? (
-          <>
-            <p>
-              Im normalen Browser nutzt <span className="text-foreground">Neuer Chat</span> standardmäßig{" "}
-              <Kbd className="mx-0.5">{ctrlMod}</Kbd>+<Kbd className="mx-0.5">N</Kbd>
-              {apple ? " (auf dem Mac die Control-Taste „^“, nicht Command)" : ""}, damit das Kürzel nicht mit „neues
-              Fenster“ kollidiert.
-            </p>
-            <p>
-              Welche Kombinationen reserviert sind, hängt vom Browser ab — ein Kürzel kann in den Einstellungen
-              gespeichert sein, wirkt aber nicht, wenn der Browser es zuerst abfängt.
-            </p>
-          </>
+          <p>
+            <span className="text-foreground">Neuer Chat</span> ist standardmäßig{" "}
+            <Kbd className="mx-0.5">{mod}</Kbd>+<Kbd className="mx-0.5">{pageUpKeyLabel()}</Kbd>
+            {apple ? " (Taste „Page Up“ bzw. Fn+↑ je nach Tastatur)" : ""}. Welche Kombinationen der Browser reserviert,
+            ist abhängig vom Programm — ein gespeichertes Kürzel wirkt nicht, wenn der Browser es zuerst abfängt.
+          </p>
         ) : null}
       </div>
       <div className="space-y-2">

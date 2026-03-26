@@ -50,6 +50,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewFile, setPreviewFile] = useState<{ src: string; name: string; type: string } | null>(null);
+  const [composerFocused, setComposerFocused] = useState(false);
   const textRef = useRef(text);
   textRef.current = text;
   const prevDraftConvRef = useRef<string | null | undefined>(undefined);
@@ -349,7 +350,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Beschreiben Sie die erbrachten Leistungen oder stellen Sie eine Frage zur GOÄ…"
+          onFocus={() => setComposerFocused(true)}
+          onBlur={() => setComposerFocused(false)}
+          placeholder={
+            composerFocused
+              ? ""
+              : "Beschreiben Sie die erbrachten Leistungen oder stellen Sie eine Frage zur GOÄ…"
+          }
           rows={1}
           className={cn(
             "flex-1 resize-none bg-transparent px-2 py-2 text-sm",

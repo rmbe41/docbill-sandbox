@@ -23,8 +23,12 @@ export interface PdfPosition {
 const MARGIN = 14;
 const LINE_HEIGHT = 5;
 const PAGE_HEIGHT = 297;
-const FOOTER_MARGIN = 25;
-const BEGRUENDUNG_MAX_WIDTH = 25;
+const FOOTER_MARGIN = 30;
+/** Einheitliche Schriftgröße für die gesamte Rechnung (inkl. Kopf, Tabelle, Fuß). */
+const FONT_PT = 10;
+const GRAY_LINE = 200;
+const GRAY_MUTED = 100;
+const ZEBRA_GRAY = 246;
 
 /** German number format: 2,3 instead of 2.3 */
 function formatDeutsch(n: number, decimals: number): string {
@@ -48,23 +52,22 @@ function maybeNewPage(doc: import("jspdf").jsPDF, y: number, neededHeight: numbe
   return y;
 }
 
-/** Split text into lines that fit within maxWidth (approx chars) */
-function wrapText(text: string, maxChars: number): string[] {
-  if (!text || text.length <= maxChars) return text ? [text] : [];
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-  for (const w of words) {
-    const candidate = current ? `${current} ${w}` : w;
-    if (candidate.length <= maxChars) {
-      current = candidate;
-    } else {
-      if (current) lines.push(current);
-      current = w.length > maxChars ? w.slice(0, maxChars) : w;
-    }
+function pageWidth(doc: import("jspdf").jsPDF): number {
+  return doc.internal.pageSize.getWidth();
+}
+
+/** Draw page numbers on all pages (call after all content). */
+function addPageFooters(doc: import("jspdf").jsPDF): void {
+  const total = doc.getNumberOfPages();
+  const w = pageWidth(doc);
+  for (let i = 1; i <= total; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(FONT_PT);
+    doc.setTextColor(GRAY_MUTED);
+    doc.text(`Seite ${i} von ${total}`, w / 2, PAGE_HEIGHT - 12, { align: "center" });
+    doc.setTextColor(0);
   }
-  if (current) lines.push(current);
-  return lines;
 }
 
 export async function generateInvoicePdf(
@@ -74,9 +77,31 @@ export async function generateInvoicePdf(
 ): Promise<void> {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF();
+  const pw = pageWidth(doc);
+  const xRight = pw - MARGIN;
   let y = MARGIN;
 
-  // 1. Praxis
+  // —— Kopf: links Praxis (klein), rechts Titel + Rechnungsdaten ——
+  const yStartHead = y;
+  let yLeft = yStartHead;
+  let yRightCol = yStartHead;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(FONT_PT);
+  doc.text("Rechnung", xRight, yRightCol, { align: "right" });
+  yRightCol += LINE_HEIGHT;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(FONT_PT);
+  if (stammdaten?.rechnungsnummer) {
+    doc.text(`Rechnungsnr.: ${stammdaten.rechnungsnummer}`, xRight, yRightCol, { align: "right" });
+    yRightCol += LINE_HEIGHT;
+  }
+  if (stammdaten?.rechnungsdatum) {
+    doc.text(`Datum: ${stammdaten.rechnungsdatum}`, xRight, yRightCol, { align: "right" });
+    yRightCol += LINE_HEIGHT;
+  }
+
   if (stammdaten?.praxis) {
     const p = stammdaten.praxis;
     const lines: string[] = [];
@@ -86,17 +111,24 @@ export async function generateInvoicePdf(
     if (p.email) lines.push(p.email);
     if (p.steuernummer) lines.push(`Steuernr.: ${p.steuernummer}`);
     if (lines.length > 0) {
-      doc.setFontSize(10);
+      doc.setFontSize(FONT_PT);
+      doc.setTextColor(GRAY_MUTED);
+      doc.setFont("helvetica", "normal");
       for (const line of lines) {
-        y = maybeNewPage(doc, y, LINE_HEIGHT);
-        doc.text(line, MARGIN, y);
-        y += LINE_HEIGHT;
+        doc.text(line, MARGIN, yLeft);
+        yLeft += LINE_HEIGHT;
       }
-      y += 4;
+      doc.setTextColor(0);
     }
   }
 
-  // 2. Patient
+  y = Math.max(yLeft, yRightCol) + 6;
+  doc.setDrawColor(GRAY_LINE);
+  doc.setLineWidth(0.2);
+  doc.line(MARGIN, y, pw - MARGIN, y);
+  y += 7;
+
+  // —— Rechnungsempfänger ——
   if (stammdaten?.patient) {
     const p = stammdaten.patient;
     const lines: string[] = [];
@@ -104,83 +136,128 @@ export async function generateInvoicePdf(
     if (p.adresse) lines.push(p.adresse);
     if (p.geburtsdatum) lines.push(`Geb.: ${p.geburtsdatum}`);
     if (lines.length > 0) {
-      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(FONT_PT);
+      doc.text("Rechnungsempfänger", MARGIN, y);
+      y += LINE_HEIGHT;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(FONT_PT);
       for (const line of lines) {
         y = maybeNewPage(doc, y, LINE_HEIGHT);
         doc.text(line, MARGIN, y);
         y += LINE_HEIGHT;
       }
-      y += 4;
+      y += 5;
     }
   }
 
-  // 3. Rechnungsnummer, Rechnungsdatum
-  if (stammdaten?.rechnungsnummer || stammdaten?.rechnungsdatum) {
-    doc.setFontSize(10);
-    y = maybeNewPage(doc, y, LINE_HEIGHT + 4);
-    const parts: string[] = [];
-    if (stammdaten.rechnungsnummer) parts.push(`Rechnungsnr.: ${stammdaten.rechnungsnummer}`);
-    if (stammdaten.rechnungsdatum) parts.push(`Datum: ${stammdaten.rechnungsdatum}`);
-    doc.text(parts.join("  |  "), MARGIN, y);
-    y += 8;
-  }
-
-  // 4. Table header
+  // —— Tabellenspalten (mm) ——
   const hasBegruendung = positions.some((p) => p.begruendung);
-  doc.setFontSize(10);
-  y = maybeNewPage(doc, y, 20);
-  doc.text("Nr", MARGIN, y);
-  doc.text("GOÄ", MARGIN + 12, y);
-  doc.text("Bezeichnung", MARGIN + 28, y);
-  doc.text("Faktor", MARGIN + 130, y);
-  doc.text("Betrag", MARGIN + 155, y);
-  if (hasBegruendung) doc.text("Begründung", MARGIN + 175, y);
-  y += 6;
+  const xNr = MARGIN;
+  const xGoae = MARGIN + 7;
+  const xBez = MARGIN + 21;
+  const xBetrag = xRight;
+  const colBetragW = 24;
+  const colFaktorW = 14;
+  const xBetragLeft = xBetrag - colBetragW;
+  const xFaktorLeft = xBetragLeft - colFaktorW;
+  const colBegrW = hasBegruendung ? 36 : 0;
+  const xBegr = hasBegruendung ? xFaktorLeft - colBegrW : xFaktorLeft;
+  const bezWidthMm = xBegr - xBez - 2;
+  const begrWidthMm = hasBegruendung ? colBegrW - 1 : 0;
 
-  // 5. Table rows with text wrapping and page breaks
+  doc.setFontSize(FONT_PT);
+  y = maybeNewPage(doc, y, 16);
+  doc.setFont("helvetica", "bold");
+  const headerY = y;
+  doc.text("Nr", xNr, headerY);
+  doc.text("GOÄ", xGoae, headerY);
+  doc.text("Bezeichnung", xBez, headerY);
+  if (hasBegruendung) doc.text("Begründung", xBegr, headerY);
+  doc.text("Faktor", xFaktorLeft + colFaktorW - 1, headerY, { align: "right" });
+  doc.text("Betrag", xBetrag, headerY, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  y = headerY + 2;
+  doc.setDrawColor(GRAY_LINE);
+  doc.line(MARGIN, y, pw - MARGIN, y);
+  y += 5;
+
+  // —— Datenzeilen ——
+  let rowIndex = 0;
   for (const p of positions) {
-    const bezeichnungLines = wrapText(p.bezeichnung, 45);
-    const begruendungText = p.begruendung ?? "—";
-    const begruendungLines = wrapText(begruendungText, BEGRUENDUNG_MAX_WIDTH);
-    const rowHeight = Math.max(bezeichnungLines.length, begruendungLines.length) * LINE_HEIGHT + 2;
+    const bezeichnungLines = doc.splitTextToSize(p.bezeichnung || "", Math.max(20, bezWidthMm));
+    const begrRaw = hasBegruendung ? (p.begruendung?.trim() ? p.begruendung : "—") : "";
+    const begruendungLines = hasBegruendung
+      ? doc.splitTextToSize(begrRaw, Math.max(12, begrWidthMm))
+      : [];
+    const lineCount = Math.max(bezeichnungLines.length, begruendungLines.length, 1);
+    const rowHeight = lineCount * LINE_HEIGHT + 3;
 
     y = maybeNewPage(doc, y, rowHeight);
 
-    doc.text(String(p.nr), MARGIN, y);
-    doc.text(p.ziffer, MARGIN + 12, y);
-    // Bezeichnung: wrap if longer than ~45 chars
-    if (bezeichnungLines.length === 1) {
-      doc.text(bezeichnungLines[0].length > 45 ? bezeichnungLines[0].slice(0, 44) + "…" : bezeichnungLines[0], MARGIN + 28, y);
-    } else {
-      for (let i = 0; i < bezeichnungLines.length; i++) {
-        doc.text(bezeichnungLines[i].slice(0, 50) + (bezeichnungLines[i].length > 50 ? "…" : ""), MARGIN + 28, y + i * LINE_HEIGHT);
+    if (rowIndex % 2 === 1) {
+      doc.setFillColor(ZEBRA_GRAY, ZEBRA_GRAY, ZEBRA_GRAY);
+      doc.rect(MARGIN, y - 4, pw - 2 * MARGIN, rowHeight, "F");
+      doc.setDrawColor(GRAY_LINE);
+    }
+
+    doc.setFontSize(FONT_PT);
+    doc.text(String(p.nr), xNr, y);
+    doc.text(p.ziffer, xGoae, y);
+
+    for (let i = 0; i < bezeichnungLines.length; i++) {
+      doc.text(bezeichnungLines[i], xBez, y + i * LINE_HEIGHT);
+    }
+    if (hasBegruendung) {
+      for (let i = 0; i < begruendungLines.length; i++) {
+        doc.text(begruendungLines[i], xBegr, y + i * LINE_HEIGHT);
       }
     }
-    doc.text(`${formatDeutsch(p.faktor, 1)}×`, MARGIN + 130, y);
-    doc.text(`${formatDeutsch(p.betrag, 2)} €`, MARGIN + 155, y);
-    if (hasBegruendung) {
-      doc.text(begruendungLines[0].slice(0, 25), MARGIN + 175, y);
-    }
+
+    const faktorLabel = p.faktor === 0 && p.ziffer === "Sachk." ? "—" : `${formatDeutsch(p.faktor, 1)}×`;
+    doc.text(faktorLabel, xFaktorLeft + colFaktorW - 1, y, { align: "right" });
+    doc.text(`${formatDeutsch(p.betrag, 2)} €`, xBetrag, y, { align: "right" });
+
     y += rowHeight;
+    rowIndex += 1;
   }
-  y += 5;
 
-  // 6. Summe
-  y = maybeNewPage(doc, y, 15);
-  doc.text(`Summe: ${formatDeutsch(sum, 2)} €`, MARGIN, y);
-  y += 10;
+  y += 4;
 
-  // 7. Bankverbindung
+  // —— Gesamtbetrag ——
+  const sumBlockH = 14;
+  y = maybeNewPage(doc, y, sumBlockH);
+  const xSumLineStart = xBetragLeft - 35;
+  doc.setDrawColor(GRAY_LINE);
+  doc.line(xSumLineStart, y, xBetrag, y);
+  y += 7;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(FONT_PT);
+  doc.text("Gesamtbetrag", xSumLineStart, y);
+  doc.text(`${formatDeutsch(sum, 2)} €`, xBetrag, y, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  y += 12;
+
+  // —— Zahlungsinformation ——
   if (stammdaten?.bank) {
     const b = stammdaten.bank;
-    const lines: string[] = [];
-    if (b.iban) lines.push(`IBAN: ${b.iban}`);
-    if (b.bic) lines.push(`BIC: ${b.bic}`);
-    if (b.bankName) lines.push(b.bankName);
-    if (b.kontoinhaber) lines.push(`Kontoinhaber: ${b.kontoinhaber}`);
-    if (lines.length > 0) {
-      doc.setFontSize(10);
-      for (const line of lines) {
+    const bankLines: string[] = [];
+    if (b.iban) bankLines.push(`IBAN: ${b.iban}`);
+    if (b.bic) bankLines.push(`BIC: ${b.bic}`);
+    if (b.bankName) bankLines.push(b.bankName);
+    if (b.kontoinhaber) bankLines.push(`Kontoinhaber: ${b.kontoinhaber}`);
+    if (bankLines.length > 0) {
+      y = maybeNewPage(doc, y, 8 + bankLines.length * LINE_HEIGHT);
+      doc.setDrawColor(GRAY_LINE);
+      doc.line(MARGIN, y, pw - MARGIN, y);
+      y += 7;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(FONT_PT);
+      doc.text("Zahlungsinformation", MARGIN, y);
+      y += LINE_HEIGHT;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(FONT_PT);
+      for (const line of bankLines) {
         y = maybeNewPage(doc, y, LINE_HEIGHT);
         doc.text(line, MARGIN, y);
         y += LINE_HEIGHT;
@@ -188,5 +265,30 @@ export async function generateInvoicePdf(
     }
   }
 
+  // —— Quellen ——
+  const quellenText =
+    "Gebührenordnung für Ärzte (GOÄ), Bundesrepublik Deutschland.";
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(FONT_PT);
+  const quellenLines = doc.splitTextToSize(quellenText, pw - 2 * MARGIN);
+  const quellenBlockH = LINE_HEIGHT + quellenLines.length * LINE_HEIGHT + 6;
+  y = maybeNewPage(doc, y, quellenBlockH);
+  doc.setDrawColor(GRAY_LINE);
+  doc.line(MARGIN, y, pw - MARGIN, y);
+  y += LINE_HEIGHT + 2;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(FONT_PT);
+  doc.setTextColor(0);
+  doc.text("Quellen:", MARGIN, y);
+  y += LINE_HEIGHT;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(FONT_PT);
+  for (const line of quellenLines) {
+    y = maybeNewPage(doc, y, LINE_HEIGHT);
+    doc.text(line, MARGIN, y);
+    y += LINE_HEIGHT;
+  }
+
+  addPageFooters(doc);
   doc.save(buildFilename(stammdaten));
 }

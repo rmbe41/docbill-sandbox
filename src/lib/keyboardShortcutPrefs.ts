@@ -15,9 +15,9 @@ function invalidatePrefsCache() {
   cachedRaw = undefined;
 }
 
-/** Default key tokens; newChat uses ctrl+n so ⌘N/Brave-Tor chords are avoided on Mac, Strg+N works in the tab. */
+/** Default key tokens; newChat uses ⌘+Page↑ / Strg+Bild↑ — rarely used by the page, distinct from ⌘N. */
 const DEFAULT_SHORTCUT_KEYS: Record<ShortcutActionId, string> = {
-  newChat: "ctrl+n",
+  newChat: "pageup",
   upload: "u",
   stop: "s",
   settings: ",",
@@ -95,7 +95,7 @@ export function loadKeyboardShortcutPrefs(): KeyboardShortcutPrefs {
     try {
       const parsed = JSON.parse(raw) as Partial<KeyboardShortcutPrefs>;
       const nc = parsed.keys?.newChat;
-      if (nc === "n" || nc === "alt+n" || nc === "alt+k") newChatMigrateTo = "ctrl+n";
+      if (nc === "n" || nc === "alt+n" || nc === "alt+k" || nc === "ctrl+n") newChatMigrateTo = "pageup";
     } catch {
       /* ignore */
     }
@@ -132,15 +132,15 @@ export function resetKeyboardShortcutPrefs(): KeyboardShortcutPrefs {
 export function isAllowedShortcutKeyToken(key: string): boolean {
   if (key.startsWith("ctrl+")) {
     const rest = key.slice(5);
-    if (rest === "," || rest === "/") return true;
+    if (rest === "," || rest === "/" || rest === "pageup") return true;
     return rest.length === 1 && /[a-z0-9]/i.test(rest);
   }
   if (key.startsWith("alt+")) {
     const rest = key.slice(4);
-    if (rest === "," || rest === "/") return true;
+    if (rest === "," || rest === "/" || rest === "pageup") return true;
     return rest.length === 1 && /[a-z0-9]/i.test(rest);
   }
-  if (key === "," || key === "/") return true;
+  if (key === "," || key === "/" || key === "pageup") return true;
   return key.length === 1 && /[a-z0-9]/i.test(key);
 }
 
@@ -149,6 +149,7 @@ export function normalizeShortcutKeyToken(raw: string): string {
     const rest = raw.slice(5);
     if (rest === ",") return "ctrl+,";
     if (rest === "/") return "ctrl+/";
+    if (rest.toLowerCase() === "pageup") return "ctrl+pageup";
     if (rest.length >= 1 && /[a-z0-9]/i.test(rest[0])) return `ctrl+${rest[0].toLowerCase()}`;
     return raw;
   }
@@ -156,17 +157,20 @@ export function normalizeShortcutKeyToken(raw: string): string {
     const rest = raw.slice(4);
     if (rest === ",") return "alt+,";
     if (rest === "/") return "alt+/";
+    if (rest.toLowerCase() === "pageup") return "alt+pageup";
     if (rest.length >= 1 && /[a-z0-9]/i.test(rest[0])) return `alt+${rest[0].toLowerCase()}`;
     return raw;
   }
   if (raw === ",") return ",";
   if (raw === "/") return "/";
+  if (raw.toLowerCase() === "pageup") return "pageup";
   return raw.slice(0, 1).toLowerCase();
 }
 
 function matchKeySegment(e: KeyboardEvent, segment: string): boolean {
   if (segment === ",") return e.key === ",";
   if (segment === "/") return e.key === "/" || e.code === "Slash";
+  if (segment === "pageup") return e.key === "PageUp";
   return e.key.length === 1 && e.key.toLowerCase() === segment.toLowerCase();
 }
 
@@ -222,21 +226,40 @@ export function ctrlKeyLabel(): string {
   return isApplePlatform() ? "⌃" : "Strg";
 }
 
+/** Human label for the non-modifier key (Page Up vs Bild↑). */
+export function pageUpKeyLabel(): string {
+  return isWindowsPlatform() ? "Bild↑" : "Page↑";
+}
+
+/** Key segment for UI (reference + combos); same idea as formatModCombo’s key half. */
+export function shortcutTokenPrimaryKeyLabel(token: string): string {
+  const usesAlt = token.startsWith("alt+");
+  const usesCtrl = token.startsWith("ctrl+");
+  const rest = usesAlt ? token.slice(4) : usesCtrl ? token.slice(5) : token;
+  if (rest === ",") return ",";
+  if (rest === "/") return "/";
+  if (rest === "pageup") return pageUpKeyLabel();
+  return rest.toUpperCase();
+}
+
 /** e.g. "Strg+U" / "⌘+U"; ctrl+: "⌃+N" / "Strg+N"; alt+: "⌥+⌘+K" / "Alt+Strg+K" */
 export function formatModCombo(token: string): string {
   const mod = modKeyLabel();
   const altLabel = isApplePlatform() ? "⌥" : "Alt";
   if (token.startsWith("ctrl+")) {
     const rest = token.slice(5);
-    const show = rest === "," ? "," : rest === "/" ? "/" : rest.toUpperCase();
+    const show =
+      rest === "," ? "," : rest === "/" ? "/" : rest === "pageup" ? pageUpKeyLabel() : rest.toUpperCase();
     return `${ctrlKeyLabel()}+${show}`;
   }
   if (token.startsWith("alt+")) {
     const rest = token.slice(4);
-    const show = rest === "," ? "," : rest === "/" ? "/" : rest.toUpperCase();
+    const show =
+      rest === "," ? "," : rest === "/" ? "/" : rest === "pageup" ? pageUpKeyLabel() : rest.toUpperCase();
     return `${altLabel}+${mod}+${show}`;
   }
-  const show = token === "," ? "," : token === "/" ? "/" : token.toUpperCase();
+  const show =
+    token === "," ? "," : token === "/" ? "/" : token === "pageup" ? pageUpKeyLabel() : token.toUpperCase();
   return `${mod}+${show}`;
 }
 

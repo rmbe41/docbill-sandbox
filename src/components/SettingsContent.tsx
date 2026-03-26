@@ -1331,6 +1331,8 @@ const SettingsContent = ({
             {activeTab === "user" && (
               <p className="text-xs text-muted-foreground -mt-1">
                 Ihre Regeln werden zusätzlich zu den globalen Defaults angewendet. Leer lassen = nur globale Regeln.
+                Bitte nur Ergänzungen (Ton, Fachfokus, interne Vorgaben) – keine zweite Antwortvorlage; die
+                Antwortstruktur legt DocBill im System fest.
               </p>
             )}
             {activeTab === "global" && isAdmin ? (
@@ -1378,14 +1380,16 @@ const SettingsContent = ({
               <Textarea
                 value={currentRules}
                 onChange={(e) => handleRulesChange(e.target.value)}
-                placeholder="z.B. Fokussiere dich auf Retinologie. Verwende immer die höchstmöglichen Steigerungssätze."
+                placeholder="z.B. Fokus Retinologie; sachlicher Ton. Keine eigene Überschriften-Vorlage."
                 rows={6}
                 className="font-mono text-sm"
               />
             )}
             {activeTab === "global" && (
               <p className="text-xs text-muted-foreground">
-                Diese Regeln gelten für alle Nutzer als Basis.
+                Diese Regeln gelten für alle Nutzer als Basis. Ergänzen Sie Guardrails und Inhaltswünsche – keine
+                alternative Kapitelstruktur für Chat-Antworten (Kurzantwort, Quellen usw. sind produktseitig
+                definiert).
               </p>
             )}
             {activeTab === "global" && isAdmin && (

@@ -28,7 +28,7 @@ export function KeyboardShortcutPrefsEditor({ prefs, onChange, onReset }: Props)
   const mod = modKeyLabel();
   const webHint =
     !isDocbillDesktopShell() &&
-    "Im Browser: „Neuer Chat“ ist standardmäßig Strg+N (Mac: Taste „ctrl“/„^“, nicht Command). Manche Tastenkombinationen fängt der Browser trotzdem ab — dann eine andere Belegung wählen.";
+    "„Neuer Chat“ ist standardmäßig ⌘+Page↑ bzw. Strg+Bild↑. Manche Browser fangen Tastenkürzel ab — dann eine andere Belegung wählen.";
 
   useEffect(() => {
     if (!recording) {
@@ -61,6 +61,8 @@ export function KeyboardShortcutPrefsEditor({ prefs, onChange, onReset }: Props)
         token = e.altKey ? "alt+," : e.ctrlKey && !e.metaKey ? "ctrl+," : ",";
       else if (e.key === "/" || e.code === "Slash")
         token = e.altKey ? "alt+/" : e.ctrlKey && !e.metaKey ? "ctrl+/" : "/";
+      else if (e.key === "PageUp")
+        token = e.altKey ? "alt+pageup" : e.ctrlKey && !e.metaKey ? "ctrl+pageup" : "pageup";
       else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) {
         const k = normalizeShortcutKeyToken(e.key);
         if (e.altKey) token = `alt+${k}`;
@@ -69,7 +71,7 @@ export function KeyboardShortcutPrefsEditor({ prefs, onChange, onReset }: Props)
       } else {
         toast({
           title: "Taste nicht unterstützt",
-          description: "Nur Buchstaben, Ziffern, Komma oder Schrägstrich.",
+          description: "Nur Buchstaben, Ziffern, Komma, Schrägstrich oder Bild↑/Page↑.",
           variant: "destructive",
         });
         return;

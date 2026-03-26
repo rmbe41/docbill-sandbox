@@ -10,50 +10,52 @@ import { runServiceBillingAsStream } from "./pipeline/service-billing-orchestrat
 import { extrahiereOptimizeFor } from "./pipeline/input-parser.ts";
 import { classifyByHeuristics, classifyIntent } from "./intent-classifier.ts";
 import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel, getReasoningConfigForStream } from "./model-resolver.ts";
-import { loadRelevantAdminContext, buildPipelineQuery, type LastResultContext } from "./admin-context.ts";
+import {
+  loadRelevantAdminContext,
+  buildPipelineQuery,
+  buildFrageAdminRagQuery,
+  type LastResultContext,
+} from "./admin-context.ts";
+import {
+  FRAGE_JSON_OUTPUT_RULES,
+  FRAGE_MARKDOWN_STREAM_RULES,
+  frageAnswerToMarkdown,
+  normalizeFrageAnswerParsed,
+  type FrageAnswerStructured,
+} from "./frage-answer-format.ts";
 
 // ---------------------------------------------------------------------------
 // System-Prompt: reiner Frage-/Erklär-Modus (ohne Dokument-Upload, kein Rechnungsvorschlag)
 // ---------------------------------------------------------------------------
 
-const FRAGE_MODUS_RULES = `
+const FRAGE_MODUS_CORE = `
 ## Modus: GOÄ-Frage und Einordnung (kein Rechnungsvorschlag)
 
 Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** Rechnung, keinen „Rechnungsvorschlag“ und keine tabellarische Positionsliste wie bei einer Honorarabrechnung.
 
-### STRUKTUR (immer in dieser Reihenfolge, mit Überschriften)
+### Inhaltliche Logik
+- **Kurzantwort:** 1–3 Sätze mit der direkten Antwort.
+- **Erläuterung:** Gründe, Konsequenzen, typische Fälle – sachlich und gut lesbar.
+- **Quellen:** **Nur**, wenn du Inhalte aus dem **gelieferten Kontext** für **konkrete** Fakten nutzt – dann **jede** verwendete Fundstelle **explizit** und **konkret** (GOÄ § aus Kontext, GOÄ-Ziffer/Bezeichnung, DocBill-Regelwerk-Abschnitt, Admin-Dateiname). **Mehrere** Bezüge → **alle** nennen. Keine vagen Formulierungen wie nur „nach GOÄ“ ohne §/Ziffer/Datei. **Ohne** solche Bezüge: **keinen** Quellen-Abschnitt (bei JSON: \`quellen: []\`) – **nicht** erwähnen, dass keine Quelle genutzt wurde; **keine** erfundenen Paragraphen.
+- **Grenzfälle:** Unsicherheiten, fehlender Kontext oder wann Fachrat nötig ist – im vorgesehenen Ausgabefeld (siehe Formatregeln unten).
 
-### Kurzantwort
-1–3 Sätze mit der direkten Antwort.
-
-### Erläuterung
-Gründe, Konsequenzen, typische Fälle – sachlich und gut lesbar.
-
-### Quelle
-Mindestens eine **konkrete** Quellenangabe aus dem DocBill-Kontext, z.B.:
-- „GOÄ § …“ (Paragraphen aus dem Kontext)
-- „GOÄ-Anhang / Abschnitt …“ (wenn im Kontext genannt)
-- „DocBill: Regelwerk [analoge Bewertung / Begründungen / Abschnitte]“
-- Wenn Admin-Kontext (RAG) maßgeblich war: „Admin-Kontext [Dateiname/Kurzbezeichnung]“
-Keine erfundenen Paragraphen; nur was im gelieferten Kontext steht.
-
-### Grenzfälle und Hinweise (optional)
-Nur wenn sinnvoll: Unsicherheiten, wann fachlicher Rat nötig ist, oder Verweis auf fehlenden Kontext.
-
-### Format
-- **Keine** Überschrift „Rechnungsvorschlag“, „Optimierungspotenzial“ im Sinne einer Abrechnungstabelle.
-- **Tabellen nur optional**, z.B. zum Vergleich zweier Ziffern – nicht als Rechnungslayout.
-- **Ausnahme** – wenn die Nutzerfrage **ausdrücklich** nach dem **Rechenweg für einen Betrag** fragt (z.B. „Wie hoch ist der Betrag für GOÄ X bei Faktor Y?“): Dann höchstens **eine** knappe Zeile oder ein Mini-Rechenbeispiel (Punkte × Punktwert × Faktor) mit klarem Hinweis auf die **Katalogwerte aus dem Kontext** – ohne Formulierung „Rechnungsvorschlag“.
-
-### Sprache
-Antworte immer auf Deutsch. Euro-Beträge mit 2 Dezimalstellen, sofern du Beträge aus dem Kontext nennst.
+### Sprache und Darstellung
+- Auf **Deutsch**.
+- Euro-Beträge mit 2 Dezimalstellen, sofern du Beträge aus dem Kontext nennst.
+- **Keine** „Rechnungsvorschlag“-Tabelle oder tabellarisches Abrechnungslayout.
+- **Tabellen** nur als Fließtext oder Aufzählung – kein Rechnungslayout.
+- Wenn die Frage **explizit** den **Rechenweg für einen Betrag** betrifft: höchstens **eine** knappe Rechenzeile (Punkte × Punktwert × Faktor) mit Verweis auf **Katalogwerte aus dem Kontext** – ohne Wort „Rechnungsvorschlag“.
 `;
 
 function buildFrageSystemPrompt(
   messages: { role: string; content: unknown }[],
+  outputMode: "json" | "markdown_stream",
 ): string {
   const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, 100);
-  return `${FRAGE_MODUS_RULES}
+  const formatBlock = outputMode === "json" ? FRAGE_JSON_OUTPUT_RULES : FRAGE_MARKDOWN_STREAM_RULES;
+  return `${FRAGE_MODUS_CORE}
+
+${formatBlock}
 
 Du bist GOÄ-DocBill. In diesem Modus **erklärst und ordnest du ein** – du erstellst **keine** Abrechnung oder Rechnungsoptimierung als Tabelle.
 
@@ -61,7 +63,7 @@ DEINE KERNKOMPETENZEN (Fragemodus):
 - Verständliche Antworten zu GOÄ-Ziffern, Abschnitten, Ausschlüssen und Faktoren
 - Einordnung von Regeln (Begründungen, Schwellenwerte) im Rahmen des gelieferten Kontexts
 - Fokus auf Augenheilkunde, aber alle Fachgebiete nachvollziehbar erklären
-- **Admin-Wissensdateien:** Steht im gelieferten Kontext ein Abschnitt **„ADMIN-KONTEXT“** mit Text aus hochgeladenen Dateien und beantwortet dieser Text die Nutzerfrage (auch **ohne** GOÄ-Bezug, z.B. allgemeine Fakten): dann antworte in derselben Struktur (Kurzantwort / Erläuterung / Quelle) **auf Basis dieses Texts** und nenne unter **Quelle** den **Dateinamen** aus dem Admin-Kontext. Eine ablehnende Antwort nur deshalb, weil das Thema „nicht GOÄ“ ist, ist **unzulässig**, solange die Fakten im mitgelieferten Admin-Text stehen.
+- **Admin-Wissensdateien:** Steht im gelieferten Kontext ein Abschnitt **„ADMIN-KONTEXT“** mit Text aus hochgeladenen Dateien und beantwortet dieser Text die Nutzerfrage (auch **ohne** GOÄ-Bezug, z.B. allgemeine Fakten): dann antworte **auf Basis dieses Texts** und gib die **Quelle konkret** an (z. B. Admin-Dateiname laut Kontext). Eine ablehnende Antwort nur deshalb, weil das Thema „nicht GOÄ“ ist, ist **unzulässig**, solange die Fakten im mitgelieferten Admin-Text stehen.
 
 WICHTIGE REGELN:
 - Beziehe dich auf den im Kontext genannten GOÄ-Stand (z.B. Katalog 2026)
@@ -98,6 +100,85 @@ ${GOAE_ANALOGE_BEWERTUNG}
 ${GOAE_BEGRUENDUNGEN}`;
 }
 
+function buildFrageSystemContent(
+  messages: { role: string; content: string }[],
+  adminContext: string,
+  extraRules: string | undefined,
+  outputMode: "json" | "markdown_stream",
+): string {
+  const ambiguous: { role: string; content: unknown }[] = messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+  let systemContent = buildFrageSystemPrompt(ambiguous, outputMode) + adminContext;
+  if (extraRules) {
+    systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules}`;
+  }
+  return systemContent;
+}
+
+function synthesizeFrageSseStream(structured: FrageAnswerStructured, markdown: string): ReadableStream {
+  const encoder = new TextEncoder();
+  const chunkSize = 120;
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify({ type: "frage_structured", data: structured })}\n\n`),
+      );
+      for (let i = 0; i < markdown.length; i += chunkSize) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: markdown.slice(i, i + chunkSize) } }],
+            })}\n\n`,
+          ),
+        );
+      }
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+}
+
+async function tryFrageStructuredCompletion(
+  apiMessages: unknown[],
+  modelTry: string,
+  apiKey: string,
+  reasoningConfig: ReturnType<typeof getReasoningConfigForStream>,
+): Promise<FrageAnswerStructured | null> {
+  const body: Record<string, unknown> = {
+    model: modelTry,
+    messages: apiMessages,
+    stream: false,
+    response_format: { type: "json_object" },
+  };
+  if (reasoningConfig) body.reasoning = reasoningConfig;
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) return null;
+
+  const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content !== "string") return null;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(content.trim()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  return normalizeFrageAnswerParsed(parsed);
+}
+
 // ---------------------------------------------------------------------------
 // Admin-Kontext (RAG-basiert)
 // ---------------------------------------------------------------------------
@@ -114,17 +195,21 @@ function debugCcb4cf(
   data: Record<string, unknown>,
 ) {
   const payload = {
-    sessionId: "ccb4cf",
+    sessionId: "631fa3",
     hypothesisId,
     location,
     message,
-    data: { ...data, runId: "post-fix" },
+    data: { ...data, runId: (data as { runId?: string }).runId ?? "repro-1" },
     timestamp: Date.now(),
   };
+  console.log(
+    `[DOCBILL_INSTRUMENTATION] hypothesisId=${hypothesisId} location=${location} message=${message}`,
+  );
+  console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(payload));
   console.error("DOCBILL_DEBUG_CCB4CF", JSON.stringify(payload));
-  fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+  fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ccb4cf" },
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
     body: JSON.stringify(payload),
   }).catch(() => {});
 }
@@ -137,34 +222,46 @@ async function handleChatMode(
   adminContext: string,
   apiKey: string,
 ): Promise<Response> {
-  const frageBase = buildFrageSystemPrompt(messages);
-  let systemContent = frageBase + adminContext;
-  if (extraRules) {
-    systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules}`;
-  }
+  const systemJson = buildFrageSystemContent(messages, adminContext, extraRules, "json");
+  const systemStream = buildFrageSystemContent(messages, adminContext, extraRules, "markdown_stream");
 
   // #region agent log
   debugCcb4cf("H3", "goae-chat/handleChatMode:systemBuilt", "system prompt composition", {
-    systemLen: systemContent.length,
-    frageBaseLen: frageBase.length,
+    systemLen: systemJson.length,
+    frageBaseLen: systemJson.length - adminContext.length - (extraRules ? extraRules.length + 80 : 0),
     adminLen: adminContext.length,
-    adminIdx: systemContent.indexOf("ADMIN-KONTEXT"),
-    systemHasCatKnowledge: /cat\s*knowledge/i.test(systemContent),
-    systemHasKatze: /\bkatze\b/i.test(systemContent.toLowerCase()),
+    adminIdx: systemJson.indexOf("ADMIN-KONTEXT"),
+    systemHasCatKnowledge: /cat\s*knowledge/i.test(systemJson),
+    systemHasKatze: /\bkatze\b/i.test(systemJson.toLowerCase()),
   });
   // #endregion
 
-  const apiMessages: unknown[] = [{ role: "system", content: systemContent }];
-  for (const msg of messages) {
-    apiMessages.push({ role: msg.role, content: msg.content });
-  }
+  const userTail = messages.map((msg) => ({ role: msg.role, content: msg.content }));
+  const apiMessagesJson: unknown[] = [{ role: "system", content: systemJson }, ...userTail];
+  const apiMessagesStream: unknown[] = [{ role: "system", content: systemStream }, ...userTail];
 
   const modelsToTry = buildFallbackModels(model);
   const reasoningConfig = getReasoningConfigForStream(model);
+
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const structured = await tryFrageStructuredCompletion(
+      apiMessagesJson,
+      modelsToTry[i],
+      apiKey,
+      reasoningConfig,
+    );
+    if (structured) {
+      const md = frageAnswerToMarkdown(structured);
+      return new Response(synthesizeFrageSseStream(structured, md), {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }
+  }
+
   for (let i = 0; i < modelsToTry.length; i++) {
     const body: Record<string, unknown> = {
       model: modelsToTry[i],
-      messages: apiMessages,
+      messages: apiMessagesStream,
       stream: true,
     };
     if (reasoningConfig) body.reasoning = reasoningConfig;
@@ -191,12 +288,12 @@ async function handleChatMode(
       const errData = (await errResp.json()) as { error?: string };
       const isFree = isFreeModel(model);
       const isLastModel = i === modelsToTry.length - 1;
-      const body: Record<string, unknown> = { error: errData.error ?? "AI-Gateway Fehler" };
+      const errBody: Record<string, unknown> = { error: errData.error ?? "AI-Gateway Fehler" };
       if (isFree && isLastModel) {
-        body.code = "FREE_MODELS_EXHAUSTED";
-        body.details = `Letztes versuchtes Modell: ${modelsToTry[i]}. HTTP-Status: ${response.status}.`;
+        errBody.code = "FREE_MODELS_EXHAUSTED";
+        errBody.details = `Letztes versuchtes Modell: ${modelsToTry[i]}. HTTP-Status: ${response.status}.`;
       }
-      return new Response(JSON.stringify(body), {
+      return new Response(JSON.stringify(errBody), {
         status: errResp.status,
         headers: { "Content-Type": "application/json" },
       });
@@ -273,7 +370,10 @@ serve(async (req) => {
   }
 
   try {
-    // Suche in Dashboard: Edge Functions → goae-chat → Logs nach diesem String (beweist deployter Stand).
+    // Suche in Dashboard: Edge Functions → goae-chat → Logs nach DOCBILL_INSTRUMENTATION oder hypothesisId=
+    console.log(
+      "[DOCBILL_INSTRUMENTATION] hypothesisId=H_req_start location=goae-chat/serve message=inbound_request",
+    );
     console.error("DOCBILL_INSTRUMENTATION_84BF6E goae-chat request");
     const { messages, files, model, extra_rules, engine_type, last_invoice_result, last_service_result } = await req.json();
 
@@ -306,8 +406,81 @@ serve(async (req) => {
 
     const getAdminContext = async (result?: { medizinischeAnalyse?: unknown; pruefung?: unknown }) => {
       const fullQuery = buildPipelineQuery(userMessage, result, lastResult);
-      const ragQuery = result != null ? fullQuery : (userMessage.trim() || fullQuery);
-      return loadRelevantAdminContext(ragQuery, OPENROUTER_API_KEY);
+      const mergeQuery =
+        result != null ? fullQuery : buildFrageAdminRagQuery(messages, userMessage, fullQuery);
+      const vectorQuery = result != null ? fullQuery : (userMessage.trim() || mergeQuery);
+      // #region agent log
+      {
+        const h5Payload = {
+          sessionId: "631fa3",
+          hypothesisId: "H5",
+          location: "goae-chat/index.ts:getAdminContext",
+          message: "ragQuery resolution",
+          data: {
+            isPipeline: result != null,
+            userMessageLen: userMessage.length,
+            userMessageHead: userMessage.slice(0, 160),
+            mergeQueryHead: mergeQuery.slice(0, 240),
+            vectorQueryHead: vectorQuery.slice(0, 240),
+            vectorDiffersFromMerge: mergeQuery !== vectorQuery,
+            fullQueryHead: fullQuery.slice(0, 240),
+          },
+          timestamp: Date.now(),
+          runId: "post-fix",
+        };
+        console.log(
+          "[DOCBILL_INSTRUMENTATION] hypothesisId=H5 location=goae-chat/index.ts:getAdminContext message=ragQuery_resolution",
+        );
+        console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(h5Payload));
+        fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
+          body: JSON.stringify(h5Payload),
+        }).catch(() => {});
+      }
+      // #endregion
+      // #region agent log
+      {
+        const recentUser = (messages ?? [])
+          .filter((m) => m.role === "user")
+          .map((m) => String((m as { content?: unknown }).content ?? ""))
+          .slice(-5);
+        const concat = recentUser.join("\n").toLowerCase();
+        const hLastPayload = {
+          sessionId: "631fa3",
+          hypothesisId: "H_last_turn_only",
+          location: "goae-chat/index.ts:getAdminContext:recentVsRag",
+          message: "RAG query vs recent user turns (cat knowledge)",
+          data: {
+            onlyLastMsgAsMerge: mergeQuery === userMessage.trim(),
+            recentUserTurns: recentUser.length,
+            mergeLen: mergeQuery.length,
+            vectorLen: vectorQuery.length,
+            lastUserHead: userMessage.slice(0, 120),
+            mergeQueryHead: mergeQuery.slice(0, 200),
+            historyHasCatCue: /\bcat\b|katze|katzen|kater|cats\b/.test(concat),
+            historyHasKnowledgeCue: /knowledge|\bwissensdatei\b|\bwissen\b|kenntnis/.test(concat),
+            historyTail: concat.slice(-400),
+          },
+          timestamp: Date.now(),
+          runId: "post-fix",
+        };
+        console.log(
+          "[DOCBILL_INSTRUMENTATION] hypothesisId=H_last_turn_only location=goae-chat/index.ts:getAdminContext message=recentVsRag",
+        );
+        console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(hLastPayload));
+        fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
+          body: JSON.stringify(hLastPayload),
+        }).catch(() => {});
+      }
+      // #endregion
+      return loadRelevantAdminContext(
+        mergeQuery,
+        OPENROUTER_API_KEY,
+        result != null ? undefined : { vectorQuery },
+      );
     };
 
     // Intent-Klassifikation: Bei Dateien nur dann überspringen, wenn klar Rechnungsprüfung und keine Akte-/Abrechnungs-Vorschläge
@@ -357,10 +530,10 @@ serve(async (req) => {
     // #region agent log
     {
       const _dbgPayload = {
-        sessionId: "c81fbe",
-        hypothesisId: "H1",
+        sessionId: "631fa3",
+        hypothesisId: "H_route",
         location: "goae-chat/index.ts:intentRoute",
-        message: "intent routing (service-billing lädt Admin-Kontext seit Fix)",
+        message: "intent routing",
         data: {
           intent,
           hasFiles: !!hasFiles,
@@ -368,11 +541,16 @@ serve(async (req) => {
           serviceBillingLoadsAdminContext: intent === "leistungen_abrechnen",
         },
         timestamp: Date.now(),
+        runId: "repro-1",
       };
+      console.log(
+        "[DOCBILL_INSTRUMENTATION] hypothesisId=H_route location=goae-chat/index.ts:intentRoute message=intent_routing",
+      );
+      console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(_dbgPayload));
       console.error("DOCBILL_DEBUG_INTENT", JSON.stringify(_dbgPayload));
-      fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+      fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c81fbe" },
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
         body: JSON.stringify(_dbgPayload),
       }).catch(() => {});
     }
@@ -439,7 +617,11 @@ serve(async (req) => {
       // ═══════════════════════════════════════════════════════
       // CHAT-MODUS: Reguläre GOÄ-Fragen
       // ═══════════════════════════════════════════════════════
-      const ragForLog = userMessage.trim() || buildPipelineQuery(userMessage, undefined, lastResult);
+      const ragForLog = buildFrageAdminRagQuery(
+        messages,
+        userMessage,
+        buildPipelineQuery(userMessage, undefined, lastResult),
+      );
       const adminContext = await getAdminContext();
       // #region agent log
       debugCcb4cf("H1", "goae-chat/index.ts:chatBranch", "admin RAG payload (Fragemodus)", {
