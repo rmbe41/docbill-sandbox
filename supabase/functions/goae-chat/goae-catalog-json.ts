@@ -92,6 +92,12 @@ export const GOAE_TONOMETRIE_MUTUALLY_EXCLUSIVE = new Set<string>([
   "1257",
 ]);
 
+/**
+ * Subjektive (1201) und objektive (1202) Refraktionsbestimmung – im selben Abrechnungsfall
+ * typischerweise nicht nebeneinander berechnungsfähig; der JSON-Import liefert dafür oft keine Ausschlussliste.
+ */
+export const GOAE_REFRACT_SUBJ_OBJ_EXCLUSIVE = new Set<string>(["1201", "1202"]);
+
 /** Expandiert Bereichsangaben wie "1210-1213" zu Einzelziffern (wie Regelengine). */
 export function expandGoaeAusschlussRangeTokens(raw: string[]): string[] {
   const result: string[] = [];
@@ -149,6 +155,15 @@ export function buildRegelKatalogMapFromJson(): Map<string, RegelKatalogEintrag>
     if (!GOAE_TONOMETRIE_MUTUALLY_EXCLUSIVE.has(entry.ziffer)) continue;
     const merged = new Set(entry.ausschlussziffern);
     for (const o of GOAE_TONOMETRIE_MUTUALLY_EXCLUSIVE) {
+      if (o !== entry.ziffer) merged.add(o);
+    }
+    entry.ausschlussziffern = [...merged];
+  }
+
+  for (const [, entry] of map) {
+    if (!GOAE_REFRACT_SUBJ_OBJ_EXCLUSIVE.has(entry.ziffer)) continue;
+    const merged = new Set(entry.ausschlussziffern);
+    for (const o of GOAE_REFRACT_SUBJ_OBJ_EXCLUSIVE) {
       if (o !== entry.ziffer) merged.add(o);
     }
     entry.ausschlussziffern = [...merged];

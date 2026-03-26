@@ -451,141 +451,115 @@ export function applyRecalcAndConsistency(data: Engine3ResultData): Engine3Resul
 }
 
 /**
+ * Welche der beiden Positionen entfällt bei Ausschlusskonflikt (gleiche Logik wie `nrBeiAusschlussZuStreichen` in regelengine).
+ * @returns `true` = zweites Argument streichen, `false` = erstes streichen.
+ */
+function engine3StrikeSecondInPair(a: Engine3Position, b: Engine3Position): boolean {
+  if (a.betrag !== b.betrag) {
+    return a.betrag >= b.betrag;
+  }
+  const zifferPunkteKey = (z: string): number => {
+    const digits = z.replace(/^A/i, "").replace(/\D/g, "");
+    const n = parseInt(digits || "0", 10);
+    return Number.isNaN(n) ? 0 : n;
+  };
+  const ka = zifferPunkteKey(a.ziffer);
+  const kb = zifferPunkteKey(b.ziffer);
+  if (ka !== kb) return ka >= kb;
+  return a.nr <= b.nr;
+}
+
+/**
  * Paarweise Ausschlussprüfung gegen den kanonischen Regelkatalog (wie Regelengine, ohne LLM).
- * Weitere eindeutige GOÄ-Prüfungen sollten ebenfalls hier oder in benachbarten Exporten aus
- * `applyRecalcAndConsistency`/`orchestrator` folgen (LLM nur für Interpretation, System für harte Regeln).
+ * Kollidierende Positionen werden bis zur Konfliktfreiheit auf **eine** reduziert (entfallende Zeile entfernen);
+ * ein Hinweis dokumentiert die Streichung. Weitere GOÄ-Prüfungen gehören hierher statt ins LLM.
  */
 export function applyEngine3AusschlussPass(data: Engine3ResultData): Engine3ResultData {
   const katalog = getRegelKatalog();
   type Row = { ziffer: string; list: "pos" | "opt"; idx: number };
-  const rows: Row[] = [];
 
-  data.positionen.forEach((p, idx) => {
-    const z = normZiffer(p.ziffer);
-    if (z && z !== "?" && katalog.has(z)) rows.push({ ziffer: z, list: "pos", idx });
-  });
-  (data.optimierungen ?? []).forEach((p, idx) => {
-    const z = normZiffer(p.ziffer);
-    if (z && z !== "?" && katalog.has(z)) rows.push({ ziffer: z, list: "opt", idx });
-  });
-
-  // #region agent log
-  fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "63d268" },
-    body: JSON.stringify({
-      sessionId: "63d268",
-      hypothesisId: "H2-H4-H5",
-      location: "validate.ts:applyEngine3AusschlussPass:rows",
-      message: "ausschluss candidate rows",
-      data: {
-        modus: data.modus,
-        ziffern: rows.map((r) => `${r.list}:${r.ziffer}`),
-        rawPosZiffern: data.positionen.map((p) => normZiffer(p.ziffer)),
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-
-  const pairSeen = new Set<string>();
-  const affected = new Set<string>();
+  let working: Engine3ResultData = data;
   const neueHinweise: Engine3Hinweis[] = [];
+  let changed = false;
 
-  for (let i = 0; i < rows.length; i++) {
-    for (let j = i + 1; j < rows.length; j++) {
-      const a = rows[i].ziffer;
-      const b = rows[j].ziffer;
-      // #region agent log
-      if (
-        (a === "1201" && b === "1202") ||
-        (a === "1202" && b === "1201")
-      ) {
-        const ea = katalog.get(a);
-        const eb = katalog.get(b);
-        const coll = regelZiffernKollidieren(katalog, a, b);
-        fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "63d268" },
-          body: JSON.stringify({
-            sessionId: "63d268",
-            hypothesisId: "H1",
-            location: "validate.ts:applyEngine3AusschlussPass:pair1201_1202",
-            message: "collision check 1201/1202",
-            data: {
-              coll,
-              ausschlA: ea?.ausschlussziffern ?? null,
-              ausschlB: eb?.ausschlussziffern ?? null,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
+  while (true) {
+    const rows: Row[] = [];
+    working.positionen.forEach((p, idx) => {
+      const z = normZiffer(p.ziffer);
+      if (z && z !== "?" && katalog.has(z)) rows.push({ ziffer: z, list: "pos", idx });
+    });
+    (working.optimierungen ?? []).forEach((p, idx) => {
+      const z = normZiffer(p.ziffer);
+      if (z && z !== "?" && katalog.has(z)) rows.push({ ziffer: z, list: "opt", idx });
+    });
+
+    let bi = -1;
+    let bj = -1;
+    outer: for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        if (!regelZiffernKollidieren(katalog, rows[i].ziffer, rows[j].ziffer)) continue;
+        bi = i;
+        bj = j;
+        break outer;
       }
-      // #endregion
-      if (!regelZiffernKollidieren(katalog, a, b)) continue;
-      const pKey = a < b ? `${a}|${b}` : `${b}|${a}`;
-      if (pairSeen.has(pKey)) continue;
-      pairSeen.add(pKey);
+    }
 
-      const ea = katalog.get(a);
-      const eb = katalog.get(b);
-      const titel = `Ausschluss: GOÄ ${a} / ${b}`;
-      if (data.hinweise.some((h) => h.titel === titel)) continue;
-      if (neueHinweise.some((h) => h.titel === titel)) continue;
+    if (bi < 0) break;
 
+    const ri = rows[bi];
+    const rj = rows[bj];
+    const pi = ri.list === "pos" ? working.positionen[ri.idx] : (working.optimierungen ?? [])[ri.idx]!;
+    const pj = rj.list === "pos" ? working.positionen[rj.idx] : (working.optimierungen ?? [])[rj.idx]!;
+    const strikeSecond = engine3StrikeSecondInPair(pi, pj);
+    const loseRow = strikeSecond ? rj : ri;
+
+    const za = ri.ziffer < rj.ziffer ? ri.ziffer : rj.ziffer;
+    const zb = ri.ziffer < rj.ziffer ? rj.ziffer : ri.ziffer;
+    const titel = `Ausschluss: GOÄ ${za} / ${zb}`;
+    const hasHint =
+      working.hinweise.some((h) => h.titel === titel) || neueHinweise.some((h) => h.titel === titel);
+
+    if (!hasHint) {
+      const ea = katalog.get(za);
+      const eb = katalog.get(zb);
+      const removedP = strikeSecond ? pj : pi;
+      const removedZ = strikeSecond ? rj.ziffer : ri.ziffer;
       const schwere: Engine3Hinweis["schwere"] =
-        data.modus === "rechnung_pruefung" ? "fehler" : "warnung";
+        working.modus === "rechnung_pruefung" ? "fehler" : "warnung";
       const detail =
-        `Laut Katalogausschluss sind GOÄ ${a} (${ea?.bezeichnung ?? "—"}) und GOÄ ${b} (${eb?.bezeichnung ?? "—"}) in einem Abrechnungsfall nicht nebeneinander berechnungsfähig. Eine Position sollte entfallen oder der Abrechnungszeitraum/-kontext muss geklärt werden.`;
+        `Laut Katalogausschluss sind GOÄ ${za} (${ea?.bezeichnung ?? "—"}) und GOÄ ${zb} (${eb?.bezeichnung ?? "—"}) in einem Abrechnungsfall nicht nebeneinander berechnungsfähig. ` +
+        `GOÄ ${removedZ} (${removedP.bezeichnung.trim() || "—"}) wurde für die Darstellung gestrichen (Priorität wie bei der Summenkorrektur: niedrigerer Betrag, sonst höhere GOÄ-Ziffer, sonst höhere Positionsnummer).`;
       neueHinweise.push({
         schwere,
         titel,
         detail,
         regelReferenz: "Ausschlussziffern GOÄ-Katalog",
       });
-      affected.add(`${rows[i].list}:${rows[i].idx}`);
-      affected.add(`${rows[j].list}:${rows[j].idx}`);
     }
+
+    if (loseRow.list === "pos") {
+      working = {
+        ...working,
+        positionen: working.positionen.filter((_, idx) => idx !== loseRow.idx),
+      };
+    } else {
+      const opts = [...(working.optimierungen ?? [])];
+      opts.splice(loseRow.idx, 1);
+      working = {
+        ...working,
+        optimierungen: opts.length ? opts : undefined,
+      };
+    }
+    working = applyRecalcAndConsistency(working);
+    changed = true;
   }
 
-  if (neueHinweise.length === 0) return data;
+  if (!changed) return data;
 
-  const escalatePosition = (p: Engine3Position): Engine3Position => {
-    const target: Engine3PositionStatus = data.modus === "rechnung_pruefung" ? "fehler" : "warnung";
-    const note = "Ausschlusskonflikt mit anderer Position.";
-    if (p.status === "vorschlag") {
-      return { ...p, status: "warnung", anmerkung: appendAnmerkung(p.anmerkung, note) };
-    }
-    if (p.status === "korrekt") {
-      return { ...p, status: target, anmerkung: appendAnmerkung(p.anmerkung, note) };
-    }
-    if (p.status === "warnung" && target === "fehler") {
-      return { ...p, status: "fehler", anmerkung: appendAnmerkung(p.anmerkung, note) };
-    }
-    return { ...p, anmerkung: appendAnmerkung(p.anmerkung, note) };
-  };
-
-  const positionen = data.positionen.map((p, idx) =>
-    affected.has(`pos:${idx}`) ? escalatePosition(p) : p,
-  );
-  const optimierungen = data.optimierungen?.map((p, idx) =>
-    affected.has(`opt:${idx}`) ? escalatePosition(p) : p,
-  );
-
-  const mergedHinweise = [...data.hinweise, ...neueHinweise];
-  const withHints: Engine3ResultData = {
-    ...data,
-    positionen,
-    ...(optimierungen?.length ? { optimierungen } : {}),
-    hinweise: mergedHinweise,
-  };
-  withHints.zusammenfassung = summarize(withHints);
-  return applyRecalcAndConsistency(withHints);
-}
-
-function appendAnmerkung(prev: string | undefined, add: string): string {
-  const t = (prev ?? "").trim();
-  return t ? `${t} ${add}` : add;
+  return applyRecalcAndConsistency({
+    ...working,
+    hinweise: [...working.hinweise, ...neueHinweise],
+  });
 }
 
 function isQuelleTextMissing(s: string | undefined): boolean {

@@ -80,13 +80,6 @@ export default function Engine3Result({ data }: Engine3ResultProps) {
         </Button>
       </div>
 
-      {quellen.length > 0 ? (
-        <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs">
-          <p className="font-medium text-muted-foreground uppercase mb-1">Grundlagen</p>
-          <p className="text-muted-foreground">{quellen.join(" · ")}</p>
-        </div>
-      ) : null}
-
       {data.hinweise.length > 0 ? (
         <div className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground uppercase">Hinweise</p>
@@ -201,6 +194,13 @@ export default function Engine3Result({ data }: Engine3ResultProps) {
               ))}
             </tbody>
           </table>
+        </div>
+      ) : null}
+
+      {quellen.length > 0 ? (
+        <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs">
+          <p className="font-medium text-muted-foreground uppercase mb-1">Quellen</p>
+          <p className="text-muted-foreground">{quellen.join(" · ")}</p>
         </div>
       ) : null}
     </div>

@@ -16,8 +16,7 @@ function oneLine(s: string, max: number): string {
 export function buildEngine3AssistantMarkdown(data: Engine3ResultData): string {
   const modusLabel = data.modus === "rechnung_pruefung" ? "Rechnungsprüfung" : "Leistungsvorschläge";
   const z = data.zusammenfassung;
-  let md = "Die detaillierte Erklärung:\n\n";
-  md += `### Engine 3 – ${modusLabel}\n\n`;
+  let md = `### Engine 3 – ${modusLabel}\n\n`;
   md += `**Überblick:** ${data.positionen.length} Position(en), geschätzte Summe ${fmtEuro(z.geschaetzteSumme)}`;
   if (z.fehler) md += `, **${z.fehler} Fehler**`;
   if (z.warnungen) md += `, **${z.warnungen} Warnungen**`;
@@ -41,9 +40,12 @@ export function buildEngine3AssistantMarkdown(data: Engine3ResultData): string {
     if (extra) md += `  - ${oneLine(extra, 420)}\n`;
   }
 
-  if (data.hinweise?.length) {
+  const hinweiseNarrativ = (data.hinweise ?? []).filter(
+    (h) => h.schwere === "fehler" || h.schwere === "warnung",
+  );
+  if (hinweiseNarrativ.length) {
     md += "\n#### Hinweise\n\n";
-    for (const h of data.hinweise) {
+    for (const h of hinweiseNarrativ) {
       md += `- **${h.schwere.toUpperCase()}:** ${oneLine(h.titel, 180)} — ${oneLine(h.detail, 400)}\n`;
     }
   }
@@ -65,7 +67,7 @@ export function buildEngine3AssistantMarkdown(data: Engine3ResultData): string {
     md += `\n*${oneLine(data.goaeStandHinweis, 400)}*\n`;
   }
   if (data.quellen?.length) {
-    md += "\n#### Grundlagen (Auszug)\n\n";
+    md += "\n#### Quellen\n\n";
     for (const q of data.quellen.slice(0, 12)) {
       const line = String(q).trim();
       if (line) md += `- ${oneLine(line, 340)}\n`;

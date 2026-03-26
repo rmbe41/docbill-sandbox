@@ -26,7 +26,7 @@ function baseResult(overrides: Partial<Engine3ResultData>): Engine3ResultData {
 }
 
 describe("applyEngine3AusschlussPass", () => {
-  it("adds Hinweis and escalates bei GOÄ 1 und 3 im selben Ergebnis", () => {
+  it("adds Hinweis und streicht die schwächere Position bei GOÄ 1 und 3 im selben Ergebnis", () => {
     const betrag1 = Math.round(80 * PUNKT * F * 100) / 100;
     const betrag3 = Math.round(150 * PUNKT * F * 100) / 100;
     const raw = baseResult({
@@ -53,7 +53,9 @@ describe("applyEngine3AusschlussPass", () => {
     const out = applyEngine3AusschlussPass(raw);
 
     expect(out.hinweise.some((h) => h.titel.includes("1") && h.titel.includes("3"))).toBe(true);
-    expect(out.positionen.every((p) => p.status === "fehler" || p.status === "warnung")).toBe(true);
+    expect(out.positionen).toHaveLength(1);
+    expect(out.positionen[0].ziffer).toBe("3");
+    expect(out.positionen[0].status).toBe("korrekt");
   });
 
   it("im Leistungsmodus Schwelle warnung statt fehler", () => {
@@ -82,10 +84,11 @@ describe("applyEngine3AusschlussPass", () => {
     const out = applyEngine3AusschlussPass(raw);
     const conflict = out.hinweise.find((h) => h.titel.includes("Ausschluss"));
     expect(conflict?.schwere).toBe("warnung");
-    expect(out.positionen.every((p) => p.status === "warnung")).toBe(true);
+    expect(out.positionen).toHaveLength(1);
+    expect(out.positionen[0].ziffer).toBe("3");
   });
 
-  it("adds Hinweis and escalates bei GOÄ 1256 und 1257 im selben Ergebnis (Tonometrie)", () => {
+  it("adds Hinweis und streicht die schwächere Position bei GOÄ 1256 und 1257 (Tonometrie)", () => {
     const fMt = 1.8;
     const betrag1256 = Math.round(100 * PUNKT * fMt * 100) / 100;
     const betrag1257 = Math.round(242 * PUNKT * fMt * 100) / 100;
@@ -115,6 +118,41 @@ describe("applyEngine3AusschlussPass", () => {
     expect(out.hinweise.some((h) => h.titel.includes("1256") && h.titel.includes("1257"))).toBe(
       true,
     );
-    expect(out.positionen.every((p) => p.status === "fehler" || p.status === "warnung")).toBe(true);
+    expect(out.positionen).toHaveLength(1);
+    expect(out.positionen[0].ziffer).toBe("1257");
+  });
+
+  it("streicht GOÄ 1202 neben 1201 (subj. vs obj. Refraktion)", () => {
+    const f = F;
+    const b1201 = Math.round(89 * PUNKT * f * 100) / 100;
+    const b1202 = Math.round(74 * PUNKT * f * 100) / 100;
+    const raw = baseResult({
+      positionen: [
+        {
+          nr: 1,
+          ziffer: "1201",
+          bezeichnung: "Subjektiv",
+          faktor: f,
+          betrag: b1201,
+          status: "korrekt",
+        },
+        {
+          nr: 2,
+          ziffer: "1202",
+          bezeichnung: "Objektiv",
+          faktor: f,
+          betrag: b1202,
+          status: "korrekt",
+        },
+      ],
+    });
+
+    const out = applyEngine3AusschlussPass(raw);
+
+    expect(out.positionen).toHaveLength(1);
+    expect(out.positionen[0].ziffer).toBe("1201");
+    expect(out.hinweise.some((h) => h.titel.includes("1201") && h.titel.includes("1202"))).toBe(
+      true,
+    );
   });
 });

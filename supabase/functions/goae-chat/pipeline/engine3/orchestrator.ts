@@ -494,30 +494,6 @@ ${
       finalData = applyEngine3AusschlussPass(finalData);
       finalData = enforceEngine3Quellenbezug(finalData);
 
-      // #region agent log
-      {
-        const nz = (z: string) => String(z ?? "").trim();
-        const snap = finalData.positionen
-          .filter((p) => nz(p.ziffer) === "1201" || nz(p.ziffer) === "1202")
-          .map((p) => ({ nr: p.nr, ziffer: nz(p.ziffer), status: p.status }));
-        const optSnap = (finalData.optimierungen ?? [])
-          .filter((p) => nz(p.ziffer) === "1201" || nz(p.ziffer) === "1202")
-          .map((p) => ({ nr: p.nr, ziffer: nz(p.ziffer), status: p.status, list: "opt" }));
-        fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "63d268" },
-          body: JSON.stringify({
-            sessionId: "63d268",
-            hypothesisId: "H3",
-            location: "orchestrator.ts:runEngine3AsStream:finalSnap",
-            message: "final 1201/1202 statuses",
-            data: { snap, optSnap, hinweiseAusschluss: finalData.hinweise.filter((h) => h.titel.includes("1201") || h.titel.includes("1202")).map((h) => h.titel) },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
-
       finalData.goaeStandHinweis = finalData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
       if (adminQuellenHint.length > 0) {
         const merged = new Set([...(finalData.adminQuellen ?? []), ...adminQuellenHint]);
