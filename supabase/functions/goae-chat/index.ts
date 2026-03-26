@@ -21,7 +21,7 @@ import {
   loadRelevantAdminContext,
   buildPipelineQuery,
   buildFrageAdminRagQuery,
-  enrichRagQueryForAuslegung,
+  enrichFrageRagQuery,
   type LastResultContext,
 } from "./admin-context.ts";
 import {
@@ -39,11 +39,13 @@ import {
 const FRAGE_MODUS_CORE = `
 ## Modus: GOÄ-Frage und Einordnung (kein Rechnungsvorschlag)
 
+**Pflicht:** In Aufzählungen **niemals** die Wörter „Korrekt:“ oder „Zusatz:“ (auch nicht fett) als Zeilenanfang – das ist veraltet und unzulässig.
+
 Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** Rechnung, keinen „Rechnungsvorschlag“ und keine tabellarische Positionsliste wie bei einer Honorarabrechnung.
 
 ### Inhaltliche Logik
 - **Kurzantwort:** **Max. 1–2 sehr kurze Sätze**, eine Kernaussage. **Keine** Aufzählungen oder Nummerierung der gesamten Kompetenzliste hier.
-- **Erläuterung:** **Standard ist eine Markdown-Liste** mit \`- \` (Minuszeichen, Leerzeichen). Pro Punkt **fettem Lead-in** (z. B. \`- **GOÄ-Konformität:** …\`). **Pro Bullet vorzugsweise ein Satz**, höchstens zwei kurze Sätze. **Keine** langen Fließabsätze und **keine** „1. … 2. …“ als durchlaufende Prosa. Bei Meta-Fragen („Was kannst du?“, „Welche Workflows?“): **nur Bullets**, **ohne** Einleitung wie „Meine typischen Workflows umfassen dabei“.
+- **Erläuterung:** **Standard ist eine Markdown-Liste** mit \`- \` (Minuszeichen, Leerzeichen). Pro Punkt optional **inhaltliches** fettes Lead-in (z. B. \`- **GOÄ-Konformität:** …\`). **Nicht** die generischen Typ-Labels **Korrekt:** oder **Zusatz:** vor jedem Bullet. **Pro Bullet vorzugsweise ein Satz**, höchstens zwei kurze Sätze. **Keine** langen Fließabsätze und **keine** „1. … 2. …“ als durchlaufende Prosa. Bei Meta-Fragen („Was kannst du?“, „Welche Workflows?“): **nur Bullets**, **ohne** Einleitung wie „Meine typischen Workflows umfassen dabei“.
 - **Quellen:** **Nur**, wenn du Inhalte aus dem **gelieferten Kontext** für **konkrete** Fakten nutzt – dann **jede** verwendete Fundstelle **explizit** und **konkret** (GOÄ § aus Kontext, GOÄ-Ziffer/Bezeichnung, DocBill-Regelwerk-Abschnitt, Admin-Dateiname). **Mehrere** Bezüge → **alle** nennen. Keine vagen Formulierungen wie nur „nach GOÄ“ ohne §/Ziffer/Datei. **Ohne** solche Bezüge: **keinen** Quellen-Abschnitt (bei JSON: \`quellen: []\`) – **nicht** erwähnen, dass keine Quelle genutzt wurde; **keine** erfundenen Paragraphen.
 - **Grenzfälle:** Unsicherheiten, fehlender Kontext oder wann Fachrat nötig ist – im vorgesehenen Ausgabefeld (siehe Formatregeln unten). Bei mehreren Hinweisen: Listenzeilen mit \`- \` wie bei der Erläuterung; bei einem einzelnen Punkt reicht ein kurzer Satz.
 - **In** \`erlaeuterung\` **und** \`grenzfaelle_hinweise\` **keine eigenen** \`###\` **Überschriften** (Abschnittsüberschriften liefert die Oberfläche).
@@ -56,12 +58,8 @@ Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** R
 - Wenn die Frage **explizit** den **Rechenweg für einen Betrag** betrifft: höchstens **eine** knappe Rechenzeile (Punkte × Punktwert × Faktor) mit Verweis auf **Katalogwerte aus dem Kontext** – ohne Wort „Rechnungsvorschlag“.
 `;
 
-function buildFrageSystemPrompt(
-  messages: { role: string; content: unknown }[],
-  outputMode: "json" | "markdown_stream",
-  catalogMaxLines = 100,
-): string {
-  const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, catalogMaxLines);
+/** Regeln und Format — unmittelbar gefolgt von ADMIN-KONTEXT (falls vorhanden), dann GOÄ-Wissensblock. */
+function buildFrageSystemPromptIntro(outputMode: "json" | "markdown_stream"): string {
   const formatBlock = outputMode === "json" ? FRAGE_JSON_OUTPUT_RULES : FRAGE_MARKDOWN_STREAM_RULES;
   return `${FRAGE_MODUS_CORE}
 
@@ -89,7 +87,7 @@ WICHTIGE REGELN:
 
 - **BÄK / Auslegung:** Aussagen der Bundesärztekammer oder ähnliche offizielle Auslegungen nur, wenn sie im **ADMIN-KONTEXT** mit **konkretem Dateinamen** belegt sind; ohne Treffer Unsicherheit benennen, nichts erfinden.
 - **GOÄ-Kommentar / Kommentierung:** Gleiches wie bei BÄK – nur mit **wörtlich oder sinngemäß** nachweisbarer Stelle im **ADMIN-KONTEXT** (eingespielter Kommentar o. Ä.); Dateiname in der Antwort nennen. Ohne Chunk-Treffer: nichts als verbindliche Auslegung darstellen.
-- **Vorrang des Kontexts:** Widersprechen allgemeines Modellwissen und der mitgelieferte Katalog/Admin-Text einander, gilt **ausschließlich der mitgelieferte Kontext**.
+- **Vorrang des Kontexts:** Widersprechen allgemeines Modellwissen und der mitgelieferte Katalog/Admin-Text einander, gilt **ausschließlich der mitgelieferte Kontext**. **Widerspricht** der **ADMIN-KONTEXT** (z. B. GOÄ-Kommentar) der **nur beschreibenden** Katalogzeile zu derselben Ziffer, **folgst du dem ADMIN-KONTEXT** und erklärst die Einordnung **ohne** die Katalogbezeichnung gegen den Kommentar auszuspielen.
 
 QUELLEN DEINES WISSENS bei Fragen wie "Woher beziehst du dein Wissen?":
 Dein GOÄ-Wissen stammt aus dem **lokalen DocBill-Kontext**, NICHT aus Wikipedia oder allgemeinem Training:
@@ -101,7 +99,15 @@ Dein GOÄ-Wissen stammt aus dem **lokalen DocBill-Kontext**, NICHT aus Wikipedia
 - **Admin-Kontext-Dateien**: Vom Admin hochgeladene .txt/.md/.csv
 Erwähne NICHT Wikipedia, allgemeines Internet oder generelles Modell-Training.
 
-DEIN GOÄ-WISSEN:
+Nach den folgenden Blöcken **„ADMIN-KONTEXT“** (falls vorhanden) und **„DEIN GOÄ-WISSEN“** musst du beide nutzen; bei Konflikt gilt der **ADMIN-KONTEXT** zur Auslegung wie oben.`;
+}
+
+function buildFrageGoaeKnowledgeBlock(
+  messages: { role: string; content: unknown }[],
+  catalogMaxLines: number,
+): string {
+  const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, catalogMaxLines);
+  return `DEIN GOÄ-WISSEN:
 
 ${GOAE_PARAGRAPHEN}
 
@@ -127,7 +133,14 @@ function buildFrageSystemContent(
     role: m.role,
     content: m.content,
   }));
-  let systemContent = buildFrageSystemPrompt(ambiguous, outputMode, catalogMaxLines) + adminContext;
+  const intro = buildFrageSystemPromptIntro(outputMode);
+  const adminTrim = adminContext.trim();
+  const knowledge = buildFrageGoaeKnowledgeBlock(ambiguous, catalogMaxLines);
+  let systemContent = intro;
+  if (adminTrim) {
+    systemContent += `\n\n${adminTrim}`;
+  }
+  systemContent += `\n\n${knowledge}`;
   if (extraRules) {
     systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules}`;
   }
@@ -212,7 +225,7 @@ function debugCcb4cf(
   data: Record<string, unknown>,
 ) {
   const payload = {
-    sessionId: "631fa3",
+    sessionId: "26bb2d",
     hypothesisId,
     location,
     message,
@@ -226,11 +239,28 @@ function debugCcb4cf(
   console.error("DOCBILL_DEBUG_CCB4CF", JSON.stringify(payload));
   fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "26bb2d" },
     body: JSON.stringify(payload),
   }).catch(() => {});
 }
 // #endregion
+
+/** Debug: detect GOÄ-Kommentar-style rule about Lagekontrolle + 648 in admin block (no PII). */
+function adminSignalsLage648Rule(admin: string): Record<string, unknown> {
+  const a = admin.toLowerCase();
+  const has648 = /\b648\b/.test(admin);
+  const hasLage = /lagekontrolle|lagenkontrolle/.test(a);
+  const hasUntrenn = /untrennbar/.test(a);
+  const hasNichtSelbst = /nicht\s+eine\s+selbstständige|keine\s+selbstständige|nicht\s+selbstständig/.test(a);
+  return {
+    adminLen: admin.length,
+    has648,
+    hasLage,
+    hasUntrenn,
+    hasNichtSelbst,
+    kommentarRuleLikely: has648 && hasLage && (hasUntrenn || hasNichtSelbst),
+  };
+}
 
 type GuidedCollectWorkflow = "leistungen_abrechnen" | "rechnung_pruefen" | "frage_oeffnen";
 
@@ -287,13 +317,15 @@ async function handleChatMode(
     collectExtra;
 
   // #region agent log
-  debugCcb4cf("H3", "goae-chat/handleChatMode:systemBuilt", "system prompt composition", {
+  debugCcb4cf("H2_H3", "goae-chat/handleChatMode:systemBuilt", "system prompt composition + catalog648 vs admin rule", {
     systemLen: systemJson.length,
     frageBaseLen: systemJson.length - adminContext.length - (extraRules ? extraRules.length + 80 : 0),
-    adminLen: adminContext.length,
     adminIdx: systemJson.indexOf("ADMIN-KONTEXT"),
     systemHasCatKnowledge: /cat\s*knowledge/i.test(systemJson),
     systemHasKatze: /\bkatze\b/i.test(systemJson.toLowerCase()),
+    catalogBlockHas648: /\b648\s*[|]|GOÄ[^\n]*\b648\b|Ziffer[^\n]*\b648\b/i.test(systemJson),
+    catalogHasRoeKontrolle648: /648[^\n]{0,120}röntgen|röntgen[^\n]{0,120}648/i.test(systemJson.toLowerCase()),
+    ...adminSignalsLage648Rule(adminContext),
   });
   // #endregion
 
@@ -313,6 +345,23 @@ async function handleChatMode(
     );
     if (structured) {
       const md = frageAnswerToMarkdown(structured);
+      // #region agent log
+      {
+        const sig = adminSignalsLage648Rule(adminContext);
+        const text = `${structured.kurzantwort}\n${structured.erlaeuterung}`.toLowerCase();
+        const modelPositivSelbst =
+          /\b(selbstständige|selbstständig)\s+leistung\b/.test(text) ||
+          /\bkann\s+eine\s+selbstständige\b/.test(text);
+        const modelNegiertSelbst = /nicht\s+(eine\s+)?selbstständige|keine\s+selbstständige/.test(text);
+        debugCcb4cf("H4", "goae-chat/handleChatMode:structuredOut", "model answer vs admin Kommentar rule", {
+          kurzantwortHead: structured.kurzantwort.slice(0, 220),
+          ...sig,
+          modelPositivSelbst,
+          modelNegiertSelbst,
+          likelyContradictsKommentar: sig.kommentarRuleLikely === true && modelPositivSelbst && !modelNegiertSelbst,
+        });
+      }
+      // #endregion
       return new Response(synthesizeFrageSseStream(structured, md), {
         headers: { "Content-Type": "text/event-stream" },
       });
@@ -482,16 +531,16 @@ serve(async (req) => {
 
     const getAdminContext = async (result?: { medizinischeAnalyse?: unknown; pruefung?: unknown }) => {
       const fullQuery = buildPipelineQuery(userMessage, result, lastResult);
-      const mergeQuery = enrichRagQueryForAuslegung(
+      const mergeQuery = enrichFrageRagQuery(
         result != null ? fullQuery : buildFrageAdminRagQuery(messages, userMessage, fullQuery),
       );
-      const vectorQuery = enrichRagQueryForAuslegung(
-        result != null ? fullQuery : (userMessage.trim() || mergeQuery),
-      );
+      // Embedding immer aus der letzten Nutzerzeile (wie Engine 3): sonst ziehen
+      // Medizin-/Pipeline-Text die Vektoren von Dateinamen-Cues wie „Cat Knowledge“ weg.
+      const vectorQuery = enrichFrageRagQuery(userMessage.trim() || mergeQuery);
       // #region agent log
       {
         const h5Payload = {
-          sessionId: "631fa3",
+          sessionId: "26bb2d",
           hypothesisId: "H5",
           location: "goae-chat/index.ts:getAdminContext",
           message: "ragQuery resolution",
@@ -503,9 +552,11 @@ serve(async (req) => {
             vectorQueryHead: vectorQuery.slice(0, 240),
             vectorDiffersFromMerge: mergeQuery !== vectorQuery,
             fullQueryHead: fullQuery.slice(0, 240),
+            mergeHas648: /\b648\b/.test(mergeQuery),
+            vectorHas648: /\b648\b/.test(vectorQuery),
           },
           timestamp: Date.now(),
-          runId: "post-fix",
+          runId: "repro-1",
         };
         console.log(
           "[DOCBILL_INSTRUMENTATION] hypothesisId=H5 location=goae-chat/index.ts:getAdminContext message=ragQuery_resolution",
@@ -513,7 +564,7 @@ serve(async (req) => {
         console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(h5Payload));
         fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "26bb2d" },
           body: JSON.stringify(h5Payload),
         }).catch(() => {});
       }
@@ -526,7 +577,7 @@ serve(async (req) => {
           .slice(-5);
         const concat = recentUser.join("\n").toLowerCase();
         const hLastPayload = {
-          sessionId: "631fa3",
+          sessionId: "26bb2d",
           hypothesisId: "H_last_turn_only",
           location: "goae-chat/index.ts:getAdminContext:recentVsRag",
           message: "RAG query vs recent user turns (cat knowledge)",
@@ -542,7 +593,7 @@ serve(async (req) => {
             historyTail: concat.slice(-400),
           },
           timestamp: Date.now(),
-          runId: "post-fix",
+          runId: "repro-1",
         };
         console.log(
           "[DOCBILL_INSTRUMENTATION] hypothesisId=H_last_turn_only location=goae-chat/index.ts:getAdminContext message=recentVsRag",
@@ -550,16 +601,12 @@ serve(async (req) => {
         console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(hLastPayload));
         fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "26bb2d" },
           body: JSON.stringify(hLastPayload),
         }).catch(() => {});
       }
       // #endregion
-      return loadRelevantAdminContext(
-        mergeQuery,
-        OPENROUTER_API_KEY,
-        result != null ? undefined : { vectorQuery },
-      );
+      return loadRelevantAdminContext(mergeQuery, OPENROUTER_API_KEY, { vectorQuery });
     };
 
     const guidedWorkflowNorm: GuidedCollectWorkflow | undefined =
@@ -820,10 +867,11 @@ serve(async (req) => {
       // #region agent log
       debugCcb4cf("H1", "goae-chat/index.ts:chatBranch", "admin RAG payload (Fragemodus)", {
         ragForLog: ragForLog.slice(0, 220),
-        adminLen: adminContext.length,
         adminHasAdminHeader: adminContext.includes("ADMIN-KONTEXT"),
         adminHasCatKnowledge: /cat\s*knowledge/i.test(adminContext),
         adminHasKatze: /\bkatze\b/i.test(adminContext.toLowerCase()),
+        adminTail320: adminContext.slice(Math.max(0, adminContext.length - 320)),
+        ...adminSignalsLage648Rule(adminContext),
       });
       // #endregion
       response = await handleChatMode(

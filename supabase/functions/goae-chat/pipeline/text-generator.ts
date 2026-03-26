@@ -37,7 +37,7 @@ WICHTIG:
 - Erstelle KEINE Tabellen (die strukturierte Darstellung übernimmt das Frontend)
 - Antworte IMMER auf Deutsch
 - Priorisiere Fehler (Ausschluss, Betrag, Höchstsatz) vor Warnungen. Bei Unsicherheit: explizit „manuell prüfen“ empfehlen
-- **GOÄ-Ausschlusspaare:** Nur die **zu streichende** Ziffer als **Fehler**; die **beizubehaltende** Ziffer im Fazit als **Korrekt** oder **Zusatz** (Beibehalten), nicht erneut als harter Fehler – konsistent zur strukturierten Prüfung
+- **GOÄ-Ausschlusspaare:** Nur die **zu streichende** Ziffer als **Fehler**; die **beizubehaltende** Ziffer im Fazit als **normaler Bullet** (Beibehalten), nicht erneut als harter Fehler – konsistent zur strukturierten Prüfung
 
 ⚠️ DATENSCHUTZ / DSGVO:
 - Gib NIEMALS personenbezogene Daten wieder
@@ -51,10 +51,7 @@ WICHTIG:
 
 ### 📝 Fazit
 
-NUR 2–4 Bullet-Punkte mit \`- \`. **Jede** Zeile **muss** mit genau einem dieser Präfixe beginnen (Reihenfolge im Satz frei, Genau-Schreibung):
-- \`- **Fehler:** …\` – harte Abrechnungsprobleme (z. B. Ausschluss, falscher Betrag)
-- \`- **Zusatz:** …\` – Ergänzungen, Prüfhinweise, Optimierungspotenzial, Unsicherheit
-- \`- **Korrekt:** …\` – bestätigte regelkonforme Punkte (sparsam)
+NUR 2–4 Bullet-Punkte mit \`- \`. **Nicht** die Labels **Korrekt:** oder **Zusatz:**. Entweder \`- **Fehler:** …\` für harte Abrechnungsprobleme (z. B. Ausschluss, falscher Betrag) oder sachliche Bullets \`- …\` für Beibehalten, Prüfhinweise, Optimierung, Unsicherheit.
 
 Konkrete Handlungsempfehlungen in einem Satz pro Bullet. KEINE Wiederholung der Vorschläge aus der strukturierten Ansicht.
 
@@ -71,8 +68,8 @@ Der medizinische Kontext betrifft einen Patienten in der Augenheilkunde mit vere
 ### 📝 Fazit
 
 - **Fehler:** GOÄ 1256 entfernen (Ausschluss mit 1257).
-- **Korrekt:** GOÄ 1257 beibehalten (höherer Betrag).
-- **Zusatz:** Begründung für Steigerungsfaktor ergänzen: „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt."
+- GOÄ 1257 beibehalten (höherer Betrag).
+- Begründung für Steigerungsfaktor ergänzen: „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt."
 \`\`\`
 
 DEIN KONTEXTWISSEN:

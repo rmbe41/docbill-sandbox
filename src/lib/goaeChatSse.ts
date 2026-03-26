@@ -1,7 +1,10 @@
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import { parseEngine3ResultData, type Engine3ResultData } from "@/lib/engine3Result";
-import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
+import {
+  stripFrageListKorrektZusatzLabels,
+  type FrageAnswerStructured,
+} from "@/lib/frageAnswerStructured";
 import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
 
 export type PipelineProgressPayload = {
@@ -214,9 +217,9 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
       if (typeof kurz === "string" && typeof erl === "string") {
         ctx.state.frageStructured = {
           kurzantwort: kurz,
-          erlaeuterung: erl,
+          erlaeuterung: stripFrageListKorrektZusatzLabels(erl),
           quellen: quellenStr,
-          grenzfaelle_hinweise: grenz,
+          grenzfaelle_hinweise: stripFrageListKorrektZusatzLabels(grenz),
         };
         ctx.onDelta();
       }

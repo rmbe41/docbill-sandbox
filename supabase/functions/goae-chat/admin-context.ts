@@ -25,8 +25,24 @@ function normalizeChunkBody(s: string): string {
 const STEM_TOKEN_ALIASES: Record<string, string[]> = {
   cat: ["katze", "katzen", "kater", "cats", "kitty"],
   cats: ["katze", "katzen", "kater"],
-  knowledge: ["wissen", "kenntnis"],
+  knowledge: ["wissen", "kenntnis", "wissensdaten", "ki-kontext", "ki kontext", "kontextdatei"],
 };
+
+/** Marken-/Meta-Wörter im Dateinamen: müssen nicht in der Nutzeranfrage vorkommen. */
+const FILENAME_TOKENS_OPTIONAL_IN_QUERY = new Set([
+  "docbill",
+  "docbillapp",
+  "readme",
+  "index",
+  "draft",
+  "final",
+  "copy",
+  "backup",
+]);
+
+function isNumericOnlyFilenameToken(w: string): boolean {
+  return /^\d+$/.test(w);
+}
 
 function queryCoversStemToken(q: string, token: string): boolean {
   const t = token.toLowerCase();
@@ -84,12 +100,17 @@ function filenameStemMatchesQuery(filename: string, query: string): boolean {
     compoundHit = splitSingleStemAgainstQuery(q, w0);
     result = queryCoversStemToken(q, w0) || compoundHit;
   } else {
-    result = words.every((w) => queryCoversStemToken(q, w));
+    const requiredWords = words.filter(
+      (w) =>
+        !FILENAME_TOKENS_OPTIONAL_IN_QUERY.has(w) && !isNumericOnlyFilenameToken(w),
+    );
+    const toCheck = requiredWords.length > 0 ? requiredWords : words;
+    result = toCheck.every((w) => queryCoversStemToken(q, w));
   }
   // #region agent log
   if (/cat/i.test(filename) && /knowledge/i.test(filename)) {
     const h1Payload = {
-      sessionId: "631fa3",
+      sessionId: "26bb2d",
       hypothesisId: "H1",
       location: "admin-context.ts:filenameStemMatchesQuery",
       message: "cat-knowledge filename stem vs query",
@@ -112,7 +133,7 @@ function filenameStemMatchesQuery(filename: string, query: string): boolean {
     console.log("[DOCBILL_INSTRUMENTATION_JSON]", JSON.stringify(h1Payload));
     fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "26bb2d" },
       body: JSON.stringify(h1Payload),
     }).catch(() => {});
   }
@@ -336,7 +357,7 @@ function debugAdminCtx(
   data: Record<string, unknown>,
 ) {
   const payload = {
-    sessionId: "631fa3",
+    sessionId: "26bb2d",
     hypothesisId,
     location,
     message,
@@ -351,7 +372,7 @@ function debugAdminCtx(
   console.error("DOCBILL_INSTRUMENTATION admin-context", JSON.stringify(payload));
   fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "631fa3" },
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "26bb2d" },
     body: JSON.stringify(payload),
   }).catch(() => {});
 }
@@ -584,9 +605,13 @@ export async function loadRelevantAdminContext(
     const ragBlock =
       "\n\n## ADMIN-KONTEXT (relevante Ausschnitte):\n" + parts.join("\n\n");
     // #region agent log
-    debugAdminCtx("H_rag_ok", "admin-context.ts:ragPath", "using RAG block", {
+    debugAdminCtx("H3_rag_body", "admin-context.ts:ragPath", "RAG block signals (Lage/648/Kommentar)", {
       ragLen: ragBlock.length,
       blockMentionsCatKnowledge: /cat\s*knowledge/i.test(ragBlock),
+      ragHasLagekontrolle: /lagekontrolle|lagenkontrolle/i.test(ragBlock),
+      ragHas648: /\b648\b/.test(ragBlock),
+      ragHasUntrennbar: /untrennbar/i.test(ragBlock),
+      ragHasNichtSelbststaendig: /nicht\s+eine\s+selbstständige|keine\s+selbstständige/i.test(ragBlock),
     });
     // #endregion
     return await mergeFilenameMatchedSections(mq, ragBlock, sbUrl, sbKey);
@@ -755,6 +780,29 @@ export function enrichRagQueryForAuslegung(query: string): string {
   return `${q}\n\n${tail}`;
 }
 
+/** RAG: bei GOÄ-Kommentar-/Abrechnungsfragen Embedding mit Meta-Stichworten stützen (Chunk-Treffer). */
+export function enrichRagQueryForGoaeKommentarHints(query: string): string {
+  const q = query.trim();
+  if (!q) return q;
+  // kein \b um „GOÄ“: JS-Word-Char endet vor „Ä“, sonst schlägt „GOÄ-Nr.“ fehl
+  const looksGoae = /goä|göä|gebührenordnung|\bziffer\b/i.test(q);
+  const looksKommentarFrage =
+    /\bkommentar\b/i.test(q) ||
+    /\b(selbstständige?\s+leistung|nicht\s+selbstständig)\b/i.test(q) ||
+    /\blagekontrolle|lagenkontrolle\b/i.test(q) ||
+    /\buntrennbar\b/i.test(q) ||
+    /\b(nebenleistung|bestandteil|abgegolten)\b/i.test(q);
+  if (!looksGoae || !looksKommentarFrage) return q;
+  const tail = "GOÄ-Kommentar Kommentierung Auslegung ADMIN eingespielter Kommentar";
+  if (/\bkommentar\b/i.test(q) && /\bauslegung\b/i.test(q)) return q;
+  return `${q}\n\n${tail}`;
+}
+
+/** Einheitliche RAG-Anreicherung für Fragemodus. */
+export function enrichFrageRagQuery(query: string): string {
+  return enrichRagQueryForGoaeKommentarHints(enrichRagQueryForAuslegung(query));
+}
+
 /**
  * Admin-RAG im Fragemodus: letzte Nutzer-Turns bündeln, damit Folgefragen weiterhin
  * Dateinamen-/Wissens-Cues aus dem Verlauf matchen (reine letzte Nachricht reicht oft nicht).
@@ -765,14 +813,12 @@ export function buildFrageAdminRagQuery(
   pipelineFallbackWhenLastEmpty: string,
 ): string {
   const last = lastUserMessage.trim();
-  if (!last) return enrichRagQueryForAuslegung(pipelineFallbackWhenLastEmpty.trim());
+  if (!last) return enrichFrageRagQuery(pipelineFallbackWhenLastEmpty.trim());
   const userTurns = (messages ?? [])
     .filter((m) => m.role === "user")
     .map((m) => String(m.content ?? "").trim())
     .filter((s) => s.length > 0);
   const recent = userTurns.slice(-FRAGE_ADMIN_RAG_MAX_USER_TURNS);
-  if (recent.length <= 1) return enrichRagQueryForAuslegung(last);
-  return enrichRagQueryForAuslegung(
-    recent.join("\n\n").slice(0, FRAGE_ADMIN_RAG_MAX_CHARS),
-  );
+  if (recent.length <= 1) return enrichFrageRagQuery(last);
+  return enrichFrageRagQuery(recent.join("\n\n").slice(0, FRAGE_ADMIN_RAG_MAX_CHARS));
 }
