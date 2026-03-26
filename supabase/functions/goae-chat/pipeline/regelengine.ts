@@ -167,7 +167,8 @@ export function pruefeRechnung(
         pruefungen.push({
           typ: "begruendung_fehlt",
           schwere: "warnung",
-          nachricht: `Faktor ${pos.faktor}× überschreitet Schwellenwert ${eintrag.schwellenfaktor}×. Schriftliche Begründung gemäß § 5 Abs. 2 / § 12 Abs. 3 GOÄ erforderlich.`,
+          nachricht:
+            `Faktor ${pos.faktor}× überschreitet Schwellenwert ${eintrag.schwellenfaktor}×. Schriftliche Begründung nach GOÄ (Steigerungsgebühren und schriftliche Begründung der Gebühren) erforderlich.`,
           vorschlag: begründungsVorschlag(pos.ziffer, pos.faktor, eintrag, analyse),
           begruendungVorschlag: begruendungText,
           neueFaktor: pos.faktor,
@@ -187,10 +188,12 @@ export function pruefeRechnung(
       pruefungen.push({
         typ: "hoechstsatz",
         schwere: "fehler",
-        nachricht: `Faktor ${pos.faktor}× überschreitet den Höchstsatz von ${eintrag.hoechstfaktor}×. Ohne § 2-Vereinbarung nicht zulässig.`,
-        vorschlag: `Faktor auf maximal ${eintrag.hoechstfaktor}× reduzieren oder § 2-Vereinbarung dokumentieren.`,
+        nachricht:
+          `Faktor ${pos.faktor}× überschreitet den Höchstsatz von ${eintrag.hoechstfaktor}×. Ohne schriftliche Gebührenvereinbarung über dem Höchstsatz nicht zulässig.`,
+        vorschlag:
+          `Faktor auf maximal ${eintrag.hoechstfaktor}× reduzieren oder schriftliche Gebührenvereinbarung (GOÄ, oberhalb Höchstsatz) dokumentieren.`,
         begruendungVorschlag:
-          "§ 2-Vereinbarung: Schriftliche Vereinbarung mit Patient/in über Gebühren über dem Höchstsatz. Dokumentation: Zeitpunkt, Umfang und Zustimmung erforderlich.",
+          "Gebühren über dem GOÄ-Höchstsatz: schriftliche Vereinbarung mit Patient oder Patientin, mit Dokumentation von Zeitpunkt, Umfang und Zustimmung.",
       });
     }
 
@@ -231,7 +234,8 @@ export function pruefeRechnung(
         pruefungen.push({
           typ: "analog",
           schwere: "warnung",
-          nachricht: `GOÄ ${pos.ziffer} als Analogziffer: Kennzeichnung „analog" oder „entsprechend" gemäß § 12 Abs. 4 GOÄ erforderlich.`,
+          nachricht:
+            `GOÄ ${pos.ziffer} als Analogziffer: Kennzeichnung „analog" oder „entsprechend" nach GOÄ (Analogbewertung) erforderlich.`,
           vorschlag: mapping.analogBegruendung ||
             `Bezeichnung ergänzen: "GOÄ ${pos.ziffer} analog – [tatsächlich erbrachte Leistung]"`,
         });
@@ -362,7 +366,7 @@ function vorschlagAusschluss(
   return `${posLabel} entfernen und ${andereLabel} beibehalten (höherer Betrag).`;
 }
 
-/** Max. Länge für Begründungen (UI-Passform: Tabelle, Vorschlags-Box) */
+/** Max. Länge für kompakte Einbettung in Handlungstext / Kurz-Zitat */
 const BEGRUENDUNG_MAX_CHARS = 140;
 
 function begründungsVorschlag(
@@ -371,42 +375,63 @@ function begründungsVorschlag(
   eintrag: KatalogEintrag,
   analyse: MedizinischeAnalyse,
 ): string {
-  const text = begruendungNurText(ziffer, faktor, eintrag, analyse);
+  const text = begruendungNurTextKurz(ziffer, faktor, eintrag, analyse);
   return `Begründungsvorschlag für GOÄ ${ziffer} (${eintrag.bezeichnung}) mit Faktor ${faktor}×: „${text}"`;
 }
 
+/** Kompakte Begründung (z. B. in Handlungstext). */
+function begruendungNurTextKurz(
+  ziffer: string,
+  faktor: number,
+  eintrag: KatalogEintrag,
+  analyse: MedizinischeAnalyse,
+): string {
+  return begruendungNurText(ziffer, faktor, eintrag, analyse, BEGRUENDUNG_MAX_CHARS);
+}
+
 /**
- * Fachlich hochwertige, UI-kompakte Begründung für Faktor > Schwellenwert.
- * Ziffer-spezifische Formulierungen, max. ~140 Zeichen für Tabellendarstellung.
+ * Ausführliche, ziffernbezogene Begründung für Faktor über dem Schwellenwert
+ * (UI „Hinweis“ / Speicherung in `begruendungVorschlag`).
  */
 function begruendungNurText(
   ziffer: string,
   faktor: number,
   eintrag: KatalogEintrag,
   analyse: MedizinischeAnalyse,
+  maxLength = 2000,
 ): string {
   const diagnoseRaw =
     analyse.diagnosen.length > 0
       ? analyse.diagnosen[0].text
       : "[Diagnose]";
-  const diagnose = diagnoseRaw.length > 50 ? diagnoseRaw.slice(0, 47) + "…" : diagnoseRaw;
-  const ctx = (analyse.klinischerKontext || "").trim().slice(0, 50);
+  const diagLimit = maxLength <= BEGRUENDUNG_MAX_CHARS ? 50 : 120;
+  const diagnose = diagnoseRaw.length > diagLimit
+    ? diagnoseRaw.slice(0, diagLimit - 3) + "…"
+    : diagnoseRaw;
+  const ctxFull = (analyse.klinischerKontext || "").trim();
+  const ctx = maxLength <= BEGRUENDUNG_MAX_CHARS
+    ? ctxFull.slice(0, 50)
+    : ctxFull.slice(0, 220);
 
   const num = parseInt(ziffer.replace(/\D/g, ""), 10) || 0;
 
   let text: string;
+  const goaeSteiger = "nach den GOÄ-Vorschriften zu Steigerungsgebühren gerechtfertigt";
 
   // Beratung (1–4): Zeitangabe wichtig
   if (num >= 1 && num <= 4) {
-    text = `Eingehende Beratung von ca. 15–20 Min. aufgrund ${diagnose}. Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.`;
+    text =
+      `Eingehende Beratung von ca. 15–20 Min. aufgrund ${diagnose}. Faktor ${faktor}× ${goaeSteiger}.`;
   }
   // Spaltlampe/Fundus (1240–1244, 1248–1249)
   else if (num >= 1240 && num <= 1249) {
-    text = `Erhöhter diagnostischer Aufwand durch ${diagnose} (erschwerte Darstellung/Beurteilung). Faktor ${faktor}× gerechtfertigt.`;
+    text =
+      `Erhöhter diagnostischer Aufwand durch ${diagnose} (erschwerte Darstellung/Beurteilung). Faktor ${faktor}× gerechtfertigt.`;
   }
   // Refraktion (1200–1218)
   else if (num >= 1200 && num <= 1218) {
-    text = `Erschwerte Refraktion bei ${diagnose}. Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.`;
+    text =
+      `Erschwerte Refraktion bei ${diagnose}. Faktor ${faktor}× ${goaeSteiger}.`;
   }
   // Tonometrie (1255–1257)
   else if (num >= 1255 && num <= 1257) {
@@ -414,7 +439,8 @@ function begruendungNurText(
   }
   // Operative Leistungen (1275–1386)
   else if (num >= 1275 && num <= 1386) {
-    text = `Erschwerter Zugang/verlängerte OP bei ${diagnose}. Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.`;
+    text =
+      `Erschwerter Zugang/verlängerte OP bei ${diagnose}. Faktor ${faktor}× ${goaeSteiger}.`;
   }
   // Untersuchungen 5–8
   else if (num >= 5 && num <= 8) {
@@ -422,13 +448,14 @@ function begruendungNurText(
   }
   // Standard
   else {
-    text = `Überdurchschnittliche Schwierigkeit bei ${diagnose}. Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ gerechtfertigt.`;
+    text =
+      `Überdurchschnittliche Schwierigkeit bei ${diagnose}. Faktor ${faktor}× ${goaeSteiger}.`;
   }
 
-  if (ctx.length > 5 && text.length + ctx.length < BEGRUENDUNG_MAX_CHARS - 3) {
+  if (ctx.length > 5 && text.length + ctx.length < maxLength - 3) {
     text = text.replace(/\.$/, `. ${ctx}.`);
   }
-  return text.slice(0, BEGRUENDUNG_MAX_CHARS).trim();
+  return text.length > maxLength ? text.slice(0, maxLength).trim() : text.trim();
 }
 
 // ---------- Service Billing Adapter ----------
@@ -446,7 +473,7 @@ export function erstelleBegruendungVorschlag(
   const katalog = getKatalog(katalogText);
   const eintrag = katalog.get(ziffer);
   if (!eintrag) {
-    return `Faktor ${faktor}× gemäß § 5 Abs. 2 GOÄ begründen.`;
+    return `Faktor ${faktor}× nach GOÄ (Steigerungsgebühren) ärztlich begründen.`;
   }
   return begruendungNurText(ziffer, faktor, eintrag, analyse);
 }

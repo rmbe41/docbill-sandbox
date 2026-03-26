@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 
 // ── Types matching pipeline output ──
 
@@ -133,17 +133,214 @@ function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+/** Eine Zeile der Vorschläge-Tabelle (je Prüfung pro Rechnungsposition). */
+type InvoicePruefRow = {
+  suggestionId: string;
+  schwere: "fehler" | "warnung" | "info";
+  typ: string;
+  posNr: number;
+  ziffer: string;
+  bezeichnung: string;
+  nachricht: string;
+  vorschlag?: string;
+};
+
+function buildInvoicePruefRows(data: InvoiceResultData): InvoicePruefRow[] {
+  const rank: Record<string, number> = { fehler: 0, warnung: 1, info: 2 };
+  const out: InvoicePruefRow[] = [];
+  for (const pos of data?.positionen ?? []) {
+    for (let i = 0; i < pos.pruefungen.length; i++) {
+      const p = pos.pruefungen[i];
+      const msg = p.nachricht?.trim();
+      if (!msg) continue;
+      out.push({
+        suggestionId: `pos-${pos.nr}-pruef-${i}`,
+        schwere: p.schwere,
+        typ: p.typ,
+        posNr: pos.nr,
+        ziffer: pos.ziffer,
+        bezeichnung: pos.bezeichnung,
+        nachricht: msg,
+        ...(p.vorschlag?.trim() ? { vorschlag: p.vorschlag.trim() } : {}),
+      });
+    }
+  }
+  out.sort((a, b) => {
+    const r = rank[a.schwere] - rank[b.schwere];
+    if (r !== 0) return r;
+    if (a.posNr !== b.posNr) return a.posNr - b.posNr;
+    return a.suggestionId.localeCompare(b.suggestionId);
+  });
+  return out;
+}
+
 /** Begründungs-Box nur, wenn der Text nicht schon in der Positionszeile steht (MECE). */
 function begruendungVorschlagForDisplay(
   s: FlatSuggestion,
   rowBegruendung: string | undefined,
+  options?: { omitIfInDetailPanel?: boolean; row?: InvoicePruefRow },
 ): string | undefined {
   const v = s.begruendungVorschlag?.trim();
   if (!v) return undefined;
   if (rowBegruendung && collapseWhitespace(v) === collapseWhitespace(rowBegruendung)) {
     return undefined;
   }
+  if (
+    options?.omitIfInDetailPanel &&
+    options.row &&
+    begruendungFuerDetailPanel(options.row, s)
+  ) {
+    return undefined;
+  }
   return s.begruendungVorschlag;
+}
+
+function textContainedInHaystack(haystack: string, needle: string): boolean {
+  if (!needle.trim()) return true;
+  const h = collapseWhitespace(haystack).toLowerCase();
+  const n = collapseWhitespace(needle).toLowerCase();
+  return h.includes(n);
+}
+
+/** Längere GOÄ-Begründung im Bereich „Detaillierte Erläuterungen“, nicht in der Hinweis-Spalte. */
+function begruendungFuerDetailPanel(
+  row: InvoicePruefRow,
+  s: FlatSuggestion | undefined,
+): string | undefined {
+  const b = s?.pruefung?.begruendungVorschlag?.trim();
+  if (!b) return undefined;
+  if (textContainedInHaystack(row.nachricht, b)) return undefined;
+  return b;
+}
+
+function einordnungFuerPruefungTyp(typ: string): string[] {
+  switch (typ) {
+    case "begruendung_fehlt":
+      return [
+        "Steigerungsgebühren über dem Regelhöchstsatz der GOÄ setzen eine nachvollziehbare, dokumentationsgestützte ärztliche Begründung voraus.",
+      ];
+    case "faktor_erhoehung_empfohlen":
+      return [
+        "Eine Anhebung bis zum Schwellen- oder Höchstfaktor soll nur erfolgen, wenn der Behandlungsablauf den Mehraufwand belegt.",
+      ];
+    case "hoechstsatz":
+      return [
+        "Gebühren oberhalb des GOÄ-Höchstfaktors erfordern eine gesonderte Vereinbarung mit dem Patienten bzw. der Patientin.",
+      ];
+    case "ausschluss":
+      return [
+        "Kombinationsverbote der GOÄ schließen eine gemeinsame Berechnung bestimmter Ziffern aus.",
+      ];
+    case "betrag":
+      return [
+        "Der Leistungsbetrag soll der GOÄ-Bewertung (Punkte, Punktwert, Faktor) entsprechen.",
+      ];
+    case "analog":
+      return [
+        "Analogziffern sind in der Abrechnung klar zu kennzeichnen.",
+      ];
+    case "doppelt":
+      return [
+        "Mehrfachabrechnung derselben Ziffer setzt eine gesonderte medizinische Indikation voraus.",
+      ];
+    case "schwellenwert":
+      return [
+        "Der Faktor liegt über dem Regelhöchstsatz; die vorliegende Begründung soll der Abrechnung inhaltlich entsprechen.",
+      ];
+    default:
+      return [];
+  }
+}
+
+function VorschlagErlaeuterungenPanel({
+  rows,
+  suggestionsById,
+  optimierungSuggestions,
+}: {
+  rows: InvoicePruefRow[];
+  suggestionsById: Map<string, FlatSuggestion>;
+  optimierungSuggestions: FlatSuggestion[];
+}) {
+  const blocks: {
+    key: string;
+    title: string;
+    handlung?: string;
+    ausfuehrlicheBegruendung?: string;
+    einordnung: string[];
+  }[] = [];
+
+  for (const row of rows) {
+    const s = suggestionsById.get(row.suggestionId);
+    const handlung = row.vorschlag?.trim();
+    const einordnung = einordnungFuerPruefungTyp(row.typ);
+    const ausfuehrlicheBegruendung = begruendungFuerDetailPanel(row, s);
+    if (!handlung && einordnung.length === 0 && !ausfuehrlicheBegruendung) continue;
+    blocks.push({
+      key: row.suggestionId,
+      title: `GOÄ ${row.ziffer} · Pos. ${row.posNr}`,
+      ...(handlung ? { handlung } : {}),
+      ...(ausfuehrlicheBegruendung ? { ausfuehrlicheBegruendung } : {}),
+      einordnung,
+    });
+  }
+
+  for (const s of optimierungSuggestions) {
+    if (s.kind !== "optimierung" || !s.opt) continue;
+    blocks.push({
+      key: s.id,
+      title: `GOÄ ${s.ziffer} · Zusatzposition`,
+      handlung: s.opt.begruendung,
+      einordnung: [
+        "Ergänzungsvorschlag im Rahmen der dokumentierten Leistung; vor Abrechnung fachlich prüfen.",
+      ],
+    });
+  }
+
+  if (blocks.length === 0) return null;
+
+  return (
+    <section className="rounded-xl p-4 border border-border/60 bg-muted/10 dark:bg-muted/5">
+      <h2 className="text-sm font-semibold text-foreground mb-3">Detaillierte Erläuterungen</h2>
+      <div className="space-y-4">
+        {blocks.map((b) => (
+          <div
+            key={b.key}
+            className="rounded-lg border border-border/50 bg-background/40 p-3 text-xs space-y-2"
+          >
+            <h3 className="text-sm font-medium text-foreground">{b.title}</h3>
+            {b.handlung && (
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground font-semibold mb-0.5">
+                  Handlung
+                </p>
+                <p className="leading-relaxed text-foreground">{b.handlung}</p>
+              </div>
+            )}
+            {b.ausfuehrlicheBegruendung && (
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground font-semibold mb-0.5">
+                  Ausführliche Begründung (GOÄ)
+                </p>
+                <p className="leading-relaxed text-foreground">{b.ausfuehrlicheBegruendung}</p>
+              </div>
+            )}
+            {b.einordnung.length > 0 && (
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground font-semibold mb-0.5">
+                  Einordnung
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-muted-foreground leading-relaxed">
+                  {b.einordnung.map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 /** Prüft, ob ein Vorschlag tatsächlich eine Änderung vorschlägt (nicht identisch mit Rechnung). */
@@ -178,31 +375,6 @@ function buildSuggestions(data: InvoiceResultData): FlatSuggestion[] {
         const nachherFaktor = p.neueFaktor ?? pos.faktor;
         const nachherBetrag = p.neuerBetrag ?? (p.typ === "betrag" ? pos.berechneterBetrag : pos.betrag);
         if (!isMeaningfulSuggestion(p, pos, nachherFaktor, nachherBetrag)) {
-          // #region agent log
-          fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "836585" },
-            body: JSON.stringify({
-              sessionId: "836585",
-              runId: "pre-fix",
-              hypothesisId: "H1",
-              location: "InvoiceResult.tsx:buildSuggestions",
-              message: "pruefung skipped (not meaningful numerically)",
-              data: {
-                posNr: pos.nr,
-                posNrType: typeof pos.nr,
-                ziffer: pos.ziffer,
-                pruefIdx: i,
-                pruefTyp: p.typ,
-                nachherFaktor,
-                nachherBetrag,
-                posFaktor: pos.faktor,
-                posBetrag: pos.betrag,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           continue;
         }
         out.push({
@@ -252,19 +424,392 @@ function getSuggestionsForPreviewRow(row: PreviewRow, suggestions: FlatSuggestio
   return [];
 }
 
+function schwereBadgeClass(s: InvoicePruefRow["schwere"]): string {
+  return cn(
+    "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase whitespace-nowrap",
+    s === "fehler" && "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200",
+    s === "warnung" && "bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+    s === "info" && "bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200",
+  );
+}
+
+function schwereLabel(s: InvoicePruefRow["schwere"]): string {
+  if (s === "fehler") return "Fehler";
+  if (s === "warnung") return "Warnung";
+  return "Hinweis";
+}
+
+function PruefPreviewCell({
+  row,
+  s,
+  decision,
+}: {
+  row: InvoicePruefRow;
+  s: FlatSuggestion | undefined;
+  decision: SuggestionDecision;
+}) {
+  if (s) {
+    if (s.kind === "korrektur" && s.pruefung?.typ === "ausschluss") {
+      return (
+        <span className="text-xs text-destructive font-medium">
+          Position entfällt (Ausschluss)
+        </span>
+      );
+    }
+    const showNum = s.kind === "korrektur" && suggestionHasMeaningfulNumericalChange(s);
+    if (
+      showNum &&
+      (s.vorherBetrag != null ||
+        s.nachherBetrag != null ||
+        (s.vorherFaktor != null && s.nachherFaktor != null))
+    ) {
+      return (
+        <div className="text-xs space-y-0.5 tabular-nums leading-snug">
+          {(s.vorherFaktor != null || s.vorherBetrag != null) && (
+            <div className="text-muted-foreground line-through">
+              <span className="font-medium text-foreground/80">Rechnung </span>
+              {s.vorherFaktor != null && (
+                <span>{s.vorherFaktor.toFixed(1).replace(".", ",")}×</span>
+              )}
+              {s.vorherFaktor != null && s.vorherBetrag != null && " · "}
+              {s.vorherBetrag != null && formatEuro(s.vorherBetrag)}
+            </div>
+          )}
+          {(s.nachherFaktor != null || s.nachherBetrag != null) && showNum && (
+            <div className="text-emerald-700 dark:text-emerald-400 font-medium">
+              <span className="text-foreground/80">Vorschau </span>
+              {s.nachherFaktor != null && (
+                <span>{s.nachherFaktor.toFixed(1).replace(".", ",")}×</span>
+              )}
+              {s.nachherFaktor != null && s.nachherBetrag != null && " · "}
+              {s.nachherBetrag != null && formatEuro(s.nachherBetrag)}
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <span className="text-xs text-muted-foreground leading-snug">
+        {formatSuggestionAenderungSummary(s, decision)}
+      </span>
+    );
+  }
+  if (row.vorschlag?.trim()) {
+    return (
+      <span className="text-xs text-muted-foreground leading-snug line-clamp-3">
+        {row.vorschlag}
+      </span>
+    );
+  }
+  return <span className="text-muted-foreground text-xs">—</span>;
+}
+
+function PruefDecisionCell({
+  s,
+  decision,
+  rowBegruendung,
+  onDecision,
+  pruefRow,
+}: {
+  s: FlatSuggestion | undefined;
+  decision: SuggestionDecision;
+  rowBegruendung?: string;
+  onDecision: (id: string, d: SuggestionDecision) => void;
+  pruefRow?: InvoicePruefRow;
+}) {
+  if (!s) {
+    return <span className="text-xs text-muted-foreground">Kein Vorschlag</span>;
+  }
+  const isPending = decision === "pending";
+  const begrBoxText = begruendungVorschlagForDisplay(s, rowBegruendung, {
+    omitIfInDetailPanel: true,
+    ...(pruefRow && { row: pruefRow }),
+  });
+  return (
+    <div className="text-xs space-y-1 min-w-[5.5rem]">
+      {begrBoxText && (
+        <div className="p-1.5 rounded-md bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] leading-snug">
+          {begrBoxText}
+        </div>
+      )}
+      {isPending ? (
+        <div className="flex gap-1 flex-wrap">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDecision(s.id, "accepted");
+            }}
+            className="inline-flex items-center gap-0.5 px-2 py-1 rounded text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            <CheckIcon className="w-3 h-3" />
+            Annehmen
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDecision(s.id, "rejected");
+            }}
+            className="inline-flex items-center gap-0.5 px-2 py-1 rounded text-[11px] font-medium text-red-600 border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-950/40"
+          >
+            <X className="w-3 h-3" />
+            Ablehnen
+          </button>
+        </div>
+      ) : (
+        <span className="text-muted-foreground">
+          {decision === "accepted" ? "Angenommen" : "Abgelehnt"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function VorschlaegePanel({
+  rows,
+  suggestionsById,
+  decisions,
+  onDecision,
+  toolbar,
+  suggestionCount,
+  rechnungVorschauKontext,
+}: {
+  rows: InvoicePruefRow[];
+  suggestionsById: Map<string, FlatSuggestion>;
+  decisions: Record<string, SuggestionDecision>;
+  onDecision: (id: string, d: SuggestionDecision) => void;
+  toolbar: ReactNode;
+  suggestionCount: number;
+  rechnungVorschauKontext: {
+    pendingCount: number;
+    rechnungsSumme: number;
+    previewSum: number;
+  } | null;
+}) {
+  return (
+    <section className="rounded-xl p-4 border border-border/80 bg-muted/15 dark:bg-muted/10">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <h2 className="text-sm font-semibold text-foreground">Vorschläge</h2>
+        <div className="flex flex-wrap items-center gap-2">{toolbar}</div>
+      </div>
+      {rechnungVorschauKontext && (
+        <>
+          <p className="text-xs text-muted-foreground mb-3">
+            Die Positionsliste unter „Rechnung“ zeigt die Vorschau nach Ihren Entscheidungen in diesem Bereich.
+          </p>
+          <div
+            className={cn(
+              "sticky top-12 z-20 -mx-2 sm:-mx-4 px-2 sm:px-4 py-2 mb-3 rounded-lg flex flex-wrap items-center gap-x-4 gap-y-1 text-xs",
+              "bg-background/95 backdrop-blur border border-border/70 shadow-sm supports-[backdrop-filter]:bg-background/85",
+            )}
+          >
+            <span>
+              <strong className="text-foreground">{rechnungVorschauKontext.pendingCount}</strong>{" "}
+              <span className="text-muted-foreground">
+                Vorschlag{rechnungVorschauKontext.pendingCount === 1 ? "" : "e"} offen
+              </span>
+            </span>
+            <span className="hidden sm:inline text-border">|</span>
+            <span className="text-muted-foreground">
+              Original{" "}
+              <strong className="text-foreground tabular-nums">
+                {formatEuro(rechnungVorschauKontext.rechnungsSumme)}
+              </strong>
+            </span>
+            <span className="text-muted-foreground">
+              Δ{" "}
+              <strong
+                className={cn(
+                  "tabular-nums",
+                  rechnungVorschauKontext.previewSum - rechnungVorschauKontext.rechnungsSumme >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400",
+                )}
+              >
+                {rechnungVorschauKontext.previewSum - rechnungVorschauKontext.rechnungsSumme >= 0
+                  ? "+"
+                  : "−"}
+                {formatEuro(
+                  Math.abs(
+                    rechnungVorschauKontext.previewSum - rechnungVorschauKontext.rechnungsSumme,
+                  ),
+                )}
+              </strong>
+              <span className="font-normal"> zur Vorschau</span>
+            </span>
+          </div>
+        </>
+      )}
+      {rows.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {suggestionCount > 0
+            ? "Keine positionsbezogenen Prüfhinweise. Zusatzpositionen siehe Rechnung unten."
+            : "Keine Vorschläge zur Prüfung. Die Rechnungsvorschau finden Sie unten."}
+        </p>
+      ) : (
+        <>
+          <div className="sm:hidden space-y-3">
+            {rows.map((row) => {
+              const s = suggestionsById.get(row.suggestionId);
+              const dec = s ? (decisions[s.id] ?? "pending") : "pending";
+              return (
+                <div
+                  key={row.suggestionId}
+                  className={cn(
+                    "rounded-lg border border-border/60 p-3 space-y-2 text-sm",
+                    dec === "pending" && s && "bg-amber-50/40 dark:bg-amber-950/15",
+                    dec === "accepted" && s && "bg-emerald-50/30 dark:bg-emerald-950/10",
+                  )}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={schwereBadgeClass(row.schwere)}>{schwereLabel(row.schwere)}</span>
+                    <span className="font-mono font-semibold text-xs">GOÄ {row.ziffer}</span>
+                    <span className="text-[10px] text-muted-foreground">Pos. {row.posNr}</span>
+                  </div>
+                  <div className="text-xs text-foreground leading-relaxed">
+                    <p>{row.nachricht}</p>
+                  </div>
+                  <div className="pt-1 border-t border-border/50">
+                    <p className="text-[10px] uppercase text-muted-foreground font-medium mb-1">Vorschau</p>
+                    <PruefPreviewCell row={row} s={s} decision={dec} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-muted-foreground font-medium mb-1">Aufgaben</p>
+                    <PruefDecisionCell
+                      s={s}
+                      decision={dec}
+                      rowBegruendung={s?.pos?.begruendung}
+                      onDecision={onDecision}
+                      pruefRow={row}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="hidden sm:block invoice-table-wrapper overflow-x-auto">
+            <table className="invoice-table w-full min-w-[640px]">
+              <thead>
+                <tr>
+                  <th className="invoice-th w-[5.5rem]">Status</th>
+                  <th className="invoice-th w-16">GOÄ</th>
+                  <th className="invoice-th min-w-[180px]">Hinweis</th>
+                  <th className="invoice-th min-w-[140px]">Vorschau</th>
+                  <th className="invoice-th min-w-[140px]">Aufgaben</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const s = suggestionsById.get(row.suggestionId);
+                  const dec = s ? (decisions[s.id] ?? "pending") : "pending";
+                  return (
+                    <tr key={row.suggestionId}>
+                      <td className="invoice-td align-top">
+                        <span className={schwereBadgeClass(row.schwere)}>{schwereLabel(row.schwere)}</span>
+                      </td>
+                      <td className="invoice-td align-top font-mono font-semibold">{row.ziffer}</td>
+                      <td className="invoice-td align-top text-xs leading-relaxed max-w-[360px]">
+                        <p className="text-foreground">{row.nachricht}</p>
+                      </td>
+                      <td className="invoice-td align-top">
+                        <PruefPreviewCell row={row} s={s} decision={dec} />
+                      </td>
+                      <td className="invoice-td align-top">
+                        <PruefDecisionCell
+                          s={s}
+                          decision={dec}
+                          rowBegruendung={s?.pos?.begruendung}
+                          onDecision={onDecision}
+                          pruefRow={row}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Kurzbeschreibung der Änderung je Zeile/Vorschlag (PDF/UI „Änderung“-Spalte). */
+function formatSuggestionAenderungSummary(
+  s: FlatSuggestion,
+  decision: SuggestionDecision,
+): string {
+  if (decision === "rejected") return "— (Vorschlag abgelehnt)";
+  if (s.kind === "optimierung") return "+ Neue Position";
+  const p = s.pruefung;
+  if (p?.typ === "ausschluss") {
+    if (decision === "pending") return "Entfällt · von Summe ausgeschlossen (ausstehend)";
+    return "Entfällt";
+  }
+  if (!suggestionHasMeaningfulNumericalChange(s)) return "Unverändert";
+  const parts: string[] = [];
+  if (
+    s.vorherFaktor != null &&
+    s.nachherFaktor != null &&
+    !valuesAreEqual(s.vorherFaktor, s.nachherFaktor, FAKTOR_TOLERANZ)
+  ) {
+    parts.push(
+      `${s.vorherFaktor.toFixed(1).replace(".", ",")} → ${s.nachherFaktor.toFixed(1).replace(".", ",")}`,
+    );
+  }
+  if (
+    s.vorherBetrag != null &&
+    s.nachherBetrag != null &&
+    !valuesAreEqual(s.vorherBetrag, s.nachherBetrag, BETRAG_TOLERANZ)
+  ) {
+    const d = s.nachherBetrag - s.vorherBetrag;
+    parts.push(`${d >= 0 ? "+" : "−"}${formatEuro(Math.abs(d))}`);
+  }
+  return parts.join(" · ");
+}
+
+function buildExportProtocolLines(
+  z: InvoiceResultData["zusammenfassung"],
+  suggestions: FlatSuggestion[],
+  decisions: Record<string, SuggestionDecision>,
+  previewSum: number,
+): string[] {
+  if (suggestions.length === 0) return [];
+  const lines: string[] = [
+    "Dieses PDF entspricht der Vorschau in DocBill (angenommene und noch ausstehende Vorschläge; abgelehnte Vorschläge sind nicht in der Positionstabelle).",
+    "",
+    `Summe laut extrahierter Original-Rechnung: ${formatEuro(z.rechnungsSumme)}`,
+    `Summe in diesem PDF (Vorschau): ${formatEuro(previewSum)}`,
+  ];
+  const delta = previewSum - z.rechnungsSumme;
+  if (Math.abs(delta) > 0.02) {
+    lines.push(
+      `Differenz zur Original-Rechnung: ${delta >= 0 ? "+" : "−"}${formatEuro(Math.abs(delta))}`,
+    );
+  }
+  lines.push("", "Vorschläge:");
+  for (const s of suggestions) {
+    const d = decisions[s.id] ?? "pending";
+    const st = d === "accepted" ? "angenommen" : d === "rejected" ? "abgelehnt" : "ausstehend";
+    lines.push(`• GOÄ ${s.ziffer}: ${formatSuggestionAenderungSummary(s, d)} — ${st}`);
+  }
+  return lines;
+}
+
 // ── Unified Position Card (Mobile) ──
 
 function UnifiedPositionCard({
   row,
   suggestions,
   decisions,
-  onDecision,
 }: {
   row: PreviewRow;
   suggestions: FlatSuggestion[];
   decisions: Record<string, SuggestionDecision>;
-  onDecision: (id: string, d: SuggestionDecision) => void;
 }) {
+  const rowSuggestions = getSuggestionsForPreviewRow(row, suggestions);
   const anyPending = suggestions.some((s) => (decisions[s.id] ?? "pending") === "pending");
   const anyAccepted = suggestions.some((s) => decisions[s.id] === "accepted");
   const hasStrikeSuggestion = suggestions.some(
@@ -295,17 +840,26 @@ function UnifiedPositionCard({
       {row.begruendung && (
         <p className={cn("text-xs text-muted-foreground", hasStrikeSuggestion && "line-through")}>{row.begruendung}</p>
       )}
-      {suggestions.map((s) => {
+      {rowSuggestions.length > 0 && (
+        <div className="text-xs space-y-1 rounded-md border border-border/50 bg-background/50 px-2 py-1.5">
+          <p className="font-medium text-muted-foreground">Änderung</p>
+          {rowSuggestions.map((s) => (
+            <p key={s.id} className="text-[11px] leading-snug">
+              {formatSuggestionAenderungSummary(s, decisions[s.id] ?? "pending")}
+            </p>
+          ))}
+        </div>
+      )}
+      {rowSuggestions.map((s) => {
         const decision = decisions[s.id] ?? "pending";
         const isPending = decision === "pending";
         const hasVorher = s.kind === "korrektur" && (s.vorherFaktor != null || s.vorherBetrag != null);
         const hasNachher = s.nachherFaktor != null || s.nachherBetrag != null;
         const showNumericalChange = suggestionHasMeaningfulNumericalChange(s);
-        const begrBoxText = begruendungVorschlagForDisplay(s, row.begruendung);
         return (
           <div key={s.id} className="space-y-1.5 text-xs mt-2 pt-2 first:mt-0 first:pt-0">
             {isPending && hasVorher && hasNachher && showNumericalChange && (
-              <div className="text-muted-foreground">
+              <div className="text-muted-foreground line-through">
                 <span className="font-medium">Aktuell: </span>
                 {s.vorherFaktor != null && <span className="font-mono">{s.vorherFaktor.toFixed(1).replace(".", ",")}×</span>}
                 {s.vorherFaktor != null && s.vorherBetrag != null && " · "}
@@ -320,34 +874,9 @@ function UnifiedPositionCard({
                 {s.nachherBetrag != null && <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">{formatEuro(s.nachherBetrag)}</span>}
               </div>
             )}
-            {begrBoxText && (
-              <div className="p-2 rounded-md bg-emerald-50/60 dark:bg-emerald-950/20">
-                <p className="text-[10px] uppercase font-medium text-emerald-800 dark:text-emerald-300 mb-0.5">Begründung:</p>
-                <p className="leading-relaxed">{begrBoxText}</p>
-              </div>
-            )}
-            {isPending ? (
-              <div className="flex gap-1 pt-1">
-                <button
-                  type="button"
-                  onClick={() => onDecision(s.id, "accepted")}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
-                >
-                  <CheckIcon className="w-3.5 h-3.5" />
-                  Annehmen
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDecision(s.id, "rejected")}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-red-600 hover:bg-red-100 dark:hover:bg-red-950/50"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  Ablehnen
-                </button>
-              </div>
-            ) : (
+            {!isPending && (
               <span className="text-muted-foreground text-xs">
-                {decision === "accepted" ? "Angenommen" : "Abgelehnt"}
+                {decision === "accepted" ? "Vorschlag angenommen" : "Vorschlag abgelehnt"}
               </span>
             )}
           </div>
@@ -363,16 +892,16 @@ function UnifiedPositionRow({
   row,
   suggestions,
   decisions,
-  onDecision,
   hasBegruendungColumn,
-  hasVorschlaegeColumn,
+  hasAenderungColumn,
+  hasVorschauZahlenColumn,
 }: {
   row: PreviewRow;
   suggestions: FlatSuggestion[];
   decisions: Record<string, SuggestionDecision>;
-  onDecision: (id: string, d: SuggestionDecision) => void;
   hasBegruendungColumn: boolean;
-  hasVorschlaegeColumn: boolean;
+  hasAenderungColumn: boolean;
+  hasVorschauZahlenColumn: boolean;
 }) {
   const rowSuggestions = getSuggestionsForPreviewRow(row, suggestions);
   const hasSuggestions = rowSuggestions.length > 0;
@@ -406,8 +935,23 @@ function UnifiedPositionRow({
       {hasBegruendungColumn && (
         <td className={cn("invoice-td text-xs text-muted-foreground max-w-[200px]", hasStrikeSuggestion && "line-through")}>{row.begruendung ?? "—"}</td>
       )}
-      {hasVorschlaegeColumn && (
-      <td className="invoice-td">
+      {hasAenderungColumn && (
+        <td className="invoice-td text-xs align-top max-w-[160px]">
+          {hasSuggestions ? (
+            <div className="space-y-1">
+              {rowSuggestions.map((s) => (
+                <div key={s.id} className="leading-snug">
+                  {formatSuggestionAenderungSummary(s, decisions[s.id] ?? "pending")}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </td>
+      )}
+      {hasVorschauZahlenColumn && (
+      <td className="invoice-td align-top">
         {hasSuggestions && (
           <div className="space-y-2">
             {rowSuggestions.map((s) => {
@@ -416,7 +960,6 @@ function UnifiedPositionRow({
               const hasVorher = s.kind === "korrektur" && (s.vorherFaktor != null || s.vorherBetrag != null);
               const hasNachher = s.nachherFaktor != null || s.nachherBetrag != null;
               const showNumericalChange = suggestionHasMeaningfulNumericalChange(s);
-              const begrBoxText = begruendungVorschlagForDisplay(s, row.begruendung);
               return (
                 <div key={s.id} className="text-xs space-y-1">
                   {isPending && hasVorher && hasNachher && showNumericalChange && (
@@ -431,30 +974,10 @@ function UnifiedPositionRow({
                       {s.nachherBetrag != null && formatEuro(s.nachherBetrag)}
                     </div>
                   )}
-                  {begrBoxText && (
-                    <div className="p-1.5 rounded bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px]">
-                      {begrBoxText}
-                    </div>
-                  )}
-                  {isPending && (
-                    <div className="flex gap-1 mt-1">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); onDecision(s.id, "accepted"); }}
-                        className="p-1 rounded text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-950/50"
-                        title="Annehmen"
-                      >
-                        <CheckIcon className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); onDecision(s.id, "rejected"); }}
-                        className="p-1 rounded text-red-600 hover:bg-red-100 dark:hover:bg-red-950/50"
-                        title="Ablehnen"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                  {!isPending && (
+                    <span className="text-muted-foreground">
+                      {decision === "accepted" ? "Angenommen" : "Abgelehnt"}
+                    </span>
                   )}
                 </div>
               );
@@ -501,6 +1024,16 @@ export default function InvoiceResult({
   const optimierungen = data?.optimierungen ?? [];
   const z = data?.zusammenfassung ?? DEFAULT_ZUSAMMENFASSUNG;
   const suggestions = useMemo(() => buildSuggestions(data), [data]);
+  const invoicePruefRows = useMemo(() => buildInvoicePruefRows(data), [data]);
+  const suggestionsById = useMemo(
+    () => new Map(suggestions.map((s) => [s.id, s] as const)),
+    [suggestions],
+  );
+  const optimierungSuggestions = useMemo(
+    () => suggestions.filter((s) => s.kind === "optimierung"),
+    [suggestions],
+  );
+  const hasAenderungColumn = suggestions.length > 0;
   const { praxisStammdaten } = usePraxisStammdaten();
 
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -688,7 +1221,8 @@ export default function InvoiceResult({
         betrag: p.betrag,
         begruendung: p.begruendung,
       }));
-      await generateInvoicePdf(positions, previewSum, stammdaten);
+      const protocolLines = buildExportProtocolLines(z, suggestions, decisions, previewSum);
+      await generateInvoicePdf(positions, previewSum, stammdaten, { protocolLines });
       setExportModalOpen(false);
       onExportSuccess?.();
     } catch (e) {
@@ -703,6 +1237,9 @@ export default function InvoiceResult({
     rechnungsdatum,
     exportPositions,
     previewSum,
+    z,
+    suggestions,
+    decisions,
     onExportSuccess,
   ]);
 
@@ -745,18 +1282,39 @@ export default function InvoiceResult({
           />
         </div>
         <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 pt-1 text-xs text-muted-foreground">
-          <span>Rechnungssumme: <strong className="text-foreground">{formatEuro(z.rechnungsSumme)}</strong></span>
+          <span>Ihre Rechnung (Original): <strong className="text-foreground">{formatEuro(z.rechnungsSumme)}</strong></span>
           {suggestions.length > 0 && (
-            <span>Vorschau-Summe: <strong className="text-emerald-600 dark:text-emerald-400">{formatEuro(previewSum)}</strong></span>
+            <span>Vorschau: <strong className="text-emerald-600 dark:text-emerald-400">{formatEuro(previewSum)}</strong> <span className="font-normal">(nach Ihren Entscheidungen)</span></span>
           )}
         </div>
       </section>
 
-      {/* ── Rechnung (Vorschläge + Vorschau vereint) ── */}
-      <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="text-sm font-semibold text-foreground">Rechnung</h2>
-          <div className="flex items-center gap-2">
+      <VorschlaegePanel
+        rows={invoicePruefRows}
+        suggestionsById={suggestionsById}
+        decisions={decisions}
+        onDecision={setDecision}
+        suggestionCount={suggestions.length}
+        rechnungVorschauKontext={
+          suggestions.length > 0
+            ? {
+                pendingCount,
+                rechnungsSumme: z.rechnungsSumme,
+                previewSum,
+              }
+            : null
+        }
+        toolbar={
+          <>
+            <button
+              type="button"
+              onClick={() => setExportModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-muted hover:bg-muted/80 transition-colors"
+              title="Als PDF exportieren"
+            >
+              <Download className="w-4 h-4" />
+              PDF exportieren
+            </button>
             {suggestions.length > 0 && pendingCount > 0 && (
               <button
                 type="button"
@@ -767,20 +1325,21 @@ export default function InvoiceResult({
                 Alle annehmen
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setExportModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-muted hover:bg-muted/80 transition-colors"
-              title="Als PDF exportieren"
-            >
-              <Download className="w-4 h-4" />
-              PDF exportieren
-            </button>
-          </div>
+          </>
+        }
+      />
+
+      <VorschlagErlaeuterungenPanel
+        rows={invoicePruefRows}
+        suggestionsById={suggestionsById}
+        optimierungSuggestions={optimierungSuggestions}
+      />
+
+      {/* ── Rechnung ── */}
+      <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <h2 className="text-sm font-semibold text-foreground">Rechnung</h2>
         </div>
-        <p className="text-xs text-muted-foreground mb-3">
-          {suggestions.length > 0 ? "Vorschläge direkt in der Tabelle annehmen oder ablehnen." : "Rechnungsvorschau."}
-        </p>
         {/* Mobile: Cards pro Position */}
         <div className="sm:hidden space-y-2">
           {unifiedRows.map((row) => {
@@ -791,7 +1350,6 @@ export default function InvoiceResult({
                 row={row}
                 suggestions={rowSuggestions}
                 decisions={decisions}
-                onDecision={setDecision}
               />
             );
           })}
@@ -809,8 +1367,11 @@ export default function InvoiceResult({
                 {unifiedRows.some((p) => p.begruendung) && (
                   <th className="invoice-th">Begründung</th>
                 )}
+                {hasAenderungColumn && (
+                  <th className="invoice-th min-w-[7rem]">Änderung</th>
+                )}
                 {suggestions.length > 0 && (
-                  <th className="invoice-th w-32">Vorschläge</th>
+                  <th className="invoice-th w-32">Zahlen</th>
                 )}
               </tr>
             </thead>
@@ -821,9 +1382,9 @@ export default function InvoiceResult({
                   row={row}
                   suggestions={suggestions}
                   decisions={decisions}
-                  onDecision={setDecision}
                   hasBegruendungColumn={unifiedRows.some((p) => p.begruendung)}
-                  hasVorschlaegeColumn={suggestions.length > 0}
+                  hasAenderungColumn={hasAenderungColumn}
+                  hasVorschauZahlenColumn={suggestions.length > 0}
                 />
               ))}
             </tbody>
