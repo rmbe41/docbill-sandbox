@@ -100,6 +100,10 @@ export type HistoryPanelProps = {
   sidebarTab?: "chats" | "archive";
   onSidebarTabChange?: (tab: "chats" | "archive") => void;
   hideCompactTabBar?: boolean;
+  /** Kompakter Archiv-Tab: alle archivierten Chats löschen */
+  onDeleteAllArchived?: () => void | Promise<void>;
+  /** Kompakter Chats-Tab: alle nicht archivierten Chats archivieren */
+  onArchiveAllChats?: () => void | Promise<void>;
 };
 
 const HistoryPanel = ({
@@ -120,6 +124,8 @@ const HistoryPanel = ({
   sidebarTab: sidebarTabProp,
   onSidebarTabChange,
   hideCompactTabBar,
+  onDeleteAllArchived,
+  onArchiveAllChats,
 }: HistoryPanelProps) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -705,6 +711,17 @@ const HistoryPanel = ({
             <p className="text-xs text-muted-foreground/80 text-center py-8">Noch keine Chats</p>
           ) : (
             <>
+              {onArchiveAllChats && (
+                <div className="mb-2 flex w-full justify-end px-3">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-transparent px-2 py-2 text-right text-xs font-medium text-muted-foreground transition-colors hover:border-border/55 hover:bg-muted/12 hover:text-foreground dark:hover:bg-muted/18"
+                    onClick={() => void Promise.resolve(onArchiveAllChats())}
+                  >
+                    Alle archivieren
+                  </button>
+                </div>
+              )}
               <div className="min-w-0 space-y-1.5">
                 {visibleSidebarChats.map((conv) => (
                   <ConversationRow key={conv.id} conv={conv} rowMode="compact-active" />
@@ -720,6 +737,17 @@ const HistoryPanel = ({
             <p className="text-xs text-muted-foreground/80 text-center py-8">Archiv ist leer</p>
           ) : (
             <>
+              {onDeleteAllArchived && (
+                <div className="mb-2 flex w-full justify-end px-3">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-transparent px-2 py-2 text-right text-xs font-medium text-muted-foreground transition-colors hover:border-border/55 hover:bg-muted/12 hover:text-foreground dark:hover:bg-muted/18"
+                    onClick={() => void Promise.resolve(onDeleteAllArchived())}
+                  >
+                    Alle löschen
+                  </button>
+                </div>
+              )}
               <div className="min-w-0 space-y-1.5">
                 {visibleSidebarChats.map((conv) => (
                   <ConversationRow key={conv.id} conv={conv} rowMode="compact-archived" />

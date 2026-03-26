@@ -80,11 +80,9 @@ export async function runPipeline(
     try {
       // Step 1: Dokument Parser (mit Retry bei unplausiblen Ergebnissen)
       await sendProgress(0, PIPELINE_STEPS[0].label);
-      const parsedRechnung = await parseDokumentWithRetry(
-        input.files,
-        apiKey,
-        input.model,
-      );
+      const parsedRechnung = await parseDokumentWithRetry(input.files, apiKey, input.model, {
+        multiDocumentInvoiceReview: input.files.length >= 2,
+      });
 
       // Step 2: Medizinisches NLP
       await sendProgress(1, PIPELINE_STEPS[1].label);

@@ -26,6 +26,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { useAcknowledgedJobs } from "@/hooks/useAcknowledgedJobs";
 import { useBackgroundJobQueue } from "@/hooks/useBackgroundJobQueue";
+import type { GuidedWorkflowKind } from "@/lib/guidedWorkflow";
 import { supabase } from "@/integrations/supabase/client";
 import { getModelInfo, AVAILABLE_MODELS, MODEL_TAG_LABELS, MODEL_TAG_TOOLTIPS, type ModelTag } from "@/data/models";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,25 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useKeyboardShortcutPrefs } from "@/hooks/useKeyboardShortcutPrefs";
 import { loadKeyboardShortcutPrefs, matchShortcutToken, formatModCombo } from "@/lib/keyboardShortcutPrefs";
+
+function findInvoiceReviewSourcePdfForMessage(
+  messages: ChatMessage[],
+  index: number,
+): { previewUrl: string; name: string } | null {
+  const msg = messages[index];
+  if (msg.role !== "assistant" || (!msg.invoiceResult && !msg.engine3Result)) return null;
+  for (let i = index - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") break;
+    if (messages[i].role !== "user") continue;
+    const pdf = messages[i].attachments?.find(
+      (a) =>
+        Boolean(a.previewUrl) &&
+        (a.type === "application/pdf" || a.name.toLowerCase().endsWith(".pdf")),
+    );
+    if (pdf?.previewUrl) return { previewUrl: pdf.previewUrl, name: pdf.name };
+  }
+  return null;
+}
 
 const Index = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -91,10 +111,12 @@ const Index = () => {
     saveMessage,
     updateMessageStructuredContent,
     deleteConversation,
+    deleteAllArchivedConversations,
     updateTitle,
     updateSourceFilename,
     fetchConversations,
     archiveConversation,
+    archiveAllNonArchivedConversations,
     restoreConversation,
     markConversationUnread,
     markConversationRead,
@@ -192,8 +214,12 @@ const Index = () => {
   }, [stopBackgroundForActiveConversation]);
 
   const sendMessage = useCallback(
-    async (content: string, files?: File[]) => {
-      await enqueueSend(content, files);
+    async (
+      content: string,
+      files?: File[],
+      guided?: { workflow: GuidedWorkflowKind; phase: "collect" },
+    ) => {
+      await enqueueSend(content, files, guided);
     },
     [enqueueSend],
   );
@@ -282,6 +308,34 @@ const Index = () => {
     },
     [deleteConversation, activeConversationId]
   );
+
+  const handleDeleteAllArchived = useCallback(async () => {
+    const wasViewingArchived =
+      activeConversationId != null &&
+      conversations.some((c) => c.id === activeConversationId && c.archived_at != null);
+    await deleteAllArchivedConversations();
+    if (wasViewingArchived) setMessages([]);
+  }, [
+    activeConversationId,
+    conversations,
+    deleteAllArchivedConversations,
+  ]);
+
+  const handleArchiveAllChats = useCallback(async () => {
+    const wasActiveNonArchived =
+      activeConversationId != null &&
+      conversations.some((c) => c.id === activeConversationId && !c.archived_at);
+    await archiveAllNonArchivedConversations();
+    if (wasActiveNonArchived) {
+      setActiveConversationId(null);
+      setMessages([]);
+    }
+  }, [
+    activeConversationId,
+    conversations,
+    archiveAllNonArchivedConversations,
+    setActiveConversationId,
+  ]);
 
   const handleRenameConversation = useCallback(
     async (id: string, title: string) => {
@@ -395,6 +449,8 @@ const Index = () => {
     onMarkUnread: markConversationUnread,
     acknowledgedJobIds: acknowledgedSet,
     onAcknowledgeJob: acknowledge,
+    onDeleteAllArchived: handleDeleteAllArchived,
+    onArchiveAllChats: handleArchiveAllChats,
   };
 
   return (
@@ -438,17 +494,33 @@ const Index = () => {
                 key={emptyChatAnimKey}
                 className="motion-reduce:animate-none animate-fade-in min-h-[40vh] flex flex-col"
               >
-                <WelcomeScreen onSuggestionClick={(text) => sendMessage(text)} />
+                <WelcomeScreen
+                  onPick={(pick) =>
+                    sendMessage(pick.text, undefined, {
+                      workflow: pick.workflow,
+                      phase: "collect",
+                    })
+                  }
+                />
               </div>
             ) : (
               <div className="max-w-6xl mx-auto px-4 pt-6 pb-16 space-y-4 min-h-[40vh]">
                 <ErrorBoundary>
-                  {messages.map((msg) => (
+                  {messages.map((msg, idx) => (
                     <ChatBubble
                       key={msg.id}
                       message={msg}
                       conversationId={activeConversationId}
                       updateMessageStructuredContent={updateMessageStructuredContent}
+                      invoiceReviewSourcePdf={findInvoiceReviewSourcePdfForMessage(messages, idx)}
+                      feedbackSessionMeta={{
+                        model: effectiveModel,
+                        engine: userSettings.engine_type ?? globalSettings.default_engine,
+                      }}
+                      feedbackPriorMessages={messages.slice(Math.max(0, idx - 8), idx + 1).map((m) => ({
+                        role: m.role,
+                        content: m.content,
+                      }))}
                     />
                   ))}
                   {isChatBusy && analysisStartTime != null && (

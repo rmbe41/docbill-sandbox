@@ -20,6 +20,7 @@ export function dbRowToChatMessage(m: {
       ...base,
       invoiceResult: s.invoiceResult,
       serviceBillingResult: s.serviceBillingResult,
+      engine3Result: s.engine3Result,
       analysisTimeSeconds: s.analysisTimeSeconds,
       frageAnswer: s.frageAnswer,
       suggestionDecisions: s.suggestionDecisions,

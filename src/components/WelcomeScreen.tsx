@@ -1,29 +1,46 @@
-import { FileText, HelpCircle, ClipboardCheck } from "lucide-react";
+import { FileText, HelpCircle, ClipboardCheck, type LucideIcon } from "lucide-react";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
+import type { GuidedWorkflowKind } from "@/lib/guidedWorkflow";
 
-const suggestions = [
+type SuggestionItem = {
+  icon: LucideIcon;
+  label: string;
+  description: string;
+  workflow: GuidedWorkflowKind;
+  userMessage: string;
+};
+
+const suggestions: SuggestionItem[] = [
   {
     icon: ClipboardCheck,
     label: "Leistungen abrechnen",
-    text: "Ich habe eine Funduskopie in Mydriasis gemacht und den Augeninnendruck gemessen. Was kann ich abrechnen?",
+    description: "Leistungen beschreiben oder Akte hochladen – ich frage nach, was fehlt.",
+    workflow: "leistungen_abrechnen",
+    userMessage: "Leistungen abrechnen",
   },
   {
     icon: FileText,
     label: "Rechnung prüfen",
-    text: "Bitte prüfe meine Rechnung auf Optimierungspotenziale und fehlende Leistungen.",
+    description: "Rechnung und optional Patientenakte hochladen – ich frage zuerst nach den Unterlagen.",
+    workflow: "rechnung_pruefen",
+    userMessage: "Rechnung prüfen",
   },
   {
     icon: HelpCircle,
     label: "GOÄ-Frage stellen",
-    text: "Wie oft darf ich die GOÄ 401 im Quartal ansetzen?",
+    description: "Ich frage, was Sie wissen möchten, und nenne kurz die wichtigsten Möglichkeiten.",
+    workflow: "frage_oeffnen",
+    userMessage: "Ich möchte eine Frage stellen.",
   },
 ];
 
+export type WelcomePick = { workflow: GuidedWorkflowKind; text: string };
+
 type WelcomeScreenProps = {
-  onSuggestionClick: (text: string) => void;
+  onPick: (pick: WelcomePick) => void;
 };
 
-const WelcomeScreen = ({ onSuggestionClick }: WelcomeScreenProps) => {
+const WelcomeScreen = ({ onPick }: WelcomeScreenProps) => {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 pt-20 pb-12">
       <div className="flex items-center justify-center w-16 h-16 rounded-2xl overflow-hidden mb-6">
@@ -43,7 +60,9 @@ const WelcomeScreen = ({ onSuggestionClick }: WelcomeScreenProps) => {
         {suggestions.map((s) => (
           <button
             key={s.label}
-            onClick={() => onSuggestionClick(s.text)}
+            onClick={() =>
+              onPick({ workflow: s.workflow, text: s.userMessage })
+            }
             className="flex items-center gap-3 text-left px-4 py-3 rounded-xl border bg-card hover:bg-muted/60 transition-colors group"
           >
             <s.icon className="w-5 h-5 text-accent flex-shrink-0" />
@@ -51,8 +70,8 @@ const WelcomeScreen = ({ onSuggestionClick }: WelcomeScreenProps) => {
               <p className="text-sm font-medium text-foreground group-hover:text-accent-subtle-foreground transition-colors">
                 {s.label}
               </p>
-              <p className="text-xs text-muted-foreground line-clamp-1">
-                {s.text}
+              <p className="text-xs text-muted-foreground line-clamp-2">
+                {s.description}
               </p>
             </div>
           </button>

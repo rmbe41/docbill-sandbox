@@ -94,6 +94,28 @@ export default {
           "0%, 100%": { transform: "scale(1)" },
           "50%": { transform: "scale(1.2)" },
         },
+        "thumb-success": {
+          "0%": { transform: "scale(1)" },
+          "35%": { transform: "scale(1.12)" },
+          "100%": { transform: "scale(1)" },
+        },
+        "confetti-burst": {
+          "0%": {
+            transform: "translate(-50%, 0) rotate(0deg)",
+            opacity: "1",
+          },
+          "100%": {
+            transform:
+              "translate(calc(-50% + var(--burst-x, 0px)), var(--burst-y, -28px)) rotate(var(--burst-r, 0deg))",
+            opacity: "0",
+          },
+        },
+        "feedback-thanks": {
+          "0%": { opacity: "0", transform: "translate(-50%, 6px) scale(0.94)" },
+          "14%": { opacity: "1", transform: "translate(-50%, 0) scale(1)" },
+          "72%": { opacity: "1", transform: "translate(-50%, 0) scale(1)" },
+          "100%": { opacity: "0", transform: "translate(-50%, -4px) scale(0.97)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -101,6 +123,9 @@ export default {
         "fade-in": "fade-in 0.3s ease-out",
         "pulse-dot": "pulse-dot 1.4s infinite ease-in-out",
         "logo-working": "logo-working 1.8s ease-in-out infinite",
+        "thumb-success": "thumb-success 0.45s ease-out",
+        "confetti-burst": "confetti-burst 0.75s ease-out forwards",
+        "feedback-thanks": "feedback-thanks 1.85s ease-out forwards",
       },
     },
   },

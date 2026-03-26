@@ -1,5 +1,6 @@
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
+import { parseEngine3ResultData, type Engine3ResultData } from "@/lib/engine3Result";
 import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
 import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
 
@@ -13,6 +14,7 @@ export type SseAccumState = {
   assistantContent: string;
   invoiceData?: InvoiceResultData;
   serviceBillingData?: ServiceBillingResultData;
+  engine3Data?: Engine3ResultData;
   frageStructured?: FrageAnswerStructured;
 };
 
@@ -31,15 +33,45 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
   try {
     parsed = JSON.parse(jsonStr) as Record<string, unknown>;
   } catch {
+    // #region agent log
+    if (jsonStr.includes('"engine3_result"') || jsonStr.includes("engine3_result")) {
+      fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+        body: JSON.stringify({
+          sessionId: "a85cc5",
+          location: "goaeChatSse.ts:jsonParseFail",
+          message: "JSON.parse failed on line mentioning engine3_result",
+          data: { jsonStrLen: jsonStr.length, jsonStrHead: jsonStr.slice(0, 120) },
+          timestamp: Date.now(),
+          hypothesisId: "H5",
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     return false;
   }
 
   const type = parsed.type as string | undefined;
 
-  if (type === "pipeline_progress" || type === "service_billing_progress") {
+  if (type === "pipeline_progress" || type === "service_billing_progress" || type === "engine3_progress") {
     const step = (parsed.step as number) ?? 1;
     const total = (parsed.totalSteps as number) ?? 6;
     const label = (parsed.label as string) ?? "";
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+      body: JSON.stringify({
+        sessionId: "a85cc5",
+        location: "goaeChatSse.ts:progress",
+        message: "goae SSE progress",
+        data: { sseType: type, step, totalSteps: total, labelHead: label.slice(0, 80) },
+        timestamp: Date.now(),
+        hypothesisId: "H4",
+      }),
+    }).catch(() => {});
+    // #endregion
     ctx.onProgress({ step, totalSteps: total, label });
     return true;
   }
@@ -98,6 +130,73 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
     return true;
   }
 
+  if (type === "engine3_result") {
+    ctx.onProgress(null);
+    const rawData = parsed.data;
+    const parsedData = parseEngine3ResultData(rawData);
+    if (parsedData) ctx.state.engine3Data = parsedData;
+    // #region agent log
+    {
+      const d =
+        rawData && typeof rawData === "object" && !Array.isArray(rawData)
+          ? (rawData as Record<string, unknown>)
+          : null;
+      const summ = d?.zusammenfassung;
+      const sm = summ && typeof summ === "object" && !Array.isArray(summ) ? (summ as Record<string, unknown>) : null;
+      fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+        body: JSON.stringify({
+          sessionId: "a85cc5",
+          location: "goaeChatSse.ts:engine3_result",
+          message: "engine3_result received",
+          data: {
+            parseOk: !!parsedData,
+            rawDataType: rawData === null ? "null" : Array.isArray(rawData) ? "array" : typeof rawData,
+            modusKind: d ? typeof d.modus : "n/a",
+            posIsArr: Array.isArray(d?.positionen),
+            posLen: Array.isArray(d?.positionen) ? d.positionen.length : null,
+            hinweiseLen: Array.isArray(d?.hinweise) ? d.hinweise.length : null,
+            hasZusammenfassung: !!sm,
+            summKeys: sm ? Object.keys(sm).join(",") : "",
+            jsonStrLen: jsonStr.length,
+          },
+          timestamp: Date.now(),
+          hypothesisId: "H2",
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
+    ctx.onDelta();
+    return true;
+  }
+
+  if (type === "engine3_error") {
+    ctx.onProgress(null);
+    const errStr = typeof parsed.error === "string" ? parsed.error : JSON.stringify(parsed.error);
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+      body: JSON.stringify({
+        sessionId: "a85cc5",
+        location: "goaeChatSse.ts:engine3_error",
+        message: "engine3_error SSE",
+        data: {
+          errHead: errStr.slice(0, 200),
+          code: typeof parsed.code === "string" ? parsed.code : null,
+          debug: parsed.debug && typeof parsed.debug === "object" ? parsed.debug : null,
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H1",
+      }),
+    }).catch(() => {});
+    // #endregion
+    ctx.state.assistantContent += `\n\n❌ **Engine-3-Fehler:** ${errStr}`;
+    ctx.onDelta();
+    return true;
+  }
+
   if (type === "frage_structured") {
     const raw = parsed.data as Record<string, unknown> | undefined;
     if (raw && typeof raw === "object") {
@@ -142,7 +241,7 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
 
 /** True when the stream appended one of our SSE error blocks (pipeline / billing / stream). */
 export function assistantContentHasSseError(content: string): boolean {
-  return /\n\n❌ \*\*(?:Pipeline-Fehler|Fehler|Stream-Fehler):\*\* /.test(content);
+  return /\n\n❌ \*\*(?:Pipeline-Fehler|Fehler|Stream-Fehler|Engine-3-Fehler):\*\* /.test(content);
 }
 
 /** True when the stream produced something we can show (text or a structured result event). */
@@ -151,13 +250,14 @@ export function sseAccumStateHasDeliverable(state: SseAccumState): boolean {
   if (state.frageStructured != null) return true;
   if (state.serviceBillingData != null) return true;
   if (state.invoiceData != null) return true;
+  if (state.engine3Data != null) return true;
   return false;
 }
 
 /** First line of the SSE error message for persistence (e.g. job.error). */
 export function sseErrorSummaryFromAssistantContent(content: string): string {
   const m = content.match(
-    /\n\n❌ \*\*(?:Pipeline-Fehler|Fehler|Stream-Fehler):\*\* ([^\n]+)/,
+    /\n\n❌ \*\*(?:Pipeline-Fehler|Fehler|Stream-Fehler|Engine-3-Fehler):\*\* ([^\n]+)/,
   );
   const line = m?.[1]?.trim();
   if (line) return line.length > 220 ? `${line.slice(0, 217)}…` : line;

@@ -14,6 +14,10 @@ import {
   pruefeServiceBillingVorschlaege,
   erstelleBegruendungVorschlag,
 } from "./regelengine.ts";
+import {
+  enrichSteigerungsBegruendungenBatch,
+  type SteigerungBegruendungItem,
+} from "./steigerungs-begruendung-llm.ts";
 import { buildServiceKatalogMapFromJson } from "../goae-catalog-json.ts";
 import type {
   ParsedRechnung,
@@ -34,6 +38,8 @@ export interface ServiceBillingPosition {
   begruendung?: string;
   leistung: string;
   konfidenz: "hoch" | "mittel" | "niedrig";
+  /** Herkunft: extrahierter Behandlungs-/Dokumenttext zur Zuordnung */
+  quelleBeschreibung?: string;
 }
 
 export interface ServiceBillingSummary {
@@ -75,6 +81,11 @@ function getKatalogMap(): Map<string, KatalogEintrag> {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** Stabiler Zeilen-Key wie im Frontend (ServiceBillingResult getKey). */
+function serviceBillingRowId(isOpt: boolean, ziffer: string, leistung: string): string {
+  return (isOpt ? "opt-" : "") + ziffer + "|" + leistung;
 }
 
 function berechneBetrag(ziffer: string, faktor: number): number {
@@ -120,6 +131,35 @@ function optimiereFaktor(
   }
 
   return Math.min(faktor, hoechstfaktor);
+}
+
+function normalizeMatchToken(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Ordnet eine Mapping-Zeile dem extrahierten NLP-Leistungstext zu (Dokumentbezug). */
+function quelleBeschreibungFuerLeistungstext(
+  leistungText: string,
+  leistungen: ExtrahierteLeistung[],
+): string | undefined {
+  const t = normalizeMatchToken(leistungText);
+  if (!t) return undefined;
+  let best: ExtrahierteLeistung | undefined;
+  let bestScore = 0;
+  for (const l of leistungen) {
+    const b = normalizeMatchToken(l.bezeichnung);
+    if (!b) continue;
+    if (t === b) return l.beschreibung;
+    let score = 0;
+    if (t.includes(b) || b.includes(t)) {
+      score = Math.min(t.length, b.length);
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = l;
+    }
+  }
+  return best?.beschreibung;
 }
 
 /** Extrahiert Leistungen nur aus NLP (Behandlungen), ohne Rechnungspositionen. Ohne Sachkosten. */
@@ -269,6 +309,7 @@ export async function runServiceBillingPipeline(
         begruendung = `Standardfaktor ${faktor}× (Schwellenwert) – keine Begründung erforderlich.`;
       }
 
+      const quelleBeschreibung = quelleBeschreibungFuerLeistungstext(z.leistung, leistungen);
       return {
         ziffer: z.ziffer,
         bezeichnung: z.bezeichnung,
@@ -277,6 +318,7 @@ export async function runServiceBillingPipeline(
         begruendung,
         leistung: z.leistung,
         konfidenz: z.konfidenz,
+        ...(quelleBeschreibung ? { quelleBeschreibung } : {}),
       };
     });
 
@@ -308,6 +350,7 @@ export async function runServiceBillingPipeline(
         begruendung = `Alternative zu GOÄ ${z.ziffer} (${z.bezeichnung}). Standardfaktor ${faktor}× (Schwellenwert) – keine Begründung erforderlich.`;
       }
 
+      const altQuelle = quelleBeschreibungFuerLeistungstext(z.leistung, leistungen);
       optimierungen.push({
         ziffer: altZiffer,
         bezeichnung: eintrag.bezeichnung,
@@ -316,7 +359,62 @@ export async function runServiceBillingPipeline(
         begruendung,
         leistung: `Alternative zu ${z.leistung}`,
         konfidenz: "mittel",
+        ...(altQuelle ? { quelleBeschreibung: altQuelle } : {}),
       });
+    }
+  }
+
+  const steigerungItems: SteigerungBegruendungItem[] = [];
+  for (const v of vorschlaege) {
+    const eintrag = katalog.get(v.ziffer);
+    const schwellenfaktor = eintrag?.schwellenfaktor ?? 2.3;
+    const hoechstfaktor = eintrag?.hoechstfaktor ?? 3.5;
+    if (v.faktor > schwellenfaktor) {
+      steigerungItems.push({
+        id: serviceBillingRowId(false, v.ziffer, v.leistung),
+        ziffer: v.ziffer,
+        bezeichnung: v.bezeichnung,
+        faktor: v.faktor,
+        schwellenfaktor,
+        hoechstfaktor,
+        leistung: v.leistung,
+        ...(v.quelleBeschreibung ? { quelleBeschreibung: v.quelleBeschreibung } : {}),
+      });
+    }
+  }
+  for (const v of optimierungen) {
+    const eintrag = katalog.get(v.ziffer);
+    const schwellenfaktor = eintrag?.schwellenfaktor ?? 2.3;
+    const hoechstfaktor = eintrag?.hoechstfaktor ?? 3.5;
+    if (v.faktor > schwellenfaktor) {
+      steigerungItems.push({
+        id: serviceBillingRowId(true, v.ziffer, v.leistung),
+        ziffer: v.ziffer,
+        bezeichnung: v.bezeichnung,
+        faktor: v.faktor,
+        schwellenfaktor,
+        hoechstfaktor,
+        leistung: v.leistung,
+        ...(v.quelleBeschreibung ? { quelleBeschreibung: v.quelleBeschreibung } : {}),
+      });
+    }
+  }
+
+  if (steigerungItems.length > 0) {
+    const begrMap = await enrichSteigerungsBegruendungenBatch(
+      steigerungItems,
+      medizinischeAnalyse,
+      apiKey,
+      input.model,
+      input.adminContext,
+    );
+    for (const v of vorschlaege) {
+      const t = begrMap.get(serviceBillingRowId(false, v.ziffer, v.leistung));
+      if (t) v.begruendung = t;
+    }
+    for (const v of optimierungen) {
+      const t = begrMap.get(serviceBillingRowId(true, v.ziffer, v.leistung));
+      if (t) v.begruendung = t;
     }
   }
 

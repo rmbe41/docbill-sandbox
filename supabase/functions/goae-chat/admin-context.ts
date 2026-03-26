@@ -388,6 +388,21 @@ async function getQueryEmbedding(query: string, apiKey: string): Promise<number[
   return embedding;
 }
 
+/**
+ * Engine 3: Vorbedingung für KI-Kontext (Admin-RAG braucht Embedding + Supabase).
+ * Wirft bei technischem Ausfall – kein stilles Weiterarbeiten ohne nachvollziehbare Basis.
+ */
+export async function preflightEngine3KiContext(apiKey: string): Promise<void> {
+  const sbUrl = Deno.env.get("SUPABASE_URL");
+  const sbKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!sbUrl || !sbKey) {
+    throw new Error(
+      "KI-Kontext nicht verfügbar: Die Anbindung an die Wissensdatenbank fehlt (Supabase-Umgebung unvollständig). Bitte Administrator kontaktieren.",
+    );
+  }
+  await getQueryEmbedding("DocBill Engine3 Kontextprüfung", apiKey);
+}
+
 export type LoadRelevantAdminContextOptions = {
   /**
    * Nur für Embedding + GOÄ-Ziffern-Filter: oft die **letzte** Nutzerzeile, damit ein
@@ -647,6 +662,12 @@ type PipelineQueryResult = {
 export type LastResultContext = {
   last_invoice_result?: { pruefung?: { positionen?: { ziffer: string }[]; optimierungen?: { ziffer: string }[] } };
   last_service_result?: { vorschlaege?: { ziffer: string }[]; klinischerKontext?: string; fachgebiet?: string };
+  last_engine3_result?: {
+    modus?: string;
+    klinischerKontext?: string;
+    positionen?: { ziffer: string }[];
+    optimierungen?: { ziffer: string }[];
+  };
 };
 
 export function buildPipelineQuery(
@@ -696,6 +717,23 @@ export function buildPipelineQuery(
       parts.push(`Fachgebiet: ${lastResult.last_service_result.fachgebiet}`);
     }
   }
+  const e3 = lastResult?.last_engine3_result;
+  if (e3?.positionen?.length) {
+    for (const p of e3.positionen) {
+      if (p.ziffer) ziffernSet.add(p.ziffer);
+    }
+  }
+  if (e3?.optimierungen?.length) {
+    for (const o of e3.optimierungen) {
+      if (o.ziffer) ziffernSet.add(o.ziffer);
+    }
+  }
+  if (e3?.klinischerKontext) {
+    parts.push(`Vorheriger Engine-3-Kontext: ${e3.klinischerKontext}`);
+  }
+  if (e3?.modus) {
+    parts.push(`Vorheriger Engine-3-Modus: ${e3.modus}`);
+  }
   if (ziffernSet.size) parts.push("GOÄ-Ziffern: " + [...ziffernSet].join(", "));
   parts.push("optimierung analog begründung");
   const query = parts.join("\n");
@@ -704,6 +742,18 @@ export function buildPipelineQuery(
 
 const FRAGE_ADMIN_RAG_MAX_CHARS = 12000;
 const FRAGE_ADMIN_RAG_MAX_USER_TURNS = 5;
+
+/** RAG-Suchquery für Auslegungs-/BÄK-Fragen mit Zusatzstichworten anreichern (Embedding). */
+export function enrichRagQueryForAuslegung(query: string): string {
+  const q = query.trim();
+  if (!q) return q;
+  if (!/\b(bäk|bundesärztekammer|bundesaerztekammer|stellungnahme|auslegung)\b/i.test(q)) {
+    return q;
+  }
+  const tail = "GOÄ Auslegung Stellungnahme Bundesärztekammer BÄK";
+  if (/\bbundes[aä]rztekammer\b/i.test(q) && /\bstellungnahme\b/i.test(q)) return q;
+  return `${q}\n\n${tail}`;
+}
 
 /**
  * Admin-RAG im Fragemodus: letzte Nutzer-Turns bündeln, damit Folgefragen weiterhin
@@ -715,12 +765,14 @@ export function buildFrageAdminRagQuery(
   pipelineFallbackWhenLastEmpty: string,
 ): string {
   const last = lastUserMessage.trim();
-  if (!last) return pipelineFallbackWhenLastEmpty;
+  if (!last) return enrichRagQueryForAuslegung(pipelineFallbackWhenLastEmpty.trim());
   const userTurns = (messages ?? [])
     .filter((m) => m.role === "user")
     .map((m) => String(m.content ?? "").trim())
     .filter((s) => s.length > 0);
   const recent = userTurns.slice(-FRAGE_ADMIN_RAG_MAX_USER_TURNS);
-  if (recent.length <= 1) return last;
-  return recent.join("\n\n").slice(0, FRAGE_ADMIN_RAG_MAX_CHARS);
+  if (recent.length <= 1) return enrichRagQueryForAuslegung(last);
+  return enrichRagQueryForAuslegung(
+    recent.join("\n\n").slice(0, FRAGE_ADMIN_RAG_MAX_CHARS),
+  );
 }

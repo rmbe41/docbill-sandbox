@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
-import { FileText, ThumbsUp, ThumbsDown } from "lucide-react";
+import { FileText, ThumbsUp, ThumbsDown, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,14 +12,22 @@ import InvoiceResult, {
   type SuggestionDecision,
 } from "@/components/InvoiceResult";
 import ServiceBillingResult, { type ServiceBillingResultData } from "@/components/ServiceBillingResult";
+import Engine3Result, { type Engine3ResultData } from "@/components/Engine3Result";
 import FileOverlay from "@/components/FileOverlay";
-import { useFeedback } from "@/hooks/useFeedback";
+import { useFeedback, type RlFeedbackContext } from "@/hooks/useFeedback";
+import { useToast } from "@/hooks/use-toast";
+import { FeedbackThanksBurst } from "@/components/FeedbackThanksBurst";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import type { MessageStructuredContentV1 } from "@/lib/messageStructuredContent";
 import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
 import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
@@ -31,6 +39,7 @@ export type ChatMessage = {
   attachments?: { name: string; type: string; previewUrl?: string }[];
   invoiceResult?: InvoiceResultData;
   serviceBillingResult?: ServiceBillingResultData;
+  engine3Result?: Engine3ResultData;
   analysisTimeSeconds?: number;
   frageAnswer?: FrageAnswerStructured;
   suggestionDecisions?: {
@@ -46,7 +55,68 @@ type ChatBubbleProps = {
     messageId: string,
     patch: Partial<MessageStructuredContentV1>,
   ) => Promise<boolean>;
+  /** Vorangehendes Nutzer-PDF — nur per Klick im Overlay (Rechnungsprüfung). */
+  invoiceReviewSourcePdf?: { previewUrl: string; name: string } | null;
+  /** Effektives Modell und Engine für Feedback-/RL-Datensatz. */
+  feedbackSessionMeta?: { model: string; engine: string };
+  /** Letzte Nachrichten derselben Konversation bis inkl. dieser Bubble. */
+  feedbackPriorMessages?: { role: "user" | "assistant"; content: string }[];
 };
+
+const MAX_RL_MSG_CHARS = 4000;
+
+function buildRlFeedbackContext(
+  message: ChatMessage,
+  sessionMeta: { model: string; engine: string } | undefined,
+  priorMessages: { role: "user" | "assistant"; content: string }[] | undefined,
+): RlFeedbackContext | undefined {
+  const hasStructured =
+    message.invoiceResult != null ||
+    message.serviceBillingResult != null ||
+    message.engine3Result != null ||
+    message.frageAnswer != null;
+  const structured_snapshot = hasStructured
+    ? {
+        ...(message.invoiceResult ? { invoiceResult: message.invoiceResult } : {}),
+        ...(message.serviceBillingResult ? { serviceBillingResult: message.serviceBillingResult } : {}),
+        ...(message.engine3Result ? { engine3Result: message.engine3Result } : {}),
+        ...(message.frageAnswer ? { frageAnswer: message.frageAnswer } : {}),
+      }
+    : undefined;
+
+  const user_messages =
+    priorMessages && priorMessages.length > 0
+      ? priorMessages.map((m) => ({
+          role: m.role,
+          content:
+            m.content.length > MAX_RL_MSG_CHARS
+              ? `${m.content.slice(0, MAX_RL_MSG_CHARS)}\n…[truncated]`
+              : m.content,
+        }))
+      : undefined;
+
+  const ctx: RlFeedbackContext = {
+    ...(sessionMeta ? { model: sessionMeta.model, engine: sessionMeta.engine } : {}),
+    ...(user_messages ? { user_messages } : {}),
+    ...(structured_snapshot ? { structured_snapshot } : {}),
+  };
+
+  if (!ctx.model && !ctx.user_messages?.length && !ctx.structured_snapshot) {
+    return undefined;
+  }
+
+  return ctx;
+}
+
+function assistantMessageFeedbackBody(m: ChatMessage): string {
+  const trimmed = m.content?.trim();
+  if (trimmed) return m.content;
+  if (m.frageAnswer) return "[DocBill: Frage-Antwort strukturiert]";
+  if (m.invoiceResult) return "[DocBill: Rechnungsprüfung strukturiert]";
+  if (m.serviceBillingResult) return "[DocBill: Gebühren-/Leistungsprüfung strukturiert]";
+  if (m.engine3Result) return "[DocBill: Engine 3 strukturiert]";
+  return "";
+}
 
 // Custom markdown components – flache Typografie, keine Boxen
 const markdownComponents = {
@@ -60,6 +130,41 @@ const markdownComponents = {
     <div className="overflow-x-auto my-4">
       <table {...props}>{children}</table>
     </div>
+  ),
+};
+
+/** Frage-Structured: keine großen Überschriften in Unterfeldern (Prompt verbietet ###); falls doch, wie Absatz. */
+const frageSectionMarkdownComponents = {
+  ...markdownComponents,
+  h1: ({ children, ...props }: any) => (
+    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
+      {children}
+    </p>
+  ),
+  h2: ({ children, ...props }: any) => (
+    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
+      {children}
+    </p>
+  ),
+  h3: ({ children, ...props }: any) => (
+    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
+      {children}
+    </p>
+  ),
+  h4: ({ children, ...props }: any) => (
+    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
+      {children}
+    </p>
+  ),
+  h5: ({ children, ...props }: any) => (
+    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
+      {children}
+    </p>
+  ),
+  h6: ({ children, ...props }: any) => (
+    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
+      {children}
+    </p>
   ),
 };
 
@@ -80,36 +185,38 @@ function FrageStructuredReply({ data }: { data: FrageAnswerStructured }) {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
           Kurzantwort
         </h3>
-        <p className="text-sm leading-relaxed">{data.kurzantwort}</p>
+        <div className="markdown-output prose prose-sm max-w-none text-sm leading-relaxed">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={frageSectionMarkdownComponents}>
+            {data.kurzantwort}
+          </ReactMarkdown>
+        </div>
       </section>
       <section>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
           Erläuterung
         </h3>
-        <div className="text-sm leading-relaxed whitespace-pre-wrap">{data.erlaeuterung}</div>
+        <div className="markdown-output prose prose-sm max-w-none text-sm leading-relaxed">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={frageSectionMarkdownComponents}>
+            {data.erlaeuterung}
+          </ReactMarkdown>
+        </div>
       </section>
       {data.grenzfaelle_hinweise?.trim() ? (
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
             Grenzfälle und Hinweise
           </h3>
-          <p className="text-sm leading-relaxed whitespace-pre-wrap">{data.grenzfaelle_hinweise}</p>
+          <div className="markdown-output prose prose-sm max-w-none text-sm leading-relaxed">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={frageSectionMarkdownComponents}>
+              {data.grenzfaelle_hinweise}
+            </ReactMarkdown>
+          </div>
         </section>
       ) : null}
       {quellen.length > 0 ? (
         <footer className="mt-1 pt-3 border-t border-border/30">
-          <p className="text-[11px] leading-snug text-muted-foreground/70 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-            <span className="shrink-0 font-medium text-muted-foreground/55 tracking-wide">Quellen</span>
-            {quellen.map((q, i) => (
-              <React.Fragment key={i}>
-                {i > 0 ? (
-                  <span className="shrink-0 text-muted-foreground/35 select-none" aria-hidden>
-                    ·
-                  </span>
-                ) : null}
-                <span className="min-w-0 break-words">{q}</span>
-              </React.Fragment>
-            ))}
+          <p className="text-xs leading-relaxed text-muted-foreground break-words">
+            <span className="font-bold">Quellen:</span> {quellen.join(", ")}
           </p>
         </footer>
       ) : null}
@@ -131,7 +238,14 @@ function chatBubbleUserInitials(user: SupabaseUser): string {
   return part.slice(0, 1).toUpperCase();
 }
 
-const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }: ChatBubbleProps) => {
+const ChatBubble = ({
+  message,
+  conversationId,
+  updateMessageStructuredContent,
+  invoiceReviewSourcePdf = null,
+  feedbackSessionMeta,
+  feedbackPriorMessages,
+}: ChatBubbleProps) => {
   const isUser = message.role === "user";
   const { user: authUser } = useAuth();
   const userAvatarUrl = authUser?.user_metadata?.avatar_url as string | undefined;
@@ -141,9 +255,19 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
     type: string;
   } | null>(null);
   const [feedbackState, setFeedbackState] = useState<"none" | "positive" | "negative">("none");
+  const [feedbackJustSaved, setFeedbackJustSaved] = useState<"up" | "down" | null>(null);
+  const [feedbackCelebration, setFeedbackCelebration] = useState(false);
   const [inquiryOpen, setInquiryOpen] = useState(false);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
+  const { toast } = useToast();
   const { sendFeedback, isExpertMode } = useFeedback();
+  const clearFeedbackCelebration = useCallback(() => setFeedbackCelebration(false), []);
+
+  useEffect(() => {
+    if (!feedbackJustSaved) return;
+    const id = window.setTimeout(() => setFeedbackJustSaved(null), 500);
+    return () => window.clearTimeout(id);
+  }, [feedbackJustSaved]);
   const invoiceDecisionsRef = useRef<Record<string, string>>({});
   const serviceDecisionsRef = useRef<Record<string, string>>({});
 
@@ -183,32 +307,117 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
 
   const submitFeedback = useCallback(
     async (rating: 1 | -1, inquiryReason?: "A" | "B" | "C" | null) => {
-      if (!conversationId || !message.id) return;
+      // #region agent log
+      if (!conversationId || !message.id) {
+        fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "79522a" },
+          body: JSON.stringify({
+            sessionId: "79522a",
+            runId: "pre-fix",
+            hypothesisId: "H3",
+            location: "ChatBubble.tsx:submitFeedback",
+            message: "submit_aborted_missing_ids",
+            data: { hasConversationId: Boolean(conversationId), hasMessageId: Boolean(message.id), rating },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        return;
+      }
+      // #endregion
       setIsSendingFeedback(true);
-      const ok = await sendFeedback({
+      const rl_context = buildRlFeedbackContext(message, feedbackSessionMeta, feedbackPriorMessages);
+      const result = await sendFeedback({
         message_id: message.id,
         conversation_id: conversationId,
-        response_content: message.content,
+        response_content: assistantMessageFeedbackBody(message),
         rating,
         metadata: {
           decisions: { ...invoiceDecisionsRef.current, ...serviceDecisionsRef.current },
           inquiry_reason: inquiryReason ?? null,
         },
+        rl_context,
       });
       setIsSendingFeedback(false);
-      if (ok) setFeedbackState(rating === 1 ? "positive" : "negative");
+      // #region agent log
+      fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "79522a" },
+        body: JSON.stringify({
+          sessionId: "79522a",
+          runId: "pre-fix",
+          hypothesisId: "H4",
+          location: "ChatBubble.tsx:submitFeedback:afterSend",
+          message: "sendFeedback_result",
+          data: { ok: result.ok, rating },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      if (result.ok) {
+        setFeedbackState(rating === 1 ? "positive" : "negative");
+        setFeedbackJustSaved(rating === 1 ? "up" : "down");
+        setFeedbackCelebration(true);
+      } else {
+        toast({
+          title: "Feedback nicht gespeichert",
+          description:
+            result.error.length > 200
+              ? `${result.error.slice(0, 200)}…`
+              : `${result.error} Bei anhaltenden Problemen bitte später erneut versuchen oder den Support informieren.`,
+          variant: "destructive",
+        });
+      }
     },
-    [conversationId, message.id, message.content, sendFeedback]
+    [
+      conversationId,
+      message,
+      sendFeedback,
+      feedbackSessionMeta,
+      feedbackPriorMessages,
+      toast,
+    ]
   );
 
   const handleThumbsUp = useCallback(() => {
+    // #region agent log
+    fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "79522a" },
+      body: JSON.stringify({
+        sessionId: "79522a",
+        runId: "pre-fix",
+        hypothesisId: "H2",
+        location: "ChatBubble.tsx:handleThumbsUp",
+        message: "thumbs_up_click",
+        data: { feedbackState, willSkip: feedbackState !== "none" },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     if (feedbackState !== "none") return;
     submitFeedback(1);
   }, [feedbackState, submitFeedback]);
 
   const handleThumbsDown = useCallback(() => {
+    // #region agent log
+    const expert = isExpertMode();
+    fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "79522a" },
+      body: JSON.stringify({
+        sessionId: "79522a",
+        runId: "pre-fix",
+        hypothesisId: "H5",
+        location: "ChatBubble.tsx:handleThumbsDown",
+        message: "thumbs_down_click",
+        data: { feedbackState, expert, willOpenInquiry: !expert && feedbackState === "none" },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     if (feedbackState !== "none") return;
-    if (isExpertMode()) {
+    if (expert) {
       submitFeedback(-1);
     } else {
       setInquiryOpen(true);
@@ -234,7 +443,57 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
     }
   }, [feedbackState, conversationId, message.id, submitFeedback]);
 
-  const showFeedback = !isUser && conversationId && message.id && message.content;
+  const hasAssistantSubstance =
+    Boolean(message.content?.trim()) ||
+    message.invoiceResult != null ||
+    message.serviceBillingResult != null ||
+    message.engine3Result != null ||
+    message.frageAnswer != null;
+  const showFeedback = !isUser && conversationId && message.id && hasAssistantSubstance;
+
+  // #region agent log
+  useEffect(() => {
+    if (isUser) return;
+    fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "79522a" },
+      body: JSON.stringify({
+        sessionId: "79522a",
+        runId: "pre-fix",
+        hypothesisId: "H1",
+        location: "ChatBubble.tsx:feedback-visibility",
+        message: "assistant_feedback_row_state",
+        data: {
+          showFeedback,
+          hasAssistantSubstance,
+          hasConversationId: Boolean(conversationId),
+          messageIdLen: message.id?.length ?? 0,
+          hasContent: Boolean(message.content?.trim()),
+          hasInvoice: message.invoiceResult != null,
+          hasService: message.serviceBillingResult != null,
+          hasEngine3: message.engine3Result != null,
+          hasFrage: message.frageAnswer != null,
+          feedbackState,
+          isSendingFeedback,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, [
+    isUser,
+    showFeedback,
+    hasAssistantSubstance,
+    conversationId,
+    message.id,
+    message.content,
+    message.invoiceResult,
+    message.serviceBillingResult,
+    message.engine3Result,
+    message.frageAnswer,
+    feedbackState,
+    isSendingFeedback,
+  ]);
+  // #endregion
 
   return (
     <div
@@ -329,16 +588,40 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
         ) : (
           <div className="space-y-4">
             {message.invoiceResult && (
-              <InvoiceResult
-                data={message.invoiceResult}
-                onDecisionsChange={handleInvoiceDecisionsForFeedback}
-                onExportSuccess={handleExportSuccess}
-                messageId={message.id}
-                initialInvoiceDecisions={message.suggestionDecisions?.invoice ?? null}
-                onPersistInvoiceDecisions={
-                  updateMessageStructuredContent ? handlePersistInvoice : undefined
-                }
-              />
+              <div className="space-y-3">
+                {invoiceReviewSourcePdf ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Ihre Rechnung (Original):{" "}
+                      <span className="text-foreground font-normal">{invoiceReviewSourcePdf.name}</span>
+                    </p>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline shrink-0"
+                      onClick={() =>
+                        setOverlayFile({
+                          src: invoiceReviewSourcePdf.previewUrl,
+                          name: invoiceReviewSourcePdf.name,
+                          type: "application/pdf",
+                        })
+                      }
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      PDF anzeigen
+                    </button>
+                  </div>
+                ) : null}
+                <InvoiceResult
+                  data={message.invoiceResult}
+                  onDecisionsChange={handleInvoiceDecisionsForFeedback}
+                  onExportSuccess={handleExportSuccess}
+                  messageId={message.id}
+                  initialInvoiceDecisions={message.suggestionDecisions?.invoice ?? null}
+                  onPersistInvoiceDecisions={
+                    updateMessageStructuredContent ? handlePersistInvoice : undefined
+                  }
+                />
+              </div>
             )}
             {message.serviceBillingResult && (
               <ServiceBillingResult
@@ -351,27 +634,47 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
                 }
               />
             )}
+            {message.engine3Result && <Engine3Result data={message.engine3Result} />}
             {message.frageAnswer && <FrageStructuredReply data={message.frageAnswer} />}
             {(message.content ||
               (message.invoiceResult && !message.content) ||
-              (message.serviceBillingResult && !message.content)) &&
-              !message.frageAnswer && (
-              <div className="markdown-output prose prose-sm max-w-none pt-1">
-                {(message.invoiceResult || message.serviceBillingResult) && message.content && (
-                  <p className="text-xs font-medium text-muted-foreground not-prose mb-2">Detaillierte Erklärung</p>
-                )}
-                {message.content ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                    {message.content}
-                  </ReactMarkdown>
-                ) : (
-                  <p className="text-muted-foreground text-sm not-prose">
-                    Die detaillierte Erklärung konnte nicht geladen werden (z. B. Timeout). Die Prüfung
-                    oben ist vollständig – bei Bedarf die Anfrage erneut senden.
-                  </p>
-                )}
-              </div>
-            )}
+              (message.serviceBillingResult && !message.content) ||
+              (message.engine3Result && !message.content)) &&
+              !message.frageAnswer &&
+              (message.invoiceResult && message.content ? (
+                <Collapsible defaultOpen={false} className="group not-prose border-t border-border/30 mt-2 pt-1">
+                  <CollapsibleTrigger className="flex w-full items-center gap-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground py-2 rounded-md -mx-1 px-1">
+                    <ChevronDown className="w-4 h-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                    Ausführliche Begründung anzeigen (z. B. § 5 GOÄ, Audit-Text)
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="markdown-output prose prose-sm max-w-none pb-2 border-border/20">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              ) : (
+                <div className="markdown-output prose prose-sm max-w-none pt-1">
+                  {(message.invoiceResult || message.serviceBillingResult || message.engine3Result) &&
+                    message.content && (
+                    <p className="text-xs font-medium text-muted-foreground not-prose mb-2">
+                      Detaillierte Erklärung
+                    </p>
+                  )}
+                  {message.content ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {message.content}
+                    </ReactMarkdown>
+                  ) : (
+                    <p className="text-muted-foreground text-sm not-prose">
+                      Die detaillierte Erklärung konnte nicht geladen werden (z. B. Timeout). Die Prüfung
+                      oben ist vollständig – bei Bedarf die Anfrage erneut senden.
+                    </p>
+                  )}
+                </div>
+              ))}
           </div>
         )}
         </div>
@@ -379,13 +682,18 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
         {(showFeedback || (!isUser && message.analysisTimeSeconds != null)) && (
           <div className="flex items-center justify-between w-full">
             {showFeedback ? (
-            <div className="flex items-center gap-1">
+            <div className="relative flex items-center gap-1">
+            <FeedbackThanksBurst
+              show={feedbackCelebration}
+              onComplete={clearFeedbackCelebration}
+            />
             <Button
               variant="ghost"
               size="icon"
               className={cn(
                 "h-8 w-8 text-muted-foreground hover:text-foreground",
-                feedbackState === "positive" && "text-emerald-600 dark:text-emerald-400"
+                feedbackState === "positive" && "text-emerald-600 dark:text-emerald-400",
+                feedbackJustSaved === "up" && "animate-thumb-success"
               )}
               onClick={handleThumbsUp}
               disabled={isSendingFeedback || feedbackState !== "none"}
@@ -400,7 +708,8 @@ const ChatBubble = ({ message, conversationId, updateMessageStructuredContent }:
                   size="icon"
                   className={cn(
                     "h-8 w-8 text-muted-foreground hover:text-foreground",
-                    feedbackState === "negative" && "text-red-600 dark:text-red-400"
+                    feedbackState === "negative" && "text-red-600 dark:text-red-400",
+                    feedbackJustSaved === "down" && "animate-thumb-success"
                   )}
                   onClick={handleThumbsDown}
                   disabled={isSendingFeedback || feedbackState !== "none"}

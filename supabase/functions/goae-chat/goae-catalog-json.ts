@@ -69,6 +69,59 @@ export type RegelKatalogEintrag = {
   abschnitt: string;
 };
 
+/**
+ * GOÄ Nr. 1, 2, 3 und Analogziffern – im selben Abrechnungsfall typischerweise
+ * nicht nebeneinander berechnungsfähig (Katalog-JSON hatte hier oft leere Ausschlüsse).
+ */
+export const GOAE_BERATUNG_MUTUALLY_EXCLUSIVE = new Set<string>([
+  "1",
+  "2",
+  "3",
+  "A1",
+  "A2",
+  "A3",
+]);
+
+/**
+ * Tonometrie 1255–1257: im selben Abrechnungsfall typischerweise nicht nebeneinander
+ * berechnungsfähig (Katalog-Import liefert hier oft leere Ausschlüsse).
+ */
+export const GOAE_TONOMETRIE_MUTUALLY_EXCLUSIVE = new Set<string>([
+  "1255",
+  "1256",
+  "1257",
+]);
+
+/** Expandiert Bereichsangaben wie "1210-1213" zu Einzelziffern (wie Regelengine). */
+export function expandGoaeAusschlussRangeTokens(raw: string[]): string[] {
+  const result: string[] = [];
+  for (const item of raw) {
+    const rangeMatch = item.match(/^(\d+)-(\d+)$/);
+    if (rangeMatch) {
+      const start = parseInt(rangeMatch[1], 10);
+      const end = parseInt(rangeMatch[2], 10);
+      for (let i = start; i <= end; i++) result.push(String(i));
+    } else {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+/** True, wenn laut effektivem Regelkatalog beide Ziffern nicht gemeinsam berechnungsfähig sind. */
+export function regelZiffernKollidieren(
+  katalog: Map<string, RegelKatalogEintrag>,
+  a: string,
+  b: string,
+): boolean {
+  if (a === b) return false;
+  const ea = katalog.get(a);
+  const eb = katalog.get(b);
+  const expA = ea ? expandGoaeAusschlussRangeTokens(ea.ausschlussziffern) : [];
+  const expB = eb ? expandGoaeAusschlussRangeTokens(eb.ausschlussziffern) : [];
+  return expA.includes(b) || expB.includes(a);
+}
+
 export function buildRegelKatalogMapFromJson(): Map<string, RegelKatalogEintrag> {
   const map = new Map<string, RegelKatalogEintrag>();
   for (const e of ENTRIES) {
@@ -82,6 +135,39 @@ export function buildRegelKatalogMapFromJson(): Map<string, RegelKatalogEintrag>
       abschnitt: e.abschnitt ?? "",
     });
   }
+
+  for (const [, entry] of map) {
+    if (!GOAE_BERATUNG_MUTUALLY_EXCLUSIVE.has(entry.ziffer)) continue;
+    const merged = new Set(entry.ausschlussziffern);
+    for (const o of GOAE_BERATUNG_MUTUALLY_EXCLUSIVE) {
+      if (o !== entry.ziffer) merged.add(o);
+    }
+    entry.ausschlussziffern = [...merged];
+  }
+
+  for (const [, entry] of map) {
+    if (!GOAE_TONOMETRIE_MUTUALLY_EXCLUSIVE.has(entry.ziffer)) continue;
+    const merged = new Set(entry.ausschlussziffern);
+    for (const o of GOAE_TONOMETRIE_MUTUALLY_EXCLUSIVE) {
+      if (o !== entry.ziffer) merged.add(o);
+    }
+    entry.ausschlussziffern = [...merged];
+  }
+
+  for (const [, entry] of map) {
+    const m = /^A(.+)$/i.exec(entry.ziffer);
+    if (!m) continue;
+    const baseKey = m[1];
+    const baseEntry = map.get(baseKey);
+    if (!baseEntry) continue;
+    const merged = new Set([
+      ...entry.ausschlussziffern,
+      ...baseEntry.ausschlussziffern,
+    ]);
+    merged.delete(entry.ziffer);
+    entry.ausschlussziffern = [...merged];
+  }
+
   return map;
 }
 
@@ -152,6 +238,14 @@ export function expandZiffernMitAusschlüssen(seed: Iterable<string>): Set<strin
           changed = true;
         }
       }
+      if (GOAE_BERATUNG_MUTUALLY_EXCLUSIVE.has(z)) {
+        for (const o of GOAE_BERATUNG_MUTUALLY_EXCLUSIVE) {
+          if (o !== z && goaeByZiffer.has(o) && !want.has(o)) {
+            want.add(o);
+            changed = true;
+          }
+        }
+      }
     }
   }
   return want;
@@ -160,16 +254,22 @@ export function expandZiffernMitAusschlüssen(seed: Iterable<string>): Set<strin
 export type SelectiveCatalogOptions = {
   /** Ziffern inkl. erweiterter Ausschlüsse */
   ziffern: Set<string>;
+  /**
+   * Max. Anzahl **Filler**-Ziffern nach allen Prioritätsziffern (ohne Priorität: Gesamtkatalogzeilen).
+   * Prioritätsziffern werden immer vollständig ausgegeben und zählen nicht gegen dieses Limit.
+   */
   maxLines?: number;
   /** Titel-Unterzeile im Markdown */
   subtitle?: string;
+  /**
+   * Diese Ziffern (Schnitt mit `ziffern`) werden immer zuerst und vollständig ausgegeben
+   * (z. B. aus Nutzertext/Rechnung extrahiert), damit sie bei großen Ausschluss-Mengen nicht abgeschnitten werden.
+   */
+  priorityZiffern?: Set<string> | string[];
 };
 
-export function buildSelectiveCatalogMarkdown(opts: SelectiveCatalogOptions): string {
-  const maxLines = opts.maxLines ?? 120;
-  const lines: string[] = [GOAE_KATALOG_HEADER, "", opts.subtitle ?? "## Relevante Ziffern (JSON-Auszug)", ""];
-
-  const sorted = [...opts.ziffern].filter((z) => goaeByZiffer.has(z)).sort((a, b) => {
+function sortZiffernListe(ids: string[]): string[] {
+  return [...ids].filter((z) => goaeByZiffer.has(z)).sort((a, b) => {
     const na = parseInt(a, 10);
     const nb = parseInt(b, 10);
     const ia = isNaN(na) ? 99999 : na;
@@ -177,19 +277,56 @@ export function buildSelectiveCatalogMarkdown(opts: SelectiveCatalogOptions): st
     if (ia !== ib) return ia - ib;
     return a.localeCompare(b);
   });
+}
 
-  let n = 0;
-  for (const z of sorted) {
-    if (n >= maxLines) break;
-    const e = goaeByZiffer.get(z);
-    if (!e) continue;
-    lines.push(formatCatalogEntryLine(e));
-    n++;
+function normalizePrioritySet(raw: SelectiveCatalogOptions["priorityZiffern"]): Set<string> {
+  if (!raw) return new Set();
+  if (raw instanceof Set) return new Set([...raw].map((z) => String(z).trim()).filter(Boolean));
+  return new Set(raw.map((z) => String(z).trim()).filter(Boolean));
+}
+
+export function buildSelectiveCatalogMarkdown(opts: SelectiveCatalogOptions): string {
+  const maxFillerLines = opts.maxLines ?? 120;
+  const lines: string[] = [GOAE_KATALOG_HEADER, "", opts.subtitle ?? "## Relevante Ziffern (JSON-Auszug)", ""];
+
+  const allValid = sortZiffernListe([...opts.ziffern]);
+  const prioritySet = normalizePrioritySet(opts.priorityZiffern);
+  const priorityOrdered = sortZiffernListe([...prioritySet].filter((z) => opts.ziffern.has(z)));
+  const fillerPool = sortZiffernListe(allValid.filter((z) => !prioritySet.has(z)));
+
+  const emitted = new Set<string>();
+
+  if (priorityOrdered.length === 0) {
+    for (const z of allValid) {
+      if (emitted.size >= maxFillerLines) break;
+      const e = goaeByZiffer.get(z);
+      if (!e) continue;
+      lines.push(formatCatalogEntryLine(e));
+      emitted.add(z);
+    }
+  } else {
+    for (const z of priorityOrdered) {
+      const e = goaeByZiffer.get(z);
+      if (!e) continue;
+      lines.push(formatCatalogEntryLine(e));
+      emitted.add(z);
+    }
+    let fillerCount = 0;
+    for (const z of fillerPool) {
+      if (fillerCount >= maxFillerLines) break;
+      if (emitted.has(z)) continue;
+      const e = goaeByZiffer.get(z);
+      if (!e) continue;
+      lines.push(formatCatalogEntryLine(e));
+      emitted.add(z);
+      fillerCount++;
+    }
   }
 
-  if (sorted.length > maxLines) {
+  const hidden = allValid.filter((z) => !emitted.has(z)).length;
+  if (hidden > 0) {
     lines.push("");
-    lines.push(`_(weitere ${sorted.length - maxLines} Ziffern ausgeblendet; erhöhe maxLines oder schärfe die Frage.)_`);
+    lines.push(`_(weitere ${hidden} Ziffern ausgeblendet; erhöhe maxLines oder schärfe die Frage.)_`);
   }
 
   lines.push(
@@ -226,6 +363,7 @@ export function buildMappingCatalogMarkdown(params: {
 }): string {
   const maxLines = params.maxLines ?? 180;
   const want = new Set<string>();
+  const priority = new Set<string>();
 
   for (const z of ["1", "2", "3", "4", "5", "6", "7", "8", "200", "250", "252", "253"]) {
     if (goaeByZiffer.has(z)) want.add(z);
@@ -240,7 +378,10 @@ export function buildMappingCatalogMarkdown(params: {
   }
 
   for (const t of params.leistungTexts) {
-    for (const z of extractZiffernFromText(t)) want.add(z);
+    for (const z of extractZiffernFromText(t)) {
+      want.add(z);
+      priority.add(z);
+    }
   }
 
   expandZiffernMitAusschlüssen(want);
@@ -249,6 +390,7 @@ export function buildMappingCatalogMarkdown(params: {
     ziffern: want,
     maxLines,
     subtitle: "## GOÄ-Katalog (Auszug für Zuordnung)",
+    priorityZiffern: priority,
   });
 }
 
@@ -275,5 +417,6 @@ export function buildChatSelectiveCatalogMarkdown(
     ziffern: expanded,
     maxLines,
     subtitle: "## GOÄ-Katalog (relevante Ziffern aus Konversation)",
+    priorityZiffern: new Set(found),
   });
 }

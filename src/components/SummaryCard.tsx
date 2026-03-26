@@ -31,7 +31,7 @@ export function SummaryCard({ label, value, detail, variant }: SummaryCardProps)
       </p>
       <p className={cn("text-lg font-bold", valueClasses[variant])}>{value}</p>
       {detail && (
-        <p className="text-[10px] text-muted-foreground">{detail}</p>
+        <p className="text-[10px] text-muted-foreground line-clamp-2">{detail}</p>
       )}
     </div>
   );

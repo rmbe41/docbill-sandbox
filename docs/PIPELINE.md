@@ -18,7 +18,9 @@ Der Klassifikator ([`intent-classifier.ts`](../supabase/functions/goae-chat/inte
 |------|-----------------|------------------|
 | 1 | Reine GOÄ-/Regelfrage, **kein** Rechnungsvorschlag | `frage` → `handleChatMode` mit **`buildFrageSystemPrompt`**: strukturierte Antwort (Kurzantwort, Erläuterung, **Quelle**), **kein** „Rechnungsvorschlag“-Layout |
 | 2 | **Bestehende Rechnung** hochladen: prüfen, korrigieren, verbessern | `rechnung_pruefen` → `runPipeline` oder `runSimplePipeline` (Simple-Prompt: Prüfung/Korrektur der extrahierten Positionen) |
-| 3 | **Akte, Befund, Leistungsliste** → GOÄ-/Rechnungsvorschlag ableiten | `leistungen_abrechnen` → `runServiceBillingAsStream` (Einleitung: „Rechnungsvorschlag aus Ihren Angaben …“) |
+| 3 | **Akte, Befund, Leistungsliste** → GOÄ-/Rechnungsvorschlag ableiten | `leistungen_abrechnen` → `runServiceBillingAsStream` **oder** bei `engine_type === "engine3"` → `runEngine3AsStream` (Modus Leistungen) |
+| 3b | Rechnung prüfen unter **Engine 3** | `rechnung_pruefen` + Dateien + `engine3` → `runEngine3AsStream` (Modus Rechnungsprüfung) |
+| 0 | **Geführter Einstieg** (Welcome „Leistungen abrechnen“ / „Rechnung prüfen“) | Erste Anfrage mit `guided_phase: "collect"` + `guided_workflow` → `handleChatMode` mit Zusatzinstruktion („Sammelphase“), **vor** Intent-Routing. Folgenachrichten ohne diese Felder laufen normal über den Klassifikator. |
 
 **Wann läuft der Intent-Klassifikator?** Er wird **immer** ohne Dateien ausgeführt. **Mit Dateien** wird er ausgeführt, wenn mindestens eines zutrifft: Nachricht bis **100 Zeichen**, **Service-Billing-Cues** (z. B. Akte, Befund, „was kann ich abrechnen“, Leistungsliste, …), oder längere Nachricht mit Leistungs-/Abrechnungsmustern ohne Prüf-/Kontroll-Fokus. Nur bei **klar längeren** Nachrichten ohne solche Cues wird der Klassifikator übersprungen und direkt `rechnung_pruefen` angenommen (klassische lange „Rechnung bitte prüfen“-Anfrage).
 
@@ -47,7 +49,17 @@ flowchart TD
 
 Quellcode: Verzweigung in [`index.ts`](../supabase/functions/goae-chat/index.ts) (nach `classifyIntent` bzw. `needsClassifier`).
 
-## A) Service-Billing (`leistungen_abrechnen`)
+## Engine 3 (`engine_type === "engine3"`)
+
+Eigenständige Pipeline [`runEngine3AsStream`](../supabase/functions/goae-chat/pipeline/engine3/orchestrator.ts), **nicht** `runPipeline` / `runSimplePipeline` / `runServiceBillingAsStream`.
+
+- **Rechnungsprüfung:** Intent `rechnung_pruefen`, Dateien vorhanden → Parser, NLP, fokussierter GOÄ-Auszug, Admin-RAG, strukturiertes JSON-Ergebnis, Nachrechnen der Beträge, optionaler Kritik-Refine-LLM-Schritt.
+- **Mehrere Dateien (Rechnung + Akte):** Bei **mindestens zwei** Uploads nutzt der Rechnungs-Parser ([`dokument-parser.ts`](../supabase/functions/goae-chat/pipeline/dokument-parser.ts)) einen erweiterten Modus: `positionen`/`stammdaten` aus der Honorarrechnung, Feld **`klinischeDokumentation`** für Akte/Befund. Engine 3 gleicht klinischen Inhalt mit den Rechnungspositionen ab (Prompt in [`engine3/orchestrator.ts`](../supabase/functions/goae-chat/pipeline/engine3/orchestrator.ts)).
+- **Leistungen abrechnen:** Intent `leistungen_abrechnen` → wie oben, Modus Erstellung; Dateien optional (sonst Nur-Text aus der Nachricht).
+- **Preflight:** `preflightEngine3KiContext` ([`admin-context.ts`](../supabase/functions/goae-chat/admin-context.ts)) – bei fehlender Supabase-Anbindung oder Embedding-Fehler **sofort** `engine3_error`, kein Scheinergebnis.
+- **Stream:** `engine3_progress`, `engine3_result`, Markdown-Kurzfassung, `engine3_error`.
+
+## A) Service-Billing (`leistungen_abrechnen`, nicht Engine 3)
 
 **Funktion:** [`runServiceBillingAsStream`](../supabase/functions/goae-chat/pipeline/service-billing-orchestrator.ts) ruft intern `runServiceBillingPipeline` auf und streamt Ergebnis + kurzen Einleitungstext.
 
@@ -94,7 +106,7 @@ Es wird **kein** `pipeline_result` gesendet; die UI hat keine strukturierte Rech
 
 ## Kontext für Follow-ups
 
-Der Client kann **`last_invoice_result`** (gekürzt auf `pruefung`) und **`last_service_result`** mitsenden, damit Follow-up-Fragen und Admin-RAG den letzten Stand berücksichtigen (siehe API-Dokumentation).
+Der Client kann **`last_invoice_result`** (gekürzt auf `pruefung`), **`last_service_result`** und **`last_engine3_result`** mitsenden, damit Follow-up-Fragen und Admin-RAG den letzten Stand berücksichtigen (siehe API-Dokumentation).
 
 ## Weiterführend
 

@@ -129,6 +129,43 @@ function suggestionHasMeaningfulNumericalChange(s: FlatSuggestion): boolean {
   return !faktorGleich || !betragGleich;
 }
 
+/** Reine Text-/Begründungskorrektur (ohne Faktor-/Betragsänderung), z. B. fehlende GOÄ-Begründung oder Analog-Hinweis. */
+function suggestionHasTextualKorrektur(s: FlatSuggestion): boolean {
+  if (s.kind !== "korrektur") return false;
+  const p = s.pruefung;
+  if (!p || (p.typ !== "begruendung_fehlt" && p.typ !== "analog")) return false;
+  return !!(p.vorschlag?.trim() || s.begruendungVorschlag?.trim());
+}
+
+const SUMMARY_TEXT_MAX = 90;
+
+function truncateSummaryText(s: string, max = SUMMARY_TEXT_MAX): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1) + "…";
+}
+
+function TextualKorrekturPreview({ s }: { s: FlatSuggestion }) {
+  const vor = (s.vorherBegruendung ?? "").trim() || "—";
+  const nach = (s.begruendungVorschlag ?? s.vorschlag ?? "").trim();
+  return (
+    <div className="text-xs space-y-1 leading-snug">
+      <div>
+        <span className="text-[10px] uppercase text-muted-foreground font-semibold">Bisher </span>
+        <span className="text-muted-foreground break-words">{vor}</span>
+      </div>
+      {nach ? (
+        <div>
+          <span className="text-[10px] uppercase text-emerald-700 dark:text-emerald-400 font-semibold">
+            Vorschlag{" "}
+          </span>
+          <span className="text-foreground/90 break-words">{nach}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
@@ -202,7 +239,7 @@ function textContainedInHaystack(haystack: string, needle: string): boolean {
   return h.includes(n);
 }
 
-/** Längere GOÄ-Begründung im Bereich „Detaillierte Erläuterungen“, nicht in der Hinweis-Spalte. */
+/** Längere GOÄ-Begründung im Erläuterungs-Panel, nicht in der Hinweis-Spalte. */
 function begruendungFuerDetailPanel(
   row: InvoicePruefRow,
   s: FlatSuggestion | undefined,
@@ -300,28 +337,23 @@ function VorschlagErlaeuterungenPanel({
 
   return (
     <section className="rounded-xl p-4 border border-border/60 bg-muted/10 dark:bg-muted/5">
-      <h2 className="text-sm font-semibold text-foreground mb-3">Detaillierte Erläuterungen</h2>
+      <h3 className="text-sm font-semibold text-foreground mb-3">Erläuterungen</h3>
       <div className="space-y-4">
         {blocks.map((b) => (
           <div
             key={b.key}
             className="rounded-lg border border-border/50 bg-background/40 p-3 text-xs space-y-2"
           >
-            <h3 className="text-sm font-medium text-foreground">{b.title}</h3>
-            {b.handlung && (
+            <h4 className="text-sm font-medium text-foreground">{b.title}</h4>
+            {(b.handlung || b.ausfuehrlicheBegruendung) && (
               <div>
                 <p className="text-[10px] uppercase text-muted-foreground font-semibold mb-0.5">
-                  Handlung
+                  Erläuterung
                 </p>
-                <p className="leading-relaxed text-foreground">{b.handlung}</p>
-              </div>
-            )}
-            {b.ausfuehrlicheBegruendung && (
-              <div>
-                <p className="text-[10px] uppercase text-muted-foreground font-semibold mb-0.5">
-                  Ausführliche Begründung (GOÄ)
-                </p>
-                <p className="leading-relaxed text-foreground">{b.ausfuehrlicheBegruendung}</p>
+                <div className="space-y-2 text-foreground leading-relaxed">
+                  {b.handlung && <p>{b.handlung}</p>}
+                  {b.ausfuehrlicheBegruendung && <p>{b.ausfuehrlicheBegruendung}</p>}
+                </div>
               </div>
             )}
             {b.einordnung.length > 0 && (
@@ -356,10 +388,19 @@ function isMeaningfulSuggestion(
   const betragGleich = valuesAreEqual(vorherBetrag, nachherBetrag, BETRAG_TOLERANZ);
 
   if (p.typ === "ausschluss") {
+    if (p.schwere === "warnung") {
+      return true;
+    }
     const partBeforeUnd = (p.vorschlag ?? "").split(" und ")[0] || "";
     const entfernenMatch = partBeforeUnd.match(/GOÄ\s*(\d+)/);
     const entferntZiffer = entfernenMatch?.[1];
     return entferntZiffer === pos.ziffer;
+  }
+  if (
+    (p.typ === "begruendung_fehlt" || p.typ === "analog") &&
+    !!(p.vorschlag?.trim() || p.begruendungVorschlag?.trim())
+  ) {
+    return true;
   }
   return !faktorGleich || !betragGleich;
 }
@@ -415,7 +456,22 @@ function buildSuggestions(data: InvoiceResultData): FlatSuggestion[] {
   return out;
 }
 
-type PreviewRow = { nr: number; ziffer: string; bezeichnung: string; faktor: number; betrag: number; begruendung?: string; sourcePosNr?: number; sourceOptSuggestionId?: string; isPendingOpt?: boolean; pendingOptSuggestion?: FlatSuggestion };
+type PreviewRow = {
+  nr: number;
+  ziffer: string;
+  bezeichnung: string;
+  faktor: number;
+  betrag: number;
+  begruendung?: string;
+  sourcePosNr?: number;
+  /** Pipeline-Prüfstatus der Originalposition (nicht bei reinen Zusatzpositionen). */
+  pruefStatus?: GeprueftePosition["status"];
+  /** Nur Ausschluss „beibehalten“-Seite, sonst keine weiteren Fehler/Warnungen außer Ausschluss-warnung. */
+  ausschlussVorschlagSeite?: boolean;
+  sourceOptSuggestionId?: string;
+  isPendingOpt?: boolean;
+  pendingOptSuggestion?: FlatSuggestion;
+};
 
 function getSuggestionsForPreviewRow(row: PreviewRow, suggestions: FlatSuggestion[]): FlatSuggestion[] {
   if (row.isPendingOpt && row.pendingOptSuggestion) return [row.pendingOptSuggestion];
@@ -424,19 +480,66 @@ function getSuggestionsForPreviewRow(row: PreviewRow, suggestions: FlatSuggestio
   return [];
 }
 
-function schwereBadgeClass(s: InvoicePruefRow["schwere"]): string {
+function isAusschlussVorschlagZeile(row: Pick<InvoicePruefRow, "typ" | "schwere">): boolean {
+  return row.typ === "ausschluss" && row.schwere === "warnung";
+}
+
+/** Badges in der Vorschläge-Tabelle (inkl. „Vorschlag“ bei Ausschluss-Beibehalten-Seite). */
+function pruefRowBadgeClass(row: InvoicePruefRow): string {
   return cn(
     "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase whitespace-nowrap",
-    s === "fehler" && "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200",
-    s === "warnung" && "bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
-    s === "info" && "bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200",
+    row.schwere === "fehler" && "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200",
+    isAusschlussVorschlagZeile(row) &&
+      "bg-sky-100 text-sky-900 dark:bg-sky-950/40 dark:text-sky-200",
+    (row.schwere === "warnung" || row.schwere === "info") &&
+      !isAusschlussVorschlagZeile(row) &&
+      "bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
   );
 }
 
-function schwereLabel(s: InvoicePruefRow["schwere"]): string {
-  if (s === "fehler") return "Fehler";
-  if (s === "warnung") return "Warnung";
-  return "Hinweis";
+function pruefRowNutzerLabel(row: InvoicePruefRow): string {
+  if (row.schwere === "fehler") return "Fehler";
+  if (isAusschlussVorschlagZeile(row)) return "Vorschlag";
+  return "Zusatz";
+}
+
+function positionStatusNutzerLabel(status: GeprueftePosition["status"]): string {
+  if (status === "fehler") return "Fehler";
+  if (status === "warnung") return "Zusatz";
+  return "Korrekt";
+}
+
+function positionStatusBadgeClass(status: GeprueftePosition["status"]): string {
+  return cn(
+    "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase whitespace-nowrap",
+    status === "fehler" && "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200",
+    status === "warnung" && "bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+    status === "korrekt" &&
+      "bg-emerald-100 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200",
+  );
+}
+
+function previewRowTypDisplay(row: PreviewRow): { label: string; className: string } {
+  if (row.sourceOptSuggestionId) {
+    return {
+      label: "Zusatz",
+      className: cn(
+        "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase whitespace-nowrap",
+        "bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+      ),
+    };
+  }
+  if (row.ausschlussVorschlagSeite) {
+    return {
+      label: "Vorschlag",
+      className: cn(
+        "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase whitespace-nowrap",
+        "bg-sky-100 text-sky-900 dark:bg-sky-950/40 dark:text-sky-200",
+      ),
+    };
+  }
+  const st = row.pruefStatus ?? "korrekt";
+  return { label: positionStatusNutzerLabel(st), className: positionStatusBadgeClass(st) };
 }
 
 function PruefPreviewCell({
@@ -450,11 +553,26 @@ function PruefPreviewCell({
 }) {
   if (s) {
     if (s.kind === "korrektur" && s.pruefung?.typ === "ausschluss") {
+      if (s.pruefung.schwere === "warnung") {
+        return (
+          <span className="text-xs text-sky-800 dark:text-sky-200 font-medium leading-snug">
+            Diese Position beibehalten; widersprüchliche GOÄ-Ziffer laut Hinweis streichen.
+          </span>
+        );
+      }
       return (
         <span className="text-xs text-destructive font-medium">
           Position entfällt (Ausschluss)
         </span>
       );
+    }
+    if (
+      s.kind === "korrektur" &&
+      decision === "pending" &&
+      suggestionHasTextualKorrektur(s) &&
+      !suggestionHasMeaningfulNumericalChange(s)
+    ) {
+      return <TextualKorrekturPreview s={s} />;
     }
     const showNum = s.kind === "korrektur" && suggestionHasMeaningfulNumericalChange(s);
     if (
@@ -573,7 +691,6 @@ function VorschlaegePanel({
   onDecision,
   toolbar,
   suggestionCount,
-  rechnungVorschauKontext,
 }: {
   rows: InvoicePruefRow[];
   suggestionsById: Map<string, FlatSuggestion>;
@@ -581,71 +698,18 @@ function VorschlaegePanel({
   onDecision: (id: string, d: SuggestionDecision) => void;
   toolbar: ReactNode;
   suggestionCount: number;
-  rechnungVorschauKontext: {
-    pendingCount: number;
-    rechnungsSumme: number;
-    previewSum: number;
-  } | null;
 }) {
   return (
-    <section className="rounded-xl p-4 border border-border/80 bg-muted/15 dark:bg-muted/10">
+    <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <h2 className="text-sm font-semibold text-foreground">Vorschläge</h2>
-        <div className="flex flex-wrap items-center gap-2">{toolbar}</div>
+        <h3 className="text-sm font-semibold text-foreground">Vorschläge</h3>
+        <div className="flex flex-nowrap items-center gap-2 shrink-0">{toolbar}</div>
       </div>
-      {rechnungVorschauKontext && (
-        <>
-          <p className="text-xs text-muted-foreground mb-3">
-            Die Positionsliste unter „Rechnung“ zeigt die Vorschau nach Ihren Entscheidungen in diesem Bereich.
-          </p>
-          <div
-            className={cn(
-              "sticky top-12 z-20 -mx-2 sm:-mx-4 px-2 sm:px-4 py-2 mb-3 rounded-lg flex flex-wrap items-center gap-x-4 gap-y-1 text-xs",
-              "bg-background/95 backdrop-blur border border-border/70 shadow-sm supports-[backdrop-filter]:bg-background/85",
-            )}
-          >
-            <span>
-              <strong className="text-foreground">{rechnungVorschauKontext.pendingCount}</strong>{" "}
-              <span className="text-muted-foreground">
-                Vorschlag{rechnungVorschauKontext.pendingCount === 1 ? "" : "e"} offen
-              </span>
-            </span>
-            <span className="hidden sm:inline text-border">|</span>
-            <span className="text-muted-foreground">
-              Original{" "}
-              <strong className="text-foreground tabular-nums">
-                {formatEuro(rechnungVorschauKontext.rechnungsSumme)}
-              </strong>
-            </span>
-            <span className="text-muted-foreground">
-              Δ{" "}
-              <strong
-                className={cn(
-                  "tabular-nums",
-                  rechnungVorschauKontext.previewSum - rechnungVorschauKontext.rechnungsSumme >= 0
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-red-600 dark:text-red-400",
-                )}
-              >
-                {rechnungVorschauKontext.previewSum - rechnungVorschauKontext.rechnungsSumme >= 0
-                  ? "+"
-                  : "−"}
-                {formatEuro(
-                  Math.abs(
-                    rechnungVorschauKontext.previewSum - rechnungVorschauKontext.rechnungsSumme,
-                  ),
-                )}
-              </strong>
-              <span className="font-normal"> zur Vorschau</span>
-            </span>
-          </div>
-        </>
-      )}
       {rows.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           {suggestionCount > 0
-            ? "Keine positionsbezogenen Prüfhinweise. Zusatzpositionen siehe Rechnung unten."
-            : "Keine Vorschläge zur Prüfung. Die Rechnungsvorschau finden Sie unten."}
+            ? "Keine positionsbezogenen Prüfhinweise. Zusatzpositionen stehen in der Positionsliste unten."
+            : "Keine Vorschläge zur Prüfung. Die Positionsliste unten zeigt die Vorschau."}
         </p>
       ) : (
         <>
@@ -663,7 +727,7 @@ function VorschlaegePanel({
                   )}
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={schwereBadgeClass(row.schwere)}>{schwereLabel(row.schwere)}</span>
+                    <span className={pruefRowBadgeClass(row)}>{pruefRowNutzerLabel(row)}</span>
                     <span className="font-mono font-semibold text-xs">GOÄ {row.ziffer}</span>
                     <span className="text-[10px] text-muted-foreground">Pos. {row.posNr}</span>
                   </div>
@@ -692,7 +756,7 @@ function VorschlaegePanel({
             <table className="invoice-table w-full min-w-[640px]">
               <thead>
                 <tr>
-                  <th className="invoice-th w-[5.5rem]">Status</th>
+                  <th className="invoice-th w-[5.5rem]">Typ</th>
                   <th className="invoice-th w-16">GOÄ</th>
                   <th className="invoice-th min-w-[180px]">Hinweis</th>
                   <th className="invoice-th min-w-[140px]">Vorschau</th>
@@ -706,7 +770,7 @@ function VorschlaegePanel({
                   return (
                     <tr key={row.suggestionId}>
                       <td className="invoice-td align-top">
-                        <span className={schwereBadgeClass(row.schwere)}>{schwereLabel(row.schwere)}</span>
+                        <span className={pruefRowBadgeClass(row)}>{pruefRowNutzerLabel(row)}</span>
                       </td>
                       <td className="invoice-td align-top font-mono font-semibold">{row.ziffer}</td>
                       <td className="invoice-td align-top text-xs leading-relaxed max-w-[360px]">
@@ -732,7 +796,7 @@ function VorschlaegePanel({
           </div>
         </>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -745,10 +809,24 @@ function formatSuggestionAenderungSummary(
   if (s.kind === "optimierung") return "+ Neue Position";
   const p = s.pruefung;
   if (p?.typ === "ausschluss") {
+    if (p.schwere === "warnung") {
+      if (decision === "pending") return "Beibehalten · widersprüchliche Ziffer streichen (ausstehend)";
+      return decision === "accepted" ? "Hinweis übernommen" : "Hinweis abgelehnt";
+    }
     if (decision === "pending") return "Entfällt · von Summe ausgeschlossen (ausstehend)";
     return "Entfällt";
   }
-  if (!suggestionHasMeaningfulNumericalChange(s)) return "Unverändert";
+  if (!suggestionHasMeaningfulNumericalChange(s)) {
+    if (p?.typ === "begruendung_fehlt") {
+      return decision === "accepted" ? "Begründung übernommen" : "Begründung ergänzen";
+    }
+    if (p?.typ === "analog") {
+      return decision === "accepted" ? "Kennzeichnung übernommen" : "Analog-Kennzeichnung";
+    }
+    const v = p?.vorschlag?.trim();
+    if (v) return truncateSummaryText(v);
+    return "Unverändert";
+  }
   const parts: string[] = [];
   if (
     s.vorherFaktor != null &&
@@ -816,6 +894,8 @@ function UnifiedPositionCard({
     (s) => s.pruefung?.typ === "ausschluss" && (decisions[s.id] ?? "pending") === "pending",
   );
 
+  const typ = previewRowTypDisplay(row);
+
   return (
     <div
       className={cn(
@@ -826,10 +906,13 @@ function UnifiedPositionCard({
     >
       <div className={cn("flex justify-between items-start gap-2", hasStrikeSuggestion && "line-through")}>
         <div>
-          <span className="font-mono text-muted-foreground text-xs">{row.nr} · {row.ziffer}</span>
-          {row.isPendingOpt && (
-            <span className="ml-1 text-[10px] uppercase text-amber-600 dark:text-amber-400">+ Hinzufügen</span>
-          )}
+          <div className="flex flex-wrap items-center gap-2 mb-0.5">
+            <span className={typ.className}>{typ.label}</span>
+            <span className="font-mono text-muted-foreground text-xs">{row.nr} · {row.ziffer}</span>
+            {row.isPendingOpt && (
+              <span className="text-[10px] uppercase text-amber-600 dark:text-amber-400">+ Hinzufügen</span>
+            )}
+          </div>
           <p className="text-sm font-medium">{row.bezeichnung}</p>
         </div>
         <div className="text-right">
@@ -874,6 +957,9 @@ function UnifiedPositionCard({
                 {s.nachherBetrag != null && <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">{formatEuro(s.nachherBetrag)}</span>}
               </div>
             )}
+            {isPending && !showNumericalChange && suggestionHasTextualKorrektur(s) && (
+              <TextualKorrekturPreview s={s} />
+            )}
             {!isPending && (
               <span className="text-muted-foreground text-xs">
                 {decision === "accepted" ? "Vorschlag angenommen" : "Vorschlag abgelehnt"}
@@ -910,6 +996,7 @@ function UnifiedPositionRow({
   const hasStrikeSuggestion = rowSuggestions.some(
     (s) => s.pruefung?.typ === "ausschluss" && (decisions[s.id] ?? "pending") === "pending",
   );
+  const typ = previewRowTypDisplay(row);
 
   return (
     <tr
@@ -921,9 +1008,12 @@ function UnifiedPositionRow({
       )}
     >
       <td className={cn("invoice-td text-center font-mono text-muted-foreground", hasStrikeSuggestion && "line-through")}>{row.nr}</td>
+      <td className="invoice-td align-top">
+        <span className={typ.className}>{typ.label}</span>
+      </td>
       <td className={cn("invoice-td font-mono font-semibold", hasStrikeSuggestion && "line-through")}>{row.ziffer}</td>
-      <td className="invoice-td">
-        <div className={cn(hasStrikeSuggestion && "line-through")}>
+      <td className="invoice-td align-top min-w-[14rem]">
+        <div className={cn("break-words", hasStrikeSuggestion && "line-through")}>
           {row.isPendingOpt && (
             <span className="text-[10px] uppercase font-medium text-amber-600 dark:text-amber-400 mr-1">+ Hinzufügen</span>
           )}
@@ -973,6 +1063,9 @@ function UnifiedPositionRow({
                       {s.nachherFaktor != null && `${s.nachherFaktor.toFixed(1).replace(".", ",")}× `}
                       {s.nachherBetrag != null && formatEuro(s.nachherBetrag)}
                     </div>
+                  )}
+                  {isPending && !showNumericalChange && suggestionHasTextualKorrektur(s) && (
+                    <TextualKorrekturPreview s={s} />
                   )}
                   {!isPending && (
                     <span className="text-muted-foreground">
@@ -1157,6 +1250,11 @@ export default function InvoiceResult({
         ? faktorOverrides.get(pos.nr)!
         : pos.faktor;
       const begruendung = begruendungOverrides.get(pos.nr) ?? pos.begruendung;
+      const warnPr = pos.pruefungen.filter((pr) => pr.schwere === "warnung");
+      const ausschlussVorschlagSeite =
+        !pos.pruefungen.some((pr) => pr.schwere === "fehler") &&
+        warnPr.length > 0 &&
+        warnPr.every((pr) => pr.typ === "ausschluss");
       out.push({
         nr: nr++,
         ziffer: pos.ziffer,
@@ -1165,6 +1263,8 @@ export default function InvoiceResult({
         betrag,
         ...(begruendung && { begruendung }),
         sourcePosNr: pos.nr,
+        pruefStatus: pos.status,
+        ...(ausschlussVorschlagSeite && { ausschlussVorschlagSeite: true }),
       });
     }
     for (const o of addedOpts) {
@@ -1248,151 +1348,132 @@ export default function InvoiceResult({
       {/* ── Überblick ── */}
       <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
         <h2 className="text-sm font-semibold text-foreground mb-3">Überblick</h2>
-        <div className={cn("grid gap-2", suggestions.length > 0 ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4")}>
+        <div className="grid gap-2 grid-cols-2 sm:grid-cols-3">
           <SummaryCard
             label="Pos."
             value={suggestions.length > 0 ? previewPositions.length : z.gesamt}
-            detail={suggestions.length > 0 && previewPositions.length !== z.gesamt ? "in Vorschau" : `${z.korrekt} in Ordnung`}
+            detail={
+              suggestions.length === 0
+                ? `${z.korrekt} in Ordnung`
+                : [
+                    previewPositions.length !== z.gesamt ? "in Vorschau" : null,
+                    pendingCount > 0 ? `${pendingCount} offen` : null,
+                    acceptedCount > 0 ? `${acceptedCount} angenommen` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "Vorschläge aktiv"
+            }
             variant="neutral"
           />
-          <SummaryCard
-            label="Warn."
-            value={z.warnungen}
-            variant={z.warnungen > 0 ? "warning" : "neutral"}
-          />
-          <SummaryCard
-            label="Fehl."
-            value={z.fehler}
-            variant={z.fehler > 0 ? "error" : "neutral"}
-          />
-          {suggestions.length > 0 && (
-            <SummaryCard
-              label="Offen"
-              value={pendingCount}
-              detail={acceptedCount > 0 ? `${acceptedCount} angenommen` : undefined}
-              variant={pendingCount > 0 ? "warning" : "accent"}
-            />
-          )}
-          <BetragCard
+          <PruefungOverviewSummaryCard warnungen={z.warnungen} fehler={z.fehler} />
+          <BetragOverviewCard
             rechnungsSumme={z.rechnungsSumme}
             korrigierteSumme={previewSum}
             optimierungsPotenzial={z.optimierungsPotenzial}
+            hasSuggestions={suggestions.length > 0}
             acceptedCount={acceptedCount}
             totalSuggestions={suggestions.length}
           />
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 pt-1 text-xs text-muted-foreground">
-          <span>Ihre Rechnung (Original): <strong className="text-foreground">{formatEuro(z.rechnungsSumme)}</strong></span>
-          {suggestions.length > 0 && (
-            <span>Vorschau: <strong className="text-emerald-600 dark:text-emerald-400">{formatEuro(previewSum)}</strong> <span className="font-normal">(nach Ihren Entscheidungen)</span></span>
-          )}
-        </div>
       </section>
 
-      <VorschlaegePanel
-        rows={invoicePruefRows}
-        suggestionsById={suggestionsById}
-        decisions={decisions}
-        onDecision={setDecision}
-        suggestionCount={suggestions.length}
-        rechnungVorschauKontext={
-          suggestions.length > 0
-            ? {
-                pendingCount,
-                rechnungsSumme: z.rechnungsSumme,
-                previewSum,
-              }
-            : null
-        }
-        toolbar={
-          <>
-            <button
-              type="button"
-              onClick={() => setExportModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-muted hover:bg-muted/80 transition-colors"
-              title="Als PDF exportieren"
-            >
-              <Download className="w-4 h-4" />
-              PDF exportieren
-            </button>
-            {suggestions.length > 0 && pendingCount > 0 && (
-              <button
-                type="button"
-                onClick={acceptAll}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-              >
-                <CheckIcon className="w-4 h-4" />
-                Alle annehmen
-              </button>
-            )}
-          </>
-        }
-      />
+      {/* ── Rechnung & Prüfung (Vorschläge, Erläuterungen, Positionsvorschau) ── */}
+      <section className="rounded-xl p-4 border border-border/80 bg-muted/15 dark:bg-muted/10">
+        <h2 className="text-sm font-semibold text-foreground mb-4">Rechnung & Prüfung</h2>
+        <div className="space-y-6">
+          <VorschlaegePanel
+            rows={invoicePruefRows}
+            suggestionsById={suggestionsById}
+            decisions={decisions}
+            onDecision={setDecision}
+            suggestionCount={suggestions.length}
+            toolbar={
+              <>
+                <button
+                  type="button"
+                  onClick={() => setExportModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-muted hover:bg-muted/80 transition-colors"
+                  title="Als PDF exportieren"
+                >
+                  <Download className="w-4 h-4" />
+                  PDF exportieren
+                </button>
+                {suggestions.length > 0 && pendingCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={acceptAll}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                  >
+                    <CheckIcon className="w-4 h-4" />
+                    Alle annehmen
+                  </button>
+                )}
+              </>
+            }
+          />
 
-      <VorschlagErlaeuterungenPanel
-        rows={invoicePruefRows}
-        suggestionsById={suggestionsById}
-        optimierungSuggestions={optimierungSuggestions}
-      />
+          <VorschlagErlaeuterungenPanel
+            rows={invoicePruefRows}
+            suggestionsById={suggestionsById}
+            optimierungSuggestions={optimierungSuggestions}
+          />
 
-      {/* ── Rechnung ── */}
-      <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="text-sm font-semibold text-foreground">Rechnung</h2>
-        </div>
-        {/* Mobile: Cards pro Position */}
-        <div className="sm:hidden space-y-2">
-          {unifiedRows.map((row) => {
-            const rowSuggestions = getSuggestionsForPreviewRow(row, suggestions);
-            return (
-              <UnifiedPositionCard
-                key={row.isPendingOpt && row.pendingOptSuggestion ? row.pendingOptSuggestion.id : `row-${row.nr}-${row.ziffer}`}
-                row={row}
-                suggestions={rowSuggestions}
-                decisions={decisions}
-              />
-            );
-          })}
-        </div>
-        {/* Desktop: Einheitliche Tabelle */}
-        <div className="hidden sm:block invoice-table-wrapper">
-          <table className="invoice-table invoice-table-mobile">
-            <thead>
-              <tr>
-                <th className="invoice-th text-center w-10">Nr.</th>
-                <th className="invoice-th w-16">GOÄ</th>
-                <th className="invoice-th">Bezeichnung</th>
-                <th className="invoice-th text-right w-16">Faktor</th>
-                <th className="invoice-th text-right w-20">Betrag</th>
-                {unifiedRows.some((p) => p.begruendung) && (
-                  <th className="invoice-th">Begründung</th>
-                )}
-                {hasAenderungColumn && (
-                  <th className="invoice-th min-w-[7rem]">Änderung</th>
-                )}
-                {suggestions.length > 0 && (
-                  <th className="invoice-th w-32">Zahlen</th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {unifiedRows.map((row) => (
-                <UnifiedPositionRow
-                  key={row.isPendingOpt && row.pendingOptSuggestion ? row.pendingOptSuggestion.id : `row-${row.nr}-${row.ziffer}`}
-                  row={row}
-                  suggestions={suggestions}
-                  decisions={decisions}
-                  hasBegruendungColumn={unifiedRows.some((p) => p.begruendung)}
-                  hasAenderungColumn={hasAenderungColumn}
-                  hasVorschauZahlenColumn={suggestions.length > 0}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="mt-4 pt-1 text-sm">
-          <span className="text-muted-foreground">Summe: </span>
-          <strong className="text-foreground">{formatEuro(previewSum)}</strong>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground mb-3">Rechnung</h3>
+            <div className="sm:hidden space-y-2">
+              {unifiedRows.map((row) => {
+                const rowSuggestions = getSuggestionsForPreviewRow(row, suggestions);
+                return (
+                  <UnifiedPositionCard
+                    key={row.isPendingOpt && row.pendingOptSuggestion ? row.pendingOptSuggestion.id : `row-${row.nr}-${row.ziffer}`}
+                    row={row}
+                    suggestions={rowSuggestions}
+                    decisions={decisions}
+                  />
+                );
+              })}
+            </div>
+            <div className="hidden sm:block invoice-table-wrapper">
+              <table className="invoice-table invoice-table-mobile">
+                <thead>
+                  <tr>
+                    <th className="invoice-th text-center w-10">Nr.</th>
+                    <th className="invoice-th w-[5.5rem]">Typ</th>
+                    <th className="invoice-th w-16">GOÄ-Nr</th>
+                    <th className="invoice-th min-w-[14rem]">Leistung</th>
+                    <th className="invoice-th text-right w-16">Faktor</th>
+                    <th className="invoice-th text-right w-20">Betrag</th>
+                    {unifiedRows.some((p) => p.begruendung) && (
+                      <th className="invoice-th">Hinweis</th>
+                    )}
+                    {hasAenderungColumn && (
+                      <th className="invoice-th min-w-[7rem]">Änderung</th>
+                    )}
+                    {suggestions.length > 0 && (
+                      <th className="invoice-th w-32">Zahlen</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {unifiedRows.map((row) => (
+                    <UnifiedPositionRow
+                      key={row.isPendingOpt && row.pendingOptSuggestion ? row.pendingOptSuggestion.id : `row-${row.nr}-${row.ziffer}`}
+                      row={row}
+                      suggestions={suggestions}
+                      decisions={decisions}
+                      hasBegruendungColumn={unifiedRows.some((p) => p.begruendung)}
+                      hasAenderungColumn={hasAenderungColumn}
+                      hasVorschauZahlenColumn={suggestions.length > 0}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 pt-1 text-sm">
+              <span className="text-muted-foreground">Summe: </span>
+              <strong className="text-foreground">{formatEuro(previewSum)}</strong>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1474,18 +1555,53 @@ export default function InvoiceResult({
   );
 }
 
-// ── Betrag Card (Korrektur + Opt.) ──
+// ── Überblick: Prüfung (ein SummaryCard) ──
 
-function BetragCard({
+function PruefungOverviewSummaryCard({ warnungen, fehler }: { warnungen: number; fehler: number }) {
+  const total = warnungen + fehler;
+  if (total === 0) {
+    return <SummaryCard label="Prüfung" value="In Ordnung" variant="neutral" />;
+  }
+  const variant = fehler > 0 ? "error" : "warning";
+  if (warnungen > 0 && fehler > 0) {
+    return (
+      <SummaryCard
+        label="Prüfung"
+        value={total}
+        detail={`${warnungen} ${warnungen === 1 ? "Warnung" : "Warnungen"} · ${fehler} Fehler`}
+        variant={variant}
+      />
+    );
+  }
+  if (fehler > 0) {
+    return (
+      <SummaryCard label="Prüfung" value={fehler} detail="Fehler" variant="error" />
+    );
+  }
+  return (
+    <SummaryCard
+      label="Prüfung"
+      value={warnungen}
+      detail={warnungen === 1 ? "Warnung" : "Warnungen"}
+      variant="warning"
+    />
+  );
+}
+
+// ── Überblick: Betrag (Original / Vorschau / Korrektur / Opt.) ──
+
+function BetragOverviewCard({
   rechnungsSumme,
   korrigierteSumme,
   optimierungsPotenzial,
+  hasSuggestions,
   acceptedCount,
   totalSuggestions,
 }: {
   rechnungsSumme: number;
   korrigierteSumme: number;
   optimierungsPotenzial: number;
+  hasSuggestions: boolean;
   acceptedCount?: number;
   totalSuggestions?: number;
 }) {
@@ -1494,55 +1610,47 @@ function BetragCard({
   const hasOpt = optimierungsPotenzial > 0.01;
   const hasAccepted = (acceptedCount ?? 0) > 0 && (totalSuggestions ?? 0) > 0;
 
+  if (hasSuggestions) {
+    const isReduktion = delta < -0.02;
+    const isErhoehung = delta > 0.02;
+    const variant =
+      isReduktion ? "error" : isErhoehung || hasAccepted ? "accent" : "neutral";
+    const detailParts = [`Original ${formatEuro(rechnungsSumme)}`];
+    if (hasKorrektur) {
+      detailParts.push(`${isReduktion ? "−" : "+"}${formatEuro(Math.abs(delta))}`);
+    }
+    return (
+      <SummaryCard
+        label="Betrag"
+        value={formatEuro(korrigierteSumme)}
+        detail={detailParts.join(" · ")}
+        variant={variant}
+      />
+    );
+  }
+
   if (hasKorrektur || hasAccepted) {
     const isReduktion = delta < 0;
     return (
-      <div
-        className={cn(
-          "rounded-lg p-2.5",
-          isReduktion ? "bg-red-50 dark:bg-red-950/30" : "bg-emerald-50 dark:bg-emerald-950/30",
-        )}
-      >
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-          Betrag
-        </p>
-        <p
-          className={cn(
-            "text-lg font-bold",
-            isReduktion ? "text-red-700 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400",
-          )}
-        >
-          {isReduktion ? "" : "+"}
-          {formatEuro(Math.abs(delta))}
-        </p>
-        <p className="text-[10px] text-muted-foreground">
-          {isReduktion ? "Reduktion" : hasAccepted ? "Nach Annahme" : "Anpassung"}
-        </p>
-      </div>
+      <SummaryCard
+        label="Betrag"
+        value={isReduktion ? `−${formatEuro(Math.abs(delta))}` : `+${formatEuro(Math.abs(delta))}`}
+        detail={isReduktion ? "Reduktion" : hasAccepted ? "Nach Annahme" : "Anpassung"}
+        variant={isReduktion ? "error" : "accent"}
+      />
     );
   }
 
   if (hasOpt) {
     return (
-      <div className="rounded-lg p-2.5 bg-emerald-50 dark:bg-emerald-950/30">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-          Betrag
-        </p>
-        <p className="text-lg font-bold text-emerald-700 dark:text-emerald-400">
-          +{formatEuro(optimierungsPotenzial)}
-        </p>
-        <p className="text-[10px] text-muted-foreground">Optimierung</p>
-      </div>
+      <SummaryCard
+        label="Betrag"
+        value={`+${formatEuro(optimierungsPotenzial)}`}
+        detail="Optimierungspotenzial"
+        variant="accent"
+      />
     );
   }
 
-  return (
-    <div className="rounded-lg p-2.5 bg-muted/50 dark:bg-muted/30">
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-        Betrag
-      </p>
-      <p className="text-lg font-bold text-foreground">—</p>
-      <p className="text-[10px] text-muted-foreground">unverändert</p>
-    </div>
-  );
+  return <SummaryCard label="Betrag" value="—" detail="unverändert" variant="neutral" />;
 }

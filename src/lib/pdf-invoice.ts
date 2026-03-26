@@ -70,10 +70,16 @@ function addPageFooters(doc: import("jspdf").jsPDF): void {
   }
 }
 
+export type GenerateInvoicePdfOptions = {
+  /** Optional second-page audit trail (e.g. accepted/pending suggestion summary). */
+  protocolLines?: string[];
+};
+
 export async function generateInvoicePdf(
   positions: PdfPosition[],
   sum: number,
   stammdaten?: PdfStammdaten | null,
+  options?: GenerateInvoicePdfOptions | null,
 ): Promise<void> {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF();
@@ -237,6 +243,33 @@ export async function generateInvoicePdf(
   doc.text(`${formatDeutsch(sum, 2)} €`, xBetrag, y, { align: "right" });
   doc.setFont("helvetica", "normal");
   y += 12;
+
+  // —— Änderungsprotokoll (optional) ——
+  const protocolLines = options?.protocolLines?.filter((l) => l.trim().length > 0) ?? [];
+  if (protocolLines.length > 0) {
+    const titleBlock = LINE_HEIGHT * 2 + 4;
+    y = maybeNewPage(doc, y, titleBlock + protocolLines.length * LINE_HEIGHT * 2);
+    doc.setDrawColor(GRAY_LINE);
+    doc.line(MARGIN, y, pw - MARGIN, y);
+    y += LINE_HEIGHT + 2;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(FONT_PT);
+    doc.text("Änderungsprotokoll (DocBill-Vorschau)", MARGIN, y);
+    y += LINE_HEIGHT + 3;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(FONT_PT - 0.5);
+    for (const raw of protocolLines) {
+      const wrapped = doc.splitTextToSize(raw, pw - 2 * MARGIN);
+      for (const line of wrapped) {
+        y = maybeNewPage(doc, y, LINE_HEIGHT + 2);
+        doc.text(line, MARGIN, y);
+        y += LINE_HEIGHT;
+      }
+      y += 2;
+    }
+    doc.setFontSize(FONT_PT);
+    y += 8;
+  }
 
   // —— Zahlungsinformation ——
   if (stammdaten?.bank) {

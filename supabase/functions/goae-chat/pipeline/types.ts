@@ -41,6 +41,8 @@ export interface ParsedRechnung {
   freitext?: string;
   rawText: string;
   stammdaten?: Stammdaten;
+  /** Bei getrennter Extraktion (Rechnung + Akte/Befund): nur klinischer Teil, nicht Rechnungszeilen */
+  klinischeDokumentation?: string;
 }
 
 export interface RechnungsPosition {

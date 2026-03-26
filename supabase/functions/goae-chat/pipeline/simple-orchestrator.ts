@@ -126,7 +126,9 @@ export async function runSimplePipeline(
       await sendProgress(0, SIMPLE_PIPELINE_STEPS[0].label);
 
       const [parsedRechnung, adminContext] = await Promise.all([
-        parseDokumentWithRetry(input.files, apiKey, input.model),
+        parseDokumentWithRetry(input.files, apiKey, input.model, {
+          multiDocumentInvoiceReview: input.files.length >= 2,
+        }),
         getAdminContext().catch(() => ""),
       ]);
 

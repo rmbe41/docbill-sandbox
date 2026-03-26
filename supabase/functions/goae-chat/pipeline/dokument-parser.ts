@@ -138,18 +138,67 @@ REGELN:
 - "stammdaten": Extrahiere ALLE Stammdaten aus der Rechnung – Praxis (Name, Adresse, Telefon, E-Mail, Steuernummer), Patient (Name, Adresse, Geburtsdatum), Bankverbindung (IBAN, BIC, Bankname, Kontoinhaber), Rechnungsnummer, Rechnungsdatum. Fehlende Felder als null oder weglassen.
 - Bei unleserlichen Stellen: bestmögliche Interpretation, im freitext vermerken`;
 
+/** Mehrere Dateien: Honorarrechnung vs. Akte/Befund trennen (Rechnungsprüfung). */
+const MULTI_DOC_INVOICE_REVIEW_PROMPT = `Du bist ein Dokumentenparser für die **Rechnungsprüfung**, wenn **mehrere Dateien** vorliegen.
+
+Typische Kombination: eine **ärztliche Honorarrechnung** (GOÄ) und optional **Patientenakte**, **Befund**, **Arztbrief** oder OP-/Ambulanzbericht.
+
+Antworte AUSSCHLIESSLICH mit JSON:
+
+{
+  "positionen": [
+    {
+      "nr": 1,
+      "ziffer": "1240",
+      "bezeichnung": "…",
+      "faktor": 2.3,
+      "betrag": 9.92,
+      "datum": "2025-01-15",
+      "begruendung": null,
+      "anzahl": 1
+    }
+  ],
+  "diagnosen": [],
+  "datum": "optional",
+  "freitext": "optional Kurznotiz",
+  "rawText": "Wesentlicher Gesamttext; Rechnungs- und Aktenanteile im Fließtext klar erkennbar",
+  "stammdaten": {
+    "praxis": { "name": null, "adresse": null, "telefon": null, "email": null, "steuernummer": null },
+    "patient": { "name": null, "adresse": null, "geburtsdatum": null },
+    "bank": { "iban": null, "bic": null, "bankName": null, "kontoinhaber": null },
+    "rechnungsnummer": null,
+    "rechnungsdatum": null
+  },
+  "klinischeDokumentation": "Auszug oder Volltext aus Akte/Befund/Arztbrief – keine Honorarzeilen. Leerer String, wenn nur eine Rechnung ohne separates klinisches Dokument vorliegt."
+}
+
+REGELN:
+- **positionen**, **stammdaten** (Praxis/Bank/Rechnungsnummer): **nur** aus der **Honorarrechnung** bzw. Abrechnungsbeleg – nichts aus der Akte als Rechnungsposition erfinden.
+- **klinischeDokumentation**: dokumentierte Leistungen, Befunde, Verläufe aus **nicht-Rechnungs**-Unterlagen; mehrere solcher Dateien zu einem zusammenhängenden Text zusammenführen.
+- **diagnosen**: soweit aus Rechnung oder Akte erkennbar.
+- **rawText**: darf beide Quellen enthalten; **klinischeDokumentation** soll den klinischen Teil für die spätere GOÄ-Bewertung tragfähig wiedergeben.
+- Bei unleserlichen Stellen: bestmögliche Interpretation, im freitext vermerken.`;
+
+export type ParseDokumentExtraOptions = {
+  multiDocumentInvoiceReview?: boolean;
+};
+
 export async function parseDokument(
   files: FilePayload[],
   apiKey: string,
   userModel: string,
   modelOverride?: string,
+  parseOpts?: ParseDokumentExtraOptions,
 ): Promise<ParsedRechnung> {
   const model = modelOverride ?? pickExtractionModel(userModel);
+  const multiReview = !!parseOpts?.multiDocumentInvoiceReview && files.length >= 2;
 
   const contentParts: unknown[] = [
     {
       type: "text",
-      text: "Lies dieses Rechnungsdokument vollständig aus und extrahiere alle Positionen, Diagnosen und relevanten Informationen als JSON.",
+      text: multiReview
+        ? "Analysiere alle angehängten Dateien. Trenne Honorarrechnung (Positionen, Stammdaten) und klinische Unterlagen (klinischeDokumentation). Antworte nur als JSON."
+        : "Lies dieses Rechnungsdokument vollständig aus und extrahiere alle Positionen, Diagnosen und relevanten Informationen als JSON.",
     },
   ];
 
@@ -180,7 +229,7 @@ export async function parseDokument(
   const raw = await callLlm({
     apiKey,
     model,
-    systemPrompt: PARSER_SYSTEM_PROMPT,
+    systemPrompt: multiReview ? MULTI_DOC_INVOICE_REVIEW_PROMPT : PARSER_SYSTEM_PROMPT,
     userContent: contentParts,
     jsonMode: true,
     temperature: 0.05,
@@ -194,6 +243,9 @@ export async function parseDokument(
   if (!parsed.positionen) parsed.positionen = [];
   if (!parsed.diagnosen) parsed.diagnosen = [];
   if (!parsed.rawText) parsed.rawText = "";
+  if (multiReview && typeof parsed.klinischeDokumentation !== "string") {
+    parsed.klinischeDokumentation = "";
+  }
 
   for (const pos of parsed.positionen) {
     pos.anzahl = pos.anzahl || 1;
@@ -295,6 +347,7 @@ export async function parseDokumentWithRetry(
   files: FilePayload[],
   apiKey: string,
   userModel: string,
+  parseOpts?: ParseDokumentExtraOptions,
 ): Promise<ParsedRechnung> {
   const modelsToTry = buildFallbackModels(userModel, { multimodal: true });
   const hasFiles = files.length > 0;
@@ -303,7 +356,7 @@ export async function parseDokumentWithRetry(
   for (let i = 0; i < Math.min(MAX_PARSER_RETRIES, modelsToTry.length); i++) {
     const model = modelsToTry[i];
     try {
-      let parsed = await parseDokument(files, apiKey, userModel, model);
+      let parsed = await parseDokument(files, apiKey, userModel, model, parseOpts);
       if (!isPlausibleParseResult(parsed, hasFiles)) {
         parsed = await tryFillPositionenFromRawText(parsed, apiKey, model);
       }

@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
-import { Copy, ClipboardCheck, Download, CheckIcon, X } from "lucide-react";
+import { useState, useCallback, useEffect, type ReactElement } from "react";
+import { Download, CheckIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,11 @@ import { Input } from "@/components/ui/input";
 import { generateInvoicePdf, type PdfStammdaten } from "@/lib/pdf-invoice";
 import { usePraxisStammdaten } from "@/hooks/usePraxisStammdaten";
 import { SummaryCard } from "@/components/SummaryCard";
+import {
+  isFaktorUeberSchwelle,
+  stripDuplicateBegruendungPrefix,
+  formatBegruendungFuerPdf,
+} from "@/lib/format-goae-hinweis";
 
 export interface ServiceBillingPosition {
   ziffer: string;
@@ -25,6 +30,8 @@ export interface ServiceBillingPosition {
   begruendung?: string;
   leistung: string;
   konfidenz: "hoch" | "mittel" | "niedrig";
+  /** Auszug aus dem dokumentierten/behandelten Leistungstext (Herkunft der Zuordnung) */
+  quelleBeschreibung?: string;
 }
 
 export interface ServiceBillingSummary {
@@ -83,6 +90,180 @@ function initialServiceDecisionsMap(
   return init;
 }
 
+function formatFaktorDisplay(f: number): string {
+  return f.toFixed(1).replace(".", ",");
+}
+
+const QUELLE_MAX_LEN = 220;
+
+function truncateQuelle(s: string): string {
+  const t = s.trim();
+  if (t.length <= QUELLE_MAX_LEN) return t;
+  return t.slice(0, QUELLE_MAX_LEN - 1).trimEnd() + "…";
+}
+
+function normalizeLeistungLabel(s: string): string {
+  return s.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** Keine zweite Zeile, wenn der Quelltext nur die GOÄ-Bezeichnung wiederholt (ggf. + Typ in Klammern). */
+function quelleOhneRedundanz(quelle: string, goaeBezeichnung: string): string | undefined {
+  const q = quelle.trim();
+  const g = goaeBezeichnung.trim();
+  if (!q) return undefined;
+  const nq = normalizeLeistungLabel(q);
+  const ng = normalizeLeistungLabel(g);
+  if (nq === ng) return undefined;
+  const m = q.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+  if (m) {
+    const base = m[1].trim();
+    const typ = m[2].trim();
+    if (normalizeLeistungLabel(base) === ng) {
+      return typ ? `(${typ})` : undefined;
+    }
+  }
+  return q;
+}
+
+function hinweisZelleInhalt(v: ServiceBillingPosition): ReactElement | null {
+  const text = v.begruendung?.trim();
+  if (!text) return null;
+  const steigerung = isFaktorUeberSchwelle(v.ziffer, v.faktor);
+  const body = steigerung ? stripDuplicateBegruendungPrefix(text) : text;
+  if (steigerung) {
+    return (
+      <span className="block leading-snug text-foreground/90">
+        <span className="font-medium text-foreground">Begründung: </span>
+        {body}
+      </span>
+    );
+  }
+  return <span className="text-foreground/90 leading-snug block">{body}</span>;
+}
+
+function leistungUnterzeile(v: ServiceBillingPosition): string | undefined {
+  const b = v.bezeichnung?.trim() ?? "";
+  const qRaw = v.quelleBeschreibung?.trim();
+  if (qRaw) {
+    const compact = quelleOhneRedundanz(qRaw, b);
+    if (!compact) return undefined;
+    return truncateQuelle(compact);
+  }
+  const l = v.leistung?.trim();
+  if (!l) return undefined;
+  const compact = quelleOhneRedundanz(l, b);
+  if (!compact) return undefined;
+  return truncateQuelle(compact);
+}
+
+function ServiceBillingPositionsTable({
+  positions,
+  isOpt,
+  decisions,
+  setDecision,
+}: {
+  positions: ServiceBillingPosition[];
+  isOpt: boolean;
+  decisions: Record<string, Decision>;
+  setDecision: (key: string, decision: Decision) => void;
+}) {
+  if (positions.length === 0) return null;
+  return (
+    <div className="invoice-table-wrapper overflow-x-auto">
+      <table className="invoice-table min-w-[46rem] w-full">
+        <thead>
+          <tr>
+            <th className="invoice-th w-20">GOÄ-Nr</th>
+            <th className="invoice-th min-w-[14rem]">Leistung</th>
+            <th className="invoice-th text-right w-16">Faktor</th>
+            <th className="invoice-th min-w-[8rem]">Hinweis</th>
+            <th className="invoice-th text-right w-24">Betrag</th>
+            <th className="invoice-th w-36">Aktion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.map((v) => {
+            const key = getKey(v, isOpt);
+            const decision = decisions[key] ?? "pending";
+            const isAccepted = decision === "accepted";
+            const isPending = decision === "pending";
+            const unterzeile = leistungUnterzeile(v);
+            return (
+              <tr
+                key={key}
+                className={cn(
+                  "transition-colors",
+                  isAccepted && "bg-emerald-50/40 dark:bg-emerald-950/15",
+                  isPending && "bg-amber-50/40 dark:bg-amber-950/15",
+                  decision === "rejected" && "opacity-75",
+                )}
+              >
+                <td className="invoice-td font-mono font-semibold align-top">{v.ziffer}</td>
+                <td className="invoice-td align-top">
+                  <span className="text-sm font-medium text-foreground block break-words">{v.bezeichnung}</span>
+                  {unterzeile && (
+                    <span className="text-xs text-muted-foreground mt-0.5 block leading-snug">
+                      {unterzeile}
+                    </span>
+                  )}
+                  {isOpt && (
+                    <span className="text-[10px] uppercase font-medium text-amber-600 dark:text-amber-400 mt-0.5 inline-block">
+                      Zusatzposition
+                    </span>
+                  )}
+                </td>
+                <td className="invoice-td text-right font-mono align-top whitespace-nowrap">
+                  {formatFaktorDisplay(v.faktor)}×
+                </td>
+                <td className="invoice-td text-xs text-muted-foreground align-top max-w-[14rem]">
+                  <div className="space-y-1">
+                    {hinweisZelleInhalt(v) ?? (
+                      <span className="text-muted-foreground/80">—</span>
+                    )}
+                  </div>
+                </td>
+                <td className="invoice-td text-right font-mono font-semibold align-top whitespace-nowrap">
+                  {formatEuro(v.betrag)}
+                </td>
+                <td className="invoice-td align-top">
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setDecision(key, "accepted")}
+                      className={cn(
+                        "inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium",
+                        isAccepted
+                          ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                          : "text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-950/50",
+                      )}
+                    >
+                      <CheckIcon className="w-3.5 h-3.5 shrink-0" />
+                      Annehmen
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDecision(key, "rejected")}
+                      className={cn(
+                        "inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium",
+                        decision === "rejected"
+                          ? "text-red-600 bg-red-50 dark:bg-red-950/30"
+                          : "text-red-600 hover:bg-red-100 dark:hover:bg-red-950/50",
+                      )}
+                    >
+                      <X className="w-3.5 h-3.5 shrink-0" />
+                      Ablehnen
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const ServiceBillingResult = ({
   data,
   messageId = null,
@@ -97,7 +278,6 @@ const ServiceBillingResult = ({
   const [decisions, setDecisions] = useState<Record<string, Decision>>(() =>
     initialServiceDecisionsMap(data, initialServiceDecisions),
   );
-  const [copied, setCopied] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [patientName, setPatientName] = useState("");
   const [patientAdresse, setPatientAdresse] = useState("");
@@ -146,21 +326,6 @@ const ServiceBillingResult = ({
   const sachkostenSumme = (data.sachkosten ?? []).reduce((sum, s) => sum + s.betrag, 0);
   const totalBetrag = acceptedPositions.reduce((sum, p) => sum + p.betrag, 0) + sachkostenSumme;
 
-  const copyToClipboard = useCallback(async () => {
-    const lines = acceptedPositions.map(
-      (p) =>
-        `${p.ziffer}\t${p.bezeichnung}\t${p.faktor.toFixed(1).replace(".", ",")}×\t${formatEuro(p.betrag)}`
-    );
-    const sachLines = (data.sachkosten ?? []).map(
-      (s) => `Sachkosten\t${s.bezeichnung}\t-\t${formatEuro(s.betrag)}`
-    );
-    const allLines = [...lines, ...sachLines];
-    const text = `${allLines.join("\n")}\n\nSumme: ${formatEuro(totalBetrag)}`;
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [acceptedPositions, data.sachkosten, totalBetrag]);
-
   const handlePdfExport = useCallback(async () => {
     const stammdaten: PdfStammdaten = {
       ...(praxisStammdaten ?? {}),
@@ -181,7 +346,7 @@ const ServiceBillingResult = ({
       bezeichnung: p.bezeichnung,
       faktor: p.faktor,
       betrag: p.betrag,
-      begruendung: p.begruendung,
+      begruendung: formatBegruendungFuerPdf(p.ziffer, p.faktor, p.begruendung),
     }));
     const sachkostenPositions = (data.sachkosten ?? []).map((s) => ({
       nr: 0,
@@ -223,12 +388,7 @@ const ServiceBillingResult = ({
       {/* ── Überblick ── */}
       <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
         <h2 className="text-sm font-semibold text-foreground mb-3">Überblick</h2>
-        <div className="grid gap-2 grid-cols-2 sm:grid-cols-5">
-          <SummaryCard
-            label="Vorschl."
-            value={allItems.length}
-            variant="neutral"
-          />
+        <div className="grid gap-2 grid-cols-2 sm:grid-cols-4">
           <SummaryCard
             label="Angenommen"
             value={acceptedPositions.length}
@@ -250,19 +410,6 @@ const ServiceBillingResult = ({
             variant="accent"
           />
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 pt-1 text-xs text-muted-foreground">
-          <span>Summe (ausgewählt): <strong className="text-foreground">{formatEuro(totalBetrag)}</strong></span>
-          {data.summary && (
-            <>
-              <span>Summe (Vorschl.): <strong className="text-foreground">{formatEuro(data.summary.gesamt)}</strong></span>
-              <span>Ø Faktor: <strong className="text-foreground">{data.summary.avg_factor.toFixed(1).replace(".", ",")}×</strong></span>
-              <span>Steigerungen: <strong className="text-foreground">{data.summary.steigerungen}</strong></span>
-              {data.summary.compliance_score != null && (
-                <span>Compliance: <strong className="text-foreground">{(data.summary.compliance_score * 100).toFixed(0)}%</strong></span>
-              )}
-            </>
-          )}
-        </div>
         {data.summary?.compliance_score != null && data.summary.compliance_score < 0.9 && (
           <div className="mt-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
             Hinweis: Compliance-Score unter 90 %. Bitte prüfen Sie Ausschlussziffern und Begründungen vor der Abrechnung.
@@ -270,121 +417,47 @@ const ServiceBillingResult = ({
         )}
       </section>
 
-      {/* ── GOÄ-Vorschläge ── */}
+      {/* ── Vorschläge ── */}
       <section className="rounded-xl p-4 bg-muted/20 dark:bg-muted/10">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="text-sm font-semibold text-foreground">GOÄ-Vorschläge</h2>
-          <button
-            type="button"
-            onClick={() => setExportModalOpen(true)}
-            disabled={acceptedPositions.length === 0 && (data.sachkosten?.length ?? 0) === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-muted hover:bg-muted/80 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-            title="Als PDF exportieren"
-          >
-            <Download className="w-4 h-4" />
-            PDF exportieren
-          </button>
-        </div>
-
-        {/* Alle annehmen – prominent über den Zeilen */}
-        {pendingCount > 0 && (
-          <div className="mb-3 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30">
+          <h2 className="text-sm font-semibold text-foreground">Vorschläge</h2>
+          <div className="flex flex-nowrap items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={acceptAll}
-              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+              onClick={() => setExportModalOpen(true)}
+              disabled={acceptedPositions.length === 0 && (data.sachkosten?.length ?? 0) === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-muted hover:bg-muted/80 transition-colors disabled:opacity-50 disabled:pointer-events-none shrink-0"
+              title="Als PDF exportieren"
             >
-              <CheckIcon className="w-4 h-4" />
-              Alle annehmen
+              <Download className="w-4 h-4 shrink-0" />
+              PDF exportieren
             </button>
+            {pendingCount > 0 && (
+              <button
+                type="button"
+                onClick={acceptAll}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shrink-0"
+              >
+                <CheckIcon className="w-4 h-4 shrink-0" />
+                Alle annehmen
+              </button>
+            )}
           </div>
-        )}
+        </div>
 
         <p className="text-xs text-muted-foreground mb-3">
-          Jede Zeile: Annehmen oder Ablehnen wählen.
+          Die GOÄ-Zuordnung bezieht sich auf Ihren eingegebenen Text bzw. den Inhalt des hochgeladenen
+          Dokuments. Jede Zeile: Annehmen oder Ablehnen wählen.
         </p>
 
         {/* Hauptvorschläge */}
         <h3 className="text-xs font-medium text-muted-foreground mb-2">Erkannte Leistungen</h3>
-        <div className="space-y-2">
-          {data.vorschlaege.map((v) => {
-            const key = getKey(v, false);
-            const decision = decisions[key] ?? "pending";
-            const isAccepted = decision === "accepted";
-            const isPending = decision === "pending";
-            return (
-              <div
-                key={key}
-                className={cn(
-                  "rounded-lg p-3 transition-colors",
-                  isAccepted && "bg-emerald-50/30 dark:bg-emerald-950/10",
-                  isPending && "bg-amber-50/50 dark:bg-amber-950/20",
-                  decision === "rejected" && "opacity-75"
-                )}
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {v.ziffer}
-                      </span>
-                      {v.konfidenz === "mittel" && (
-                        <span className="text-[10px] uppercase text-amber-600 dark:text-amber-400">
-                          unsicher
-                        </span>
-                      )}
-                      {v.konfidenz === "niedrig" && (
-                        <span className="text-[10px] uppercase text-amber-600 dark:text-amber-400">
-                          Begründung prüfen
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm font-medium truncate">{v.bezeichnung}</p>
-                    {v.begruendung && (
-                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                        {v.begruendung}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex-shrink-0 text-right">
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {v.faktor.toFixed(1).replace(".", ",")}×
-                    </span>
-                    <span className="font-mono font-semibold ml-1">{formatEuro(v.betrag)}</span>
-                  </div>
-                </div>
-                <div className="flex gap-1 pt-2 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => setDecision(key, "accepted")}
-                    className={cn(
-                      "inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium",
-                      isAccepted
-                        ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                        : "text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-950/50"
-                    )}
-                  >
-                    <CheckIcon className="w-3.5 h-3.5" />
-                    Annehmen
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDecision(key, "rejected")}
-                    className={cn(
-                      "inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium",
-                      decision === "rejected"
-                        ? "text-red-600 bg-red-50 dark:bg-red-950/30"
-                        : "text-red-600 hover:bg-red-100 dark:hover:bg-red-950/50"
-                    )}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    Ablehnen
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <ServiceBillingPositionsTable
+          positions={data.vorschlaege}
+          isOpt={false}
+          decisions={decisions}
+          setDecision={setDecision}
+        />
 
         {/* Sachkosten */}
         {(data.sachkosten?.length ?? 0) > 0 && (
@@ -413,75 +486,12 @@ const ServiceBillingResult = ({
         {(data.optimierungen?.length ?? 0) > 0 && (
           <>
             <h3 className="text-xs font-medium text-muted-foreground mt-4 mb-2">Zusätzliche Ziffern</h3>
-            <div className="space-y-2">
-              {data.optimierungen!.map((v) => {
-                const key = getKey(v, true);
-                const decision = decisions[key] ?? "pending";
-                const isAccepted = decision === "accepted";
-                const isPending = decision === "pending";
-                return (
-                  <div
-                    key={key}
-                    className={cn(
-                      "rounded-lg p-3 transition-colors",
-                      isAccepted && "bg-emerald-50/30 dark:bg-emerald-950/10",
-                      isPending && "bg-amber-50/50 dark:bg-amber-950/20",
-                      decision === "rejected" && "opacity-75"
-                    )}
-                  >
-                    <div className="flex justify-between items-start gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {v.ziffer}
-                          </span>
-                        </div>
-                        <p className="text-sm font-medium truncate">{v.bezeichnung}</p>
-                        {v.begruendung && (
-                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                            {v.begruendung}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex-shrink-0 text-right">
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {v.faktor.toFixed(1).replace(".", ",")}×
-                        </span>
-                        <span className="font-mono font-semibold ml-1">{formatEuro(v.betrag)}</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-1 pt-2 mt-2">
-                      <button
-                        type="button"
-                        onClick={() => setDecision(key, "accepted")}
-                        className={cn(
-                          "inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium",
-                          isAccepted
-                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                            : "text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-950/50"
-                        )}
-                      >
-                        <CheckIcon className="w-3.5 h-3.5" />
-                        Annehmen
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDecision(key, "rejected")}
-                        className={cn(
-                          "inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium",
-                          decision === "rejected"
-                            ? "text-red-600 bg-red-50 dark:bg-red-950/30"
-                            : "text-red-600 hover:bg-red-100 dark:hover:bg-red-950/50"
-                        )}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        Ablehnen
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <ServiceBillingPositionsTable
+              positions={data.optimierungen!}
+              isOpt
+              decisions={decisions}
+              setDecision={setDecision}
+            />
           </>
         )}
 
@@ -492,27 +502,6 @@ const ServiceBillingResult = ({
           <strong className="font-mono font-semibold">{formatEuro(totalBetrag)}</strong>
         </div>
       </section>
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={copyToClipboard}
-          disabled={acceptedPositions.length === 0 && (data.sachkosten?.length ?? 0) === 0}
-        >
-          {copied ? (
-            <>
-              <ClipboardCheck className="w-4 h-4 mr-2" />
-              Kopiert
-            </>
-          ) : (
-            <>
-              <Copy className="w-4 h-4 mr-2" />
-              Auswahl kopieren
-            </>
-          )}
-        </Button>
-      </div>
 
       <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
         <DialogContent className="max-w-md">

@@ -209,3 +209,15 @@ D: Anästhesie | E: 1,0–2,5× (Schwelle 1,8×) | F–H: 1,0–3,5×
 I (Augenheilkunde 1200–1386): 1,0–3,5× (Schwelle 2,3×), Tonometrie 1255–1257: 1,8×
 J–N: 1,0–3,5× | M (Labor): 1,0–1,3× (Schwelle 1,15×) | O: 1,0–2,5× (Schwelle 1,8×)
 `;
+
+/** Orientierung zu Sonder-Themen – konkrete Ziffern/Texte nur aus Katalog/ADMIN, nicht frei erfinden */
+export const GOAE_SONDERBEREICHE_KOMPAKT = `
+# Sonderbereiche – Strukturhinweise (DocBill)
+
+- **Abschnitt A (u. a. niedrige Ziffern):** Zeit-, Sprechstunden- und Notfall-Zuschläge („Zuschlag für …“ im Katalog). Gebührenrahmen oft 1,0–2,5× (Schwelle 1,8×). Welche Ziffer zu welcher Situation passt, nur anhand der **Katalogzeile** im Prompt und der Ausschlussangaben beantworten.
+- **Abschnitt P (Ziffern 6000–6018):** Leichenschau / Sektionsleistungen – Punktwerte, Bezeichnungen und Ausschlüsse nur aus dem **Katalogauszug**.
+- **Schmerztherapie / Akupunktur:** entsprechende Leistungen im Katalog (u. a. Nummern um 2200) – ohne genannte Ziffer im Kontext keine Eigeninterpretation der Abrechnung.
+- **Beratung vs. Untersuchung:** Nr. 1, 2, 3 und Analoge (A1–A3) schließen sich typischerweise **gegenseitig** aus; **Nr. 5** (Untersuchung) ist regelhaft **zusätzlich** zur Beratung (1) denkbar, sofern der Katalog keine Ausschlüsse für das konkrete Paar setzt.
+
+Stellungnahmen (**BÄK** etc.) nur nutzen, wenn der Text im **ADMIN-KONTEXT** mit Quelle steht; sonst Grenzen angeben.
+`.trim();

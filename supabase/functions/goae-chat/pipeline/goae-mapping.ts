@@ -97,7 +97,7 @@ Antworte AUSSCHLIESSLICH mit JSON:
 
 REGELN:
 - Nutze Analogbewertung nach § 6 GOÄ, wenn keine direkte Ziffer existiert
-- "konfidenz": "hoch" bei eindeutiger Zuordnung, "mittel" bei plausibel, "niedrig" bei unsicher
+- "konfidenz": "hoch" bei eindeutiger Zuordnung, "mittel" bei plausibel, "niedrig" bei mehrdeutiger Zuordnung
 - Gib bei Analogziffern IMMER eine analogBegruendung an (fachlich präzise, max. ~140 Zeichen für UI)
 - Bevorzuge gelistete Ziffern vor Analogbewertungen
 - "alternativZiffern": Gib 1–3 alternative GOÄ-Ziffern an, wenn sinnvolle weitere Abrechnungsmöglichkeiten existieren (z.B. ähnliche Leistung, ergänzende Ziffer bei typischer Kombination)`;

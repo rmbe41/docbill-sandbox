@@ -1,10 +1,12 @@
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
+import type { Engine3ResultData } from "@/lib/engine3Result";
 import {
   consumeGoaeChatSseStream,
   type PipelineProgressPayload,
   type SseAccumState,
 } from "@/lib/goaeChatSse";
+import type { GuidedWorkflowKind } from "@/lib/guidedWorkflow";
 
 const CHAT_URL = import.meta.env.DEV
   ? `/api/supabase/functions/v1/goae-chat`
@@ -21,10 +23,13 @@ export type ExecuteGoaeChatParams = {
   extra_rules: string;
   lastInvoiceResult?: InvoiceResultData;
   lastServiceResult?: ServiceBillingResultData;
+  lastEngine3Result?: Engine3ResultData;
   signal: AbortSignal;
   onProgress: (p: PipelineProgressPayload | null) => void;
   onStreamState: (state: SseAccumState) => void;
   onFreeModelsExhausted?: (details: string | null) => void;
+  guidedWorkflow?: GuidedWorkflowKind;
+  guidedPhase?: "collect";
 };
 
 export type ExecuteGoaeChatHttpError = {
@@ -41,6 +46,7 @@ export async function executeGoaeChatRequest(
     assistantContent: "",
     invoiceData: undefined,
     serviceBillingData: undefined,
+    engine3Data: undefined,
   };
 
   let resp: Response;
@@ -68,6 +74,17 @@ export async function executeGoaeChatRequest(
             fachgebiet: params.lastServiceResult.fachgebiet,
           },
         }),
+        ...(params.lastEngine3Result && {
+          last_engine3_result: {
+            modus: params.lastEngine3Result.modus,
+            klinischerKontext: params.lastEngine3Result.klinischerKontext,
+            positionen: params.lastEngine3Result.positionen.map((p) => ({ ziffer: p.ziffer })),
+            optimierungen: params.lastEngine3Result.optimierungen?.map((p) => ({ ziffer: p.ziffer })),
+          },
+        }),
+        ...(params.guidedWorkflow && params.guidedPhase
+          ? { guided_workflow: params.guidedWorkflow, guided_phase: params.guidedPhase }
+          : {}),
       }),
       signal: params.signal,
     });
@@ -91,6 +108,20 @@ export async function executeGoaeChatRequest(
   }
 
   const reader = resp.body.getReader();
+  // #region agent log
+  fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
+    body: JSON.stringify({
+      sessionId: "a85cc5",
+      location: "executeGoaeChatRequest.ts:startConsume",
+      message: "SSE consume start",
+      data: { engine_type: params.engine_type, fileCount: params.filePayloads?.length ?? 0 },
+      timestamp: Date.now(),
+      hypothesisId: "H3",
+    }),
+  }).catch(() => {});
+  // #endregion
   await consumeGoaeChatSseStream(reader, {
     state,
     onProgress: params.onProgress,
@@ -101,19 +132,23 @@ export async function executeGoaeChatRequest(
   const analysisTimeSeconds = (Date.now() - startTime) / 1000;
 
   // #region agent log
-  fetch("http://127.0.0.1:7350/ingest/d67df62b-428b-4fab-8921-97d904601338", {
+  fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c81fbe" },
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a85cc5" },
     body: JSON.stringify({
-      sessionId: "c81fbe",
-      hypothesisId: "H1",
-      location: "executeGoaeChatRequest.ts:success",
-      message: "client observed response shape",
+      sessionId: "a85cc5",
+      runId: "post-fix",
+      hypothesisId: "H4",
+      location: "executeGoaeChatRequest.ts:afterConsume",
+      message: "SSE accumulate final",
       data: {
-        hadServiceBilling: !!state.serviceBillingData,
+        engine_type: params.engine_type,
+        hadEngine3: !!state.engine3Data,
         hadInvoice: !!state.invoiceData,
-        hasFiles: !!(params.filePayloads && params.filePayloads.length),
+        hadServiceBilling: !!state.serviceBillingData,
         assistantLen: state.assistantContent.length,
+        hasEngine3Err: /\*\*Engine-3-Fehler:\*\*/.test(state.assistantContent),
+        hasDeliverableText: state.assistantContent.trim().length > 0,
       },
       timestamp: Date.now(),
     }),

@@ -14,6 +14,35 @@ import type {
   ExtrahierteLeistung,
 } from "./types.ts";
 
+function normalizeLeistungLabel(s: string): string {
+  return s.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** Vermeidet doppelten Wortlaut, wenn Rechnungszeile und NLP-Behandlung dieselbe Leistung beschreiben. */
+function kompakteLeistungsbeschreibung(
+  posBezeichnung: string,
+  behandlung: { text: string; typ: string },
+): string {
+  const p = posBezeichnung.trim();
+  const t = behandlung.text.trim();
+  const typ = behandlung.typ.trim();
+  const np = normalizeLeistungLabel(p);
+  const nt = normalizeLeistungLabel(t);
+  const typSuffix = typ ? ` (${typ})` : "";
+
+  if (!np && !nt) return p || t;
+  if (np === nt) {
+    return typ ? `(${typ})` : p;
+  }
+  if (nt.includes(np) && np.length > 0) {
+    return `${t}${typSuffix}`;
+  }
+  if (np.includes(nt) && nt.length > 0) {
+    return `${p}${typSuffix}`;
+  }
+  return `${p} – ${t}${typSuffix}`;
+}
+
 export function extrahiereLeistungen(
   rechnung: ParsedRechnung,
   analyse: MedizinischeAnalyse,
@@ -35,7 +64,7 @@ export function extrahiereLeistungen(
     leistungen.push({
       bezeichnung: pos.bezeichnung,
       beschreibung: matchingBehandlung
-        ? `${pos.bezeichnung} – ${matchingBehandlung.text} (${matchingBehandlung.typ})`
+        ? kompakteLeistungsbeschreibung(pos.bezeichnung, matchingBehandlung)
         : pos.bezeichnung,
       quellePositionNr: pos.nr,
       quelleBehandlung: matchingBehandlung?.text,

@@ -129,6 +129,16 @@ const parseGlobalRuleFields = (value: string): string[] => {
   return [value];
 };
 
+function engineFromDbGlobal(v: string | undefined): "simple" | "complex" | "engine3" {
+  if (v === "simple" || v === "engine3") return v;
+  return "complex";
+}
+
+function engineFromDbUser(v: string | null | undefined): "simple" | "complex" | "engine3" | null {
+  if (v === "simple" || v === "complex" || v === "engine3") return v;
+  return null;
+}
+
 /** Von Index übergeben: bereits geladene global/user Settings → kein blockierendes „Laden…“ beim Panel-Öffnen. */
 export type SettingsChatHydration = {
   global: { default_model: string; default_rules: string; default_engine: string };
@@ -139,22 +149,22 @@ function initialStateFromChatHydration(h: SettingsChatHydration | undefined) {
   if (!h) {
     return {
       globalModel: "openrouter/free",
-      globalEngine: "complex" as const,
+      globalEngine: "complex" as "simple" | "complex" | "engine3",
       globalRules: "",
       globalRuleFields: [DEFAULT_GLOBAL_GUARDRAILS_RULES],
       userModel: null as string | null,
-      userEngine: null as "simple" | "complex" | null,
+      userEngine: null as "simple" | "complex" | "engine3" | null,
       userRules: null as string | null,
     };
   }
   const eng = h.user.engine_type;
   return {
     globalModel: h.global.default_model,
-    globalEngine: h.global.default_engine === "simple" ? ("simple" as const) : ("complex" as const),
+    globalEngine: engineFromDbGlobal(h.global.default_engine),
     globalRules: h.global.default_rules,
     globalRuleFields: parseGlobalRuleFields(h.global.default_rules),
     userModel: h.user.selected_model,
-    userEngine: eng === "simple" ? "simple" : eng === "complex" ? "complex" : null,
+    userEngine: engineFromDbUser(eng),
     userRules: h.user.custom_rules,
   };
 }
@@ -212,11 +222,11 @@ const SettingsContent = ({
     [],
   );
   const [globalModel, setGlobalModel] = useState(boot.globalModel);
-  const [globalEngine, setGlobalEngine] = useState<"simple" | "complex">(boot.globalEngine);
+  const [globalEngine, setGlobalEngine] = useState<"simple" | "complex" | "engine3">(boot.globalEngine);
   const [globalRules, setGlobalRules] = useState(boot.globalRules);
   const [globalRuleFields, setGlobalRuleFields] = useState<string[]>(boot.globalRuleFields);
   const [userModel, setUserModel] = useState<string | null>(boot.userModel);
-  const [userEngine, setUserEngine] = useState<"simple" | "complex" | null>(boot.userEngine);
+  const [userEngine, setUserEngine] = useState<"simple" | "complex" | "engine3" | null>(boot.userEngine);
   const [userRules, setUserRules] = useState<string | null>(boot.userRules);
   const [loading, setLoading] = useState(() => !chatSettingsHydration);
   const rulesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -273,14 +283,14 @@ const SettingsContent = ({
         ]);
         if (gData) {
           setGlobalModel(gData.default_model);
-          setGlobalEngine((gData as { default_engine?: string }).default_engine === "simple" ? "simple" : "complex");
+          setGlobalEngine(engineFromDbGlobal((gData as { default_engine?: string }).default_engine));
           setGlobalRules(gData.default_rules);
           setGlobalRuleFields(parseGlobalRuleFields(gData.default_rules));
         }
         if (uData) {
           setUserModel(uData.selected_model);
           const eng = (uData as { engine_type?: string | null }).engine_type;
-          setUserEngine(eng === "simple" ? "simple" : eng === "complex" ? "complex" : null);
+          setUserEngine(engineFromDbUser(eng));
           setUserRules(uData.custom_rules);
           const ps = (uData as { praxis_stammdaten?: PraxisStammdaten }).praxis_stammdaten as PraxisStammdaten | undefined;
           setPraxisStammdaten(ps && typeof ps === "object" ? ps : {});
@@ -365,7 +375,7 @@ const SettingsContent = ({
   }, []);
 
   const saveGlobal = useCallback(
-    async (model?: string, rules?: string, engine?: "simple" | "complex") => {
+    async (model?: string, rules?: string, engine?: "simple" | "complex" | "engine3") => {
       const m = model ?? globalModel;
       const r = rules ?? globalRules;
       const e = engine ?? globalEngine;
@@ -389,7 +399,7 @@ const SettingsContent = ({
   );
 
   const saveUser = useCallback(
-    async (model?: string | null, rules?: string | null, engine?: "simple" | "complex" | null) => {
+    async (model?: string | null, rules?: string | null, engine?: "simple" | "complex" | "engine3" | null) => {
       if (!user) return;
       const m = model !== undefined ? model : userModel;
       const r = rules !== undefined ? rules : userRules;
@@ -924,7 +934,7 @@ const SettingsContent = ({
   };
 
   const handleEngineSelect = (value: string) => {
-    const eng = value === "simple" ? "simple" : "complex";
+    const eng = value === "simple" ? "simple" : value === "engine3" ? "engine3" : "complex";
     if (activeTab === "global") {
       setGlobalEngine(eng);
       saveGlobal(globalModel, serializeGlobalRuleFields(globalRuleFields), eng);
@@ -1287,7 +1297,9 @@ const SettingsContent = ({
             <div className="space-y-3">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Engine wählen</p>
               <p className="text-xs text-muted-foreground -mt-1">
-                Einfache Engine: schneller, 2 Schritte. Komplexe Engine: präziser, 6 Schritte mit strukturierter Ausgabe.
+                Einfache Engine: schnell, 2 Schritte. Komplexe Engine: 6 Schritte mit klassischer Karten-Ansicht. Engine
+                3: neue Pipeline mit einheitlichem Ergebnis, GOÄ plus geprüftem KI-/Admin-Kontext (ohne Kontext: sofortiger
+                Hinweis).
               </p>
               <Select
                 value={activeTab === "user" && userEngine === null ? "__global__" : currentEngine}
@@ -1313,6 +1325,9 @@ const SettingsContent = ({
                   </SelectItem>
                   <SelectItem value="complex">
                     <span className="font-medium">Komplexe (6-Schritt) Engine</span>
+                  </SelectItem>
+                  <SelectItem value="engine3">
+                    <span className="font-medium">Engine 3 (neu)</span>
                   </SelectItem>
                 </SelectContent>
               </Select>

@@ -28,6 +28,8 @@ import type {
 } from "./types.ts";
 import {
   buildRegelKatalogMapFromJson,
+  expandGoaeAusschlussRangeTokens,
+  regelZiffernKollidieren,
   type RegelKatalogEintrag,
 } from "../goae-catalog-json.ts";
 
@@ -47,29 +49,31 @@ function getKatalog(_katalogText: string): Map<string, KatalogEintrag> {
   return _katalogCache;
 }
 
-// Expandiert Bereichsangaben wie "1210-1213" zu ["1210","1211","1212","1213"]
-function expandRange(s: string): string[] {
-  const rangeMatch = s.match(/^(\d+)-(\d+)$/);
-  if (rangeMatch) {
-    const start = parseInt(rangeMatch[1], 10);
-    const end = parseInt(rangeMatch[2], 10);
-    const result: string[] = [];
-    for (let i = start; i <= end; i++) result.push(String(i));
-    return result;
-  }
-  return [s];
-}
-
-function expandAusschluesse(raw: string[]): string[] {
-  const result: string[] = [];
-  for (const item of raw) {
-    result.push(...expandRange(item));
-  }
-  return result;
-}
-
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Bei Ausschlusskonflikt zwischen zwei Positionen: welche Positionsnummer wird
+ * für die korrigierte Summe / Service-Billing-Vorschlag gestrichen?
+ * Bei gleichem Betrag: höhere Ziffer beibehalten (numerischer Kern), sonst höhere Zeilennummer streichen.
+ */
+function nrBeiAusschlussZuStreichen(
+  pos: { nr: number; ziffer: string; betrag: number },
+  andere: { nr: number; ziffer: string; betrag: number },
+): number {
+  if (pos.betrag !== andere.betrag) {
+    return pos.betrag < andere.betrag ? pos.nr : andere.nr;
+  }
+  const zifferPunkteKey = (z: string): number => {
+    const digits = z.replace(/^A/i, "").replace(/\D/g, "");
+    const n = parseInt(digits || "0", 10);
+    return Number.isNaN(n) ? 0 : n;
+  };
+  const kp = zifferPunkteKey(pos.ziffer);
+  const ko = zifferPunkteKey(andere.ziffer);
+  if (kp !== ko) return kp < ko ? pos.nr : andere.nr;
+  return pos.nr > andere.nr ? pos.nr : andere.nr;
 }
 
 // ---------- Hauptlogik ----------
@@ -84,7 +88,7 @@ export function pruefeRechnung(
   const positionen: GeprueftePosition[] = [];
   const optimierungen: Optimierung[] = [];
 
-  // Bei Ausschluss: welche Positionen streichen (niedrigerer Betrag)
+  // Bei Ausschluss: welche Positionen für korrigierte Summe streichen (niedrigerer Betrag; bei Gleichstand höhere Ziffer behalten)
   const ausschlussExcluded = new Set<number>();
 
   let korrekt = 0;
@@ -97,12 +101,13 @@ export function pruefeRechnung(
   for (const pos of rechnung.positionen) {
     const eintrag = katalog.get(pos.ziffer);
     if (!eintrag) continue;
-    const expandedAusschl = expandAusschluesse(eintrag.ausschlussziffern);
+    const expandedAusschl = expandGoaeAusschlussRangeTokens(
+      eintrag.ausschlussziffern,
+    );
     for (const andere of rechnung.positionen) {
       if (andere.nr === pos.nr) continue;
       if (expandedAusschl.includes(andere.ziffer)) {
-        const toExclude = pos.betrag <= andere.betrag ? pos.nr : andere.nr;
-        ausschlussExcluded.add(toExclude);
+        ausschlussExcluded.add(nrBeiAusschlussZuStreichen(pos, andere));
       }
     }
   }
@@ -199,17 +204,29 @@ export function pruefeRechnung(
 
     // --- Prüfung 4: Ausschlussziffern ---
     if (eintrag) {
-      const expandedAusschl = expandAusschluesse(eintrag.ausschlussziffern);
+      const expandedAusschl = expandGoaeAusschlussRangeTokens(
+        eintrag.ausschlussziffern,
+      );
       for (const andere of rechnung.positionen) {
         if (andere.nr === pos.nr) continue;
         if (expandedAusschl.includes(andere.ziffer)) {
           const andereEintrag = katalog.get(andere.ziffer);
-          pruefungen.push({
-            typ: "ausschluss",
-            schwere: "fehler",
-            nachricht: `GOÄ ${pos.ziffer} ist neben GOÄ ${andere.ziffer}${andereEintrag ? ` (${andereEintrag.bezeichnung})` : ""} nicht berechnungsfähig.`,
-            vorschlag: vorschlagAusschluss(pos, andere, eintrag, andereEintrag),
-          });
+          const streichenNr = nrBeiAusschlussZuStreichen(pos, andere);
+          if (pos.nr === streichenNr) {
+            pruefungen.push({
+              typ: "ausschluss",
+              schwere: "fehler",
+              nachricht: `GOÄ ${pos.ziffer} ist neben GOÄ ${andere.ziffer}${andereEintrag ? ` (${andereEintrag.bezeichnung})` : ""} nicht berechnungsfähig.`,
+              vorschlag: vorschlagAusschluss(pos, andere, eintrag, andereEintrag),
+            });
+          } else {
+            pruefungen.push({
+              typ: "ausschluss",
+              schwere: "warnung",
+              nachricht: `Konflikt mit GOÄ ${andere.ziffer}${andereEintrag ? ` (${andereEintrag.bezeichnung})` : ""}: Diese Position soll bei Regelkonformität beibehalten werden; die widersprüchliche Ziffer entfällt (GOÄ-Ausschluss).`,
+              vorschlag: `GOÄ ${andere.ziffer} aus der Abrechnung entfernen oder getrennt abrechnen.`,
+            });
+          }
         }
       }
     }
@@ -280,6 +297,11 @@ export function pruefeRechnung(
 
     const eintrag = katalog.get(zuordnung.ziffer);
     if (!eintrag) continue;
+
+    const kollidiertMitRechnung = rechnung.positionen.some((p) =>
+      regelZiffernKollidieren(katalog, p.ziffer, zuordnung.ziffer)
+    );
+    if (kollidiertMitRechnung) continue;
 
     const faktor = eintrag.schwellenfaktor;
     const betrag = round2(eintrag.punkte * PUNKTWERT * faktor);
@@ -524,17 +546,18 @@ export function pruefeServiceBillingVorschlaege(
   const mappings: GoaeMappingResult = { zuordnungen, fehlendeMappings: [] };
   const pruefung = pruefeRechnung(rechnung, analyse, mappings, katalogText);
 
-  // Ausschluss: welche Positionen wurden ausgeschlossen (niedrigerer Betrag)
+  // Ausschluss: gleiche Logik wie pruefeRechnung (inkl. Tie-Break bei gleichem Betrag)
   const ausschlussExcluded = new Set<number>();
   for (const pos of rechnung.positionen) {
     const eintrag = katalog.get(pos.ziffer);
     if (!eintrag) continue;
-    const expandedAusschl = expandAusschluesse(eintrag.ausschlussziffern);
+    const expandedAusschl = expandGoaeAusschlussRangeTokens(
+      eintrag.ausschlussziffern,
+    );
     for (const andere of rechnung.positionen) {
       if (andere.nr === pos.nr) continue;
       if (expandedAusschl.includes(andere.ziffer)) {
-        const toExclude = pos.betrag <= andere.betrag ? pos.nr : andere.nr;
-        ausschlussExcluded.add(toExclude);
+        ausschlussExcluded.add(nrBeiAusschlussZuStreichen(pos, andere));
       }
     }
   }

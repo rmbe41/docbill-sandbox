@@ -3,17 +3,25 @@ import { corsHeaders } from "jsr:@supabase/supabase-js@2/cors";
 
 import { buildChatSelectiveCatalogMarkdown } from "./goae-catalog-json.ts";
 import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
-import { GOAE_ANALOGE_BEWERTUNG, GOAE_BEGRUENDUNGEN, GOAE_ABSCHNITTE } from "./goae-regeln.ts";
+import {
+  GOAE_ABSCHNITTE,
+  GOAE_ANALOGE_BEWERTUNG,
+  GOAE_BEGRUENDUNGEN,
+  GOAE_SONDERBEREICHE_KOMPAKT,
+} from "./goae-regeln.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
 import { runSimplePipeline } from "./pipeline/simple-orchestrator.ts";
 import { runServiceBillingAsStream } from "./pipeline/service-billing-orchestrator.ts";
+import { runEngine3AsStream } from "./pipeline/engine3/orchestrator.ts";
 import { extrahiereOptimizeFor } from "./pipeline/input-parser.ts";
 import { classifyByHeuristics, classifyIntent } from "./intent-classifier.ts";
+import { inferWelcomeStickyWorkflow } from "./infer-welcome-sticky.ts";
 import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel, getReasoningConfigForStream } from "./model-resolver.ts";
 import {
   loadRelevantAdminContext,
   buildPipelineQuery,
   buildFrageAdminRagQuery,
+  enrichRagQueryForAuslegung,
   type LastResultContext,
 } from "./admin-context.ts";
 import {
@@ -34,10 +42,11 @@ const FRAGE_MODUS_CORE = `
 Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** Rechnung, keinen „Rechnungsvorschlag“ und keine tabellarische Positionsliste wie bei einer Honorarabrechnung.
 
 ### Inhaltliche Logik
-- **Kurzantwort:** 1–3 Sätze mit der direkten Antwort.
-- **Erläuterung:** Gründe, Konsequenzen, typische Fälle – sachlich und gut lesbar.
+- **Kurzantwort:** **Max. 1–2 sehr kurze Sätze**, eine Kernaussage. **Keine** Aufzählungen oder Nummerierung der gesamten Kompetenzliste hier.
+- **Erläuterung:** **Standard ist eine Markdown-Liste** mit \`- \` (Minuszeichen, Leerzeichen). Pro Punkt **fettem Lead-in** (z. B. \`- **GOÄ-Konformität:** …\`). **Pro Bullet vorzugsweise ein Satz**, höchstens zwei kurze Sätze. **Keine** langen Fließabsätze und **keine** „1. … 2. …“ als durchlaufende Prosa. Bei Meta-Fragen („Was kannst du?“, „Welche Workflows?“): **nur Bullets**, **ohne** Einleitung wie „Meine typischen Workflows umfassen dabei“.
 - **Quellen:** **Nur**, wenn du Inhalte aus dem **gelieferten Kontext** für **konkrete** Fakten nutzt – dann **jede** verwendete Fundstelle **explizit** und **konkret** (GOÄ § aus Kontext, GOÄ-Ziffer/Bezeichnung, DocBill-Regelwerk-Abschnitt, Admin-Dateiname). **Mehrere** Bezüge → **alle** nennen. Keine vagen Formulierungen wie nur „nach GOÄ“ ohne §/Ziffer/Datei. **Ohne** solche Bezüge: **keinen** Quellen-Abschnitt (bei JSON: \`quellen: []\`) – **nicht** erwähnen, dass keine Quelle genutzt wurde; **keine** erfundenen Paragraphen.
-- **Grenzfälle:** Unsicherheiten, fehlender Kontext oder wann Fachrat nötig ist – im vorgesehenen Ausgabefeld (siehe Formatregeln unten).
+- **Grenzfälle:** Unsicherheiten, fehlender Kontext oder wann Fachrat nötig ist – im vorgesehenen Ausgabefeld (siehe Formatregeln unten). Bei mehreren Hinweisen: Listenzeilen mit \`- \` wie bei der Erläuterung; bei einem einzelnen Punkt reicht ein kurzer Satz.
+- **In** \`erlaeuterung\` **und** \`grenzfaelle_hinweise\` **keine eigenen** \`###\` **Überschriften** (Abschnittsüberschriften liefert die Oberfläche).
 
 ### Sprache und Darstellung
 - Auf **Deutsch**.
@@ -50,8 +59,9 @@ Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** R
 function buildFrageSystemPrompt(
   messages: { role: string; content: unknown }[],
   outputMode: "json" | "markdown_stream",
+  catalogMaxLines = 100,
 ): string {
-  const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, 100);
+  const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, catalogMaxLines);
   const formatBlock = outputMode === "json" ? FRAGE_JSON_OUTPUT_RULES : FRAGE_MARKDOWN_STREAM_RULES;
   return `${FRAGE_MODUS_CORE}
 
@@ -77,6 +87,10 @@ WICHTIGE REGELN:
 
 ⚠️ PFLICHT: Du darfst NICHTS erfinden. Agiere ausschließlich im Rahmen deines Kontextwissens (GOÄ-Katalog, Paragraphen, Regeln, Admin-Kontext). Keine Ziffern oder Beträge, die nicht in deinem Kontext stehen.
 
+- **BÄK / Auslegung:** Aussagen der Bundesärztekammer oder ähnliche offizielle Auslegungen nur, wenn sie im **ADMIN-KONTEXT** mit **konkretem Dateinamen** belegt sind; ohne Treffer Unsicherheit benennen, nichts erfinden.
+- **GOÄ-Kommentar / Kommentierung:** Gleiches wie bei BÄK – nur mit **wörtlich oder sinngemäß** nachweisbarer Stelle im **ADMIN-KONTEXT** (eingespielter Kommentar o. Ä.); Dateiname in der Antwort nennen. Ohne Chunk-Treffer: nichts als verbindliche Auslegung darstellen.
+- **Vorrang des Kontexts:** Widersprechen allgemeines Modellwissen und der mitgelieferte Katalog/Admin-Text einander, gilt **ausschließlich der mitgelieferte Kontext**.
+
 QUELLEN DEINES WISSENS bei Fragen wie "Woher beziehst du dein Wissen?":
 Dein GOÄ-Wissen stammt aus dem **lokalen DocBill-Kontext**, NICHT aus Wikipedia oder allgemeinem Training:
 - **GOÄ-Katalog**: Ziffern, Bezeichnungen, Punktwerte
@@ -93,6 +107,8 @@ ${GOAE_PARAGRAPHEN}
 
 ${GOAE_ABSCHNITTE}
 
+${GOAE_SONDERBEREICHE_KOMPAKT}
+
 ${goaeKatalogMarkdown}
 
 ${GOAE_ANALOGE_BEWERTUNG}
@@ -105,12 +121,13 @@ function buildFrageSystemContent(
   adminContext: string,
   extraRules: string | undefined,
   outputMode: "json" | "markdown_stream",
+  catalogMaxLines = 100,
 ): string {
   const ambiguous: { role: string; content: unknown }[] = messages.map((m) => ({
     role: m.role,
     content: m.content,
   }));
-  let systemContent = buildFrageSystemPrompt(ambiguous, outputMode) + adminContext;
+  let systemContent = buildFrageSystemPrompt(ambiguous, outputMode, catalogMaxLines) + adminContext;
   if (extraRules) {
     systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules}`;
   }
@@ -215,15 +232,59 @@ function debugCcb4cf(
 }
 // #endregion
 
+type GuidedCollectWorkflow = "leistungen_abrechnen" | "rechnung_pruefen" | "frage_oeffnen";
+
+function guidedCollectSystemExtra(workflow: GuidedCollectWorkflow): string {
+  if (workflow === "leistungen_abrechnen") {
+    return `
+
+## Geführter Workflow: Leistungen abrechnen (Sammelphase)
+
+Du befindest dich in der **ersten Phase**: Der Nutzer hat „Leistungen abrechnen“ gewählt. Es soll **noch keine** GOÄ-Abrechnung und kein Rechnungsvorschlag erstellt werden.
+
+- Bitte **unmittelbar und klar** um die **Leistungen, die abgerechnet werden sollen**: entweder in **eigenen Worten auflisten** oder **Befund/Arztbrief/Patientenakte** als PDF oder Bild hochladen.
+- Max. **drei** kurze Rückfragen oder eine knappe Checkliste, falls noch etwas fehlt (ohne abstrakte Abschweifung).
+- **Verboten:** GOÄ-Ziffern, Beträge, Steigerungsfaktoren, tabellarische Positionslisten, „Rechnungsvorschlag“ im Sinne einer fertigen Honorarabrechnung.
+- Ein Satz: Sobald die Leistungen (Text und/oder Dokument) vorliegen, startet im nächsten Schritt automatisch die **Abrechnungsanalyse** mit GOÄ-Vorschlägen.`;
+  }
+  if (workflow === "frage_oeffnen") {
+    return `
+
+## Geführter Workflow: Frage stellen (Eröffnung)
+
+Der Nutzer hat **„GOÄ-Frage stellen“** gewählt. **Keine** inhaltliche GOÄ-Einzelfrage beantworten und keinen Rechnungsvorschlag.
+
+- Antworte freundlich mit einer kurzen Rückfrage im Sinne von: **Was möchten Sie wissen?**
+- Danach **höchstens 4–5 Bulletpoints** (\`- **…**\`) mit deinen **Hauptfähigkeiten**: Leistungen aus Text/Akte in GOÄ-Vorschläge überführen, Rechnung prüfen/mit Akte abgleichen, GOÄ-Regeln erklären, Einordnung im Rahmen des gelieferten Kontexts.
+- **Verboten:** lange GOÄ-Fachantwort zu einer noch nicht gestellten Einzelfrage.`;
+  }
+  return `
+
+## Geführter Workflow: Rechnung prüfen (Sammelphase)
+
+Erste Phase nach „Rechnung prüfen“. **Noch keine** Rechnungsprüfung oder Positionsbewertung durchführen.
+
+- Frage **zuerst**, um **welche konkrete Honorarrechnung** es geht (z. B. Zeitraum, Kontext), und ob es **weitere Unterlagen** gibt: **Patientenakte**, **Befund**, **Arztbrief** oder andere Dokumente zum Abgleich.
+- Bitte höflich um **Upload** der Rechnung als PDF oder Bild sowie optional der genannten Zusatzdokumente.
+- Kurz erklären: Alle eingereichten Dateien dienen gemeinsam der **Prüfung und Einordnung** dieser Rechnung; danach folgen Hinweise oder Optimierungen im Rahmen der **GOÄ** und des verfügbaren Kontexts.
+- **Verboten:** GOÄ-Ziffern, Beträge oder konkrete Prüf- oder Korrekturergebnisse in dieser Antwort.`;
+}
+
 async function handleChatMode(
   messages: { role: string; content: string }[],
   model: string,
   extraRules: string | undefined,
   adminContext: string,
   apiKey: string,
+  guidedCollectWorkflow?: GuidedCollectWorkflow,
+  catalogMaxLines = 100,
 ): Promise<Response> {
-  const systemJson = buildFrageSystemContent(messages, adminContext, extraRules, "json");
-  const systemStream = buildFrageSystemContent(messages, adminContext, extraRules, "markdown_stream");
+  const collectExtra = guidedCollectWorkflow ? guidedCollectSystemExtra(guidedCollectWorkflow) : "";
+  const systemJson =
+    buildFrageSystemContent(messages, adminContext, extraRules, "json", catalogMaxLines) + collectExtra;
+  const systemStream =
+    buildFrageSystemContent(messages, adminContext, extraRules, "markdown_stream", catalogMaxLines) +
+    collectExtra;
 
   // #region agent log
   debugCcb4cf("H3", "goae-chat/handleChatMode:systemBuilt", "system prompt composition", {
@@ -375,7 +436,18 @@ serve(async (req) => {
       "[DOCBILL_INSTRUMENTATION] hypothesisId=H_req_start location=goae-chat/serve message=inbound_request",
     );
     console.error("DOCBILL_INSTRUMENTATION_84BF6E goae-chat request");
-    const { messages, files, model, extra_rules, engine_type, last_invoice_result, last_service_result } = await req.json();
+    const {
+      messages,
+      files,
+      model,
+      extra_rules,
+      engine_type,
+      last_invoice_result,
+      last_service_result,
+      last_engine3_result,
+      guided_workflow,
+      guided_phase,
+    } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
     const keyExists = typeof OPENROUTER_API_KEY === "string";
@@ -400,15 +472,22 @@ serve(async (req) => {
     const userMessage = (messages?.[messages.length - 1]?.content as string) || "";
 
     const lastResult: LastResultContext | undefined =
-      last_invoice_result || last_service_result
-        ? { last_invoice_result: last_invoice_result, last_service_result: last_service_result }
+      last_invoice_result || last_service_result || last_engine3_result
+        ? {
+            last_invoice_result,
+            last_service_result,
+            last_engine3_result,
+          }
         : undefined;
 
     const getAdminContext = async (result?: { medizinischeAnalyse?: unknown; pruefung?: unknown }) => {
       const fullQuery = buildPipelineQuery(userMessage, result, lastResult);
-      const mergeQuery =
-        result != null ? fullQuery : buildFrageAdminRagQuery(messages, userMessage, fullQuery);
-      const vectorQuery = result != null ? fullQuery : (userMessage.trim() || mergeQuery);
+      const mergeQuery = enrichRagQueryForAuslegung(
+        result != null ? fullQuery : buildFrageAdminRagQuery(messages, userMessage, fullQuery),
+      );
+      const vectorQuery = enrichRagQueryForAuslegung(
+        result != null ? fullQuery : (userMessage.trim() || mergeQuery),
+      );
       // #region agent log
       {
         const h5Payload = {
@@ -483,6 +562,43 @@ serve(async (req) => {
       );
     };
 
+    const guidedWorkflowNorm: GuidedCollectWorkflow | undefined =
+      guided_workflow === "leistungen_abrechnen" ||
+      guided_workflow === "rechnung_pruefen" ||
+      guided_workflow === "frage_oeffnen"
+        ? guided_workflow
+        : undefined;
+    const guidedPhaseNorm = guided_phase === "collect" ? guided_phase : undefined;
+    const userMsgCount = (messages ?? []).filter((m: { role: string }) => m.role === "user").length;
+    const assistantMsgCount = (messages ?? []).filter((m: { role: string }) => m.role === "assistant")
+      .length;
+
+    if (
+      guidedPhaseNorm === "collect" &&
+      guidedWorkflowNorm &&
+      !hasFiles &&
+      userMsgCount === 1 &&
+      assistantMsgCount === 0
+    ) {
+      const adminContext = await getAdminContext();
+      const collectResponse = await handleChatMode(
+        messages as { role: string; content: string }[],
+        resolvedModel,
+        extra_rules,
+        adminContext,
+        OPENROUTER_API_KEY,
+        guidedWorkflowNorm,
+      );
+      const collectHeaders = new Headers(collectResponse.headers);
+      for (const [key, value] of Object.entries(corsHeaders)) {
+        collectHeaders.set(key, value);
+      }
+      return new Response(collectResponse.body, {
+        status: collectResponse.status,
+        headers: collectHeaders,
+      });
+    }
+
     // Intent-Klassifikation: Bei Dateien nur dann überspringen, wenn klar Rechnungsprüfung und keine Akte-/Abrechnungs-Vorschläge
     const msg = (userMessage || "").toLowerCase().trim();
     const serviceBillingCue =
@@ -495,11 +611,14 @@ serve(async (req) => {
       msg.length > 60 &&
       /abrechnen|was kann|leistung|durchgeführt|erbracht/.test(msg) &&
       !/prüfen|kontroll/.test(msg);
+    const typedMsgs = messages as { role: string; content: string }[] | undefined;
+    const welcomeSticky = inferWelcomeStickyWorkflow(typedMsgs);
     const needsClassifier =
       !hasFiles ||
       msg.length <= 100 ||
       serviceBillingCue ||
-      longLeistungWithoutInvoiceWording;
+      longLeistungWithoutInvoiceWording ||
+      (welcomeSticky === "leistungen_abrechnen" && !!hasFiles);
 
     let intentResult = needsClassifier
       ? await classifyIntent(
@@ -510,13 +629,20 @@ serve(async (req) => {
       : { workflow: "rechnung_pruefen" as const, confidence: "hoch" as const };
 
     let intent = intentResult.workflow;
+    if (welcomeSticky === "leistungen_abrechnen") {
+      intent = "leistungen_abrechnen";
+    } else if (welcomeSticky === "rechnung_pruefen") {
+      intent = "rechnung_pruefen";
+    } else if (welcomeSticky === "frage" && !hasFiles) {
+      intent = "frage";
+    }
     if (!hasFiles && intent === "leistungen_abrechnen") {
       const h = classifyByHeuristics({
         userMessage,
         hasFiles: !!hasFiles,
         recentMessages: messages,
       });
-      if (h === "frage") intent = "frage";
+      if (h === "frage" && welcomeSticky !== "leistungen_abrechnen") intent = "frage";
     }
 
     // #region agent log
@@ -556,9 +682,77 @@ serve(async (req) => {
     }
     // #endregion
 
+    // #region agent log
+    {
+      const useEngine3 = engine_type === "engine3";
+      const predictsSteps =
+        intent === "leistungen_abrechnen"
+          ? useEngine3
+            ? 5
+            : 4
+          : hasFiles
+            ? useEngine3 && intent === "rechnung_pruefen"
+              ? 5
+              : engine_type === "simple"
+                ? 2
+                : 6
+            : 0;
+      fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "691e35" },
+        body: JSON.stringify({
+          sessionId: "691e35",
+          location: "goae-chat/index.ts:preResponse",
+          message: "expected progress steps from routing",
+          data: {
+            intent,
+            hasFiles: !!hasFiles,
+            engine_type: engine_type ?? "",
+            needsClassifier,
+            serviceBillingCue,
+            longLeistungWithoutInvoiceWording,
+            predictsSteps,
+          },
+          timestamp: Date.now(),
+          hypothesisId: "H3",
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
+
     let response: Response;
 
-    if (intent === "leistungen_abrechnen") {
+    const useEngine3 = engine_type === "engine3";
+
+    if (useEngine3 && intent === "leistungen_abrechnen") {
+      response = await runEngine3AsStream(
+        {
+          modus: "leistungen_abrechnen",
+          files: hasFiles ? files : undefined,
+          userMessage,
+          conversationHistory: messages,
+          model: resolvedModel,
+          extraRules: extra_rules,
+          lastResult,
+          lastEngine3Result: last_engine3_result,
+        },
+        OPENROUTER_API_KEY,
+      );
+    } else if (useEngine3 && hasFiles && intent === "rechnung_pruefen") {
+      response = await runEngine3AsStream(
+        {
+          modus: "rechnung_pruefung",
+          files,
+          userMessage,
+          conversationHistory: messages,
+          model: resolvedModel,
+          extraRules: extra_rules,
+          lastResult,
+          lastEngine3Result: last_engine3_result,
+        },
+        OPENROUTER_API_KEY,
+      );
+    } else if (intent === "leistungen_abrechnen") {
       // ═══════════════════════════════════════════════════════
       // SERVICE-BILLING: Leistungen aus Text/Dokument → GOÄ-Vorschläge
       // ═══════════════════════════════════════════════════════
@@ -638,6 +832,8 @@ serve(async (req) => {
         extra_rules,
         adminContext,
         OPENROUTER_API_KEY,
+        undefined,
+        engine_type === "engine3" ? 200 : 100,
       );
     }
 

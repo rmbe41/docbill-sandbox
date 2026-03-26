@@ -35,8 +35,9 @@ flowchart LR
 
 ## Engine-Typ und Einstellungen
 
-- **`engine_type`** steuert nur den **Rechnungs-Upload-Pfad** (wenn Dateien vorliegen und der Workflow nicht „Leistungen abrechnen“ ist):
+- **`engine_type`** steuert den **Rechnungs-Upload-Pfad** (wenn Dateien vorliegen und der Workflow nicht „Leistungen abrechnen“ ist) bzw. **Engine 3** für beide Haupt-Workflows:
   - `simple`: zweistufige Pipeline (Dokumentparser + ein großer LLM-Aufruf mit Streaming), **ohne** strukturiertes `pipeline_result`.
+  - `engine3`: eigenständige Pipeline mit **`engine3_result`** (siehe [PIPELINE.md](./PIPELINE.md)).
   - sonst (Standard): sechsstufige Pipeline mit Regelengine und **`pipeline_result`** vor der Erklärung.
 - Werte kommen aus `user_settings.engine_type` mit Fallback auf `global_settings.default_engine` (siehe Types in [`types.ts`](../src/integrations/supabase/types.ts)).
 
@@ -45,6 +46,24 @@ flowchart LR
 - **`extra_rules`**: Kombination aus globalen Standardregeln und nutzerspezifischen Regeln (vom Client gebildet).
 - **RAG-ähnlicher Admin-Kontext**: Die Function lädt relevante Ausschnitte aus hochgeladenen Admin-Textdateien (`loadRelevantAdminContext` nach Query aus Nutzerfrage bzw. Pipeline-Zwischenstand).
 - Globale/persönliche Regeln werden im Chat-Systemprompt bzw. in Pipeline-Prompts eingebunden.
+
+## GOÄ- und KI-Kontext: Quellen und Garantien
+
+DocBill trennt drei Ebenen; das ist relevant für Erwartungen an „richtige“ GOÄ-Antworten:
+
+| Ebene | Inhalt | Typische Quelle im Code |
+|--------|--------|------------------------|
+| **Deterministisch** | Ziffern, Punkte, Schwellen-/Höchstfaktoren, Ausschlussmatrix (inkl. dokumentierter Patches z. B. Beratung 1–3, Tonometrie 1255–1257) | [`goae-catalog-full.json`](../supabase/functions/goae-chat/goae-catalog-full.json) → [`buildRegelKatalogMapFromJson`](../supabase/functions/goae-chat/goae-catalog-json.ts); Engine-3-Nachlauf z. B. [`applyEngine3AusschlussPass`](../supabase/functions/goae-chat/pipeline/engine3/validate.ts); Regelengine [`regelengine.ts`](../supabase/functions/goae-chat/pipeline/regelengine.ts) |
+| **Eingebetteter Referenztext** | Kurzfassung Paragraphen, Leitfäden (Analog, Begründungen, Abschnitte) | [`goae-paragraphen.ts`](../supabase/functions/goae-chat/goae-paragraphen.ts), [`goae-regeln.ts`](../supabase/functions/goae-chat/goae-regeln.ts) |
+| **RAG / Admin-Dateien** | Auslegung, GOÄ-Kommentar, BÄK-Schriften, interne Leitlinien | [`admin-context.ts`](../supabase/functions/goae-chat/admin-context.ts), gespeicherte Chunks in Supabase |
+
+**Was das Produkt „garantieren“ kann:** Rein formal-sichere Aussagen, die aus **JSON + denselben Regeln wie die Regelengine** folgen (z. B. Ausschlusspaare nach Katalog inkl. Patches, Punktwert-Nachrechnung in Engine 3). **Kein Automatismus** besteht für den vollen GOÄ-Kommentar oder Gerichtsmeinungen, solange der Text nicht im **Admin-Kontext** mit Chunk-Treffer ankommt.
+
+**Weitere deterministische Passes:** Das Muster „LLM liefert strukturiertes Ergebnis → `validate.ts` korrigiert/ergänzt ohne LLM“ ist die bevorzugte Erweiterung für eindeutige GOÄ-Regeln. Neue Patches oder Passes sollen nur mit nachvollziehbarer Grundlage (Katalog, Kommentar-Zitat in Doku/Admin) ergänzt werden.
+
+**GOÄ-Kommentar in der Pipeline:** Den gebührenrechtlichen Kommentar (und ähnliche PDFs) als durchsuchbare **Markdown- oder Textdateien** im Admin-Bucket bereitstellen; beim Chunking **Ziffernüberschriften** nutzen, damit Embedding-Suche Positionspaare und Ausschlüsse zuverlässig trifft. Retrieval-Query soll weiterhin Ziffern aus der Rechnung bzw. der Nutzerfrage einbeziehen (siehe `extractZiffernFromText` / `enrichRagQueryForAuslegung` in `admin-context.ts`).
+
+**Modell vs. System:** Wo nach der LLM-Antwort ein deterministischer Pass läuft (Ausschlüsse, Betragsnachrechnung), ist der **aufbereitete** Stand maßgeblich; Prompts weisen das Modell an, keine widersprüchlichen `korrekt`-Status zu liefern, wenn der Katalogausschnitt einen Konflikt zeigt.
 
 ## Umgebungen und URLs
 

@@ -37,6 +37,7 @@ WICHTIG:
 - Erstelle KEINE Tabellen (die strukturierte Darstellung übernimmt das Frontend)
 - Antworte IMMER auf Deutsch
 - Priorisiere Fehler (Ausschluss, Betrag, Höchstsatz) vor Warnungen. Bei Unsicherheit: explizit „manuell prüfen“ empfehlen
+- **GOÄ-Ausschlusspaare:** Nur die **zu streichende** Ziffer als **Fehler**; die **beizubehaltende** Ziffer im Fazit als **Korrekt** oder **Zusatz** (Beibehalten), nicht erneut als harter Fehler – konsistent zur strukturierten Prüfung
 
 ⚠️ DATENSCHUTZ / DSGVO:
 - Gib NIEMALS personenbezogene Daten wieder
@@ -50,7 +51,12 @@ WICHTIG:
 
 ### 📝 Fazit
 
-NUR 2–4 Bullet-Punkte mit \`- \`. Konkrete Handlungsempfehlungen in einem Satz pro Bullet. KEINE Wiederholung der Vorschläge aus der strukturierten Ansicht.
+NUR 2–4 Bullet-Punkte mit \`- \`. **Jede** Zeile **muss** mit genau einem dieser Präfixe beginnen (Reihenfolge im Satz frei, Genau-Schreibung):
+- \`- **Fehler:** …\` – harte Abrechnungsprobleme (z. B. Ausschluss, falscher Betrag)
+- \`- **Zusatz:** …\` – Ergänzungen, Prüfhinweise, Optimierungspotenzial, Unsicherheit
+- \`- **Korrekt:** …\` – bestätigte regelkonforme Punkte (sparsam)
+
+Konkrete Handlungsempfehlungen in einem Satz pro Bullet. KEINE Wiederholung der Vorschläge aus der strukturierten Ansicht.
 
 Wiederhole NICHT denselben Wortlaut wie unter „Grund:“ bei Optimierungsvorschlägen oder bereits tabellarisch angezeigte Begründungen – verweise höchstens kurz darauf (z.B. „fehlende Ziffer prüfen“), ohne den Text zu duplizieren.
 
@@ -64,9 +70,9 @@ Der medizinische Kontext betrifft einen Patienten in der Augenheilkunde mit vere
 
 ### 📝 Fazit
 
-- GOÄ 1256 entfernen (Ausschluss mit 1257).
-- GOÄ 1257 beibehalten (höherer Betrag).
-- Begründung für Steigerungsfaktor ergänzen: „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt."
+- **Fehler:** GOÄ 1256 entfernen (Ausschluss mit 1257).
+- **Korrekt:** GOÄ 1257 beibehalten (höherer Betrag).
+- **Zusatz:** Begründung für Steigerungsfaktor ergänzen: „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt."
 \`\`\`
 
 DEIN KONTEXTWISSEN:

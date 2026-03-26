@@ -7,6 +7,14 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+interface RlFeedbackContext {
+  model?: string;
+  engine?: string;
+  user_messages?: { role: string; content: string }[];
+  structured_snapshot?: unknown;
+  truncated?: boolean;
+}
+
 interface FeedbackPayload {
   message_id: string;
   conversation_id: string;
@@ -17,6 +25,15 @@ interface FeedbackPayload {
     inquiry_reason?: "A" | "B" | "C" | null;
   };
   timestamp?: string;
+  rl_context?: RlFeedbackContext | null;
+}
+
+const MAX_RECORD_BYTES = 512_000;
+/** Langer Chat-/Markdown-Text allein kann das JSON sonst > max sprengen. */
+const MAX_RESPONSE_CONTENT_CHARS = 350_000;
+
+function utf8ByteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
 }
 
 serve(async (req) => {
@@ -32,7 +49,11 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
+    let authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      const apikey = req.headers.get("apikey");
+      if (apikey) authHeader = `Bearer ${apikey}`;
+    }
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: "Authorization required" }),
@@ -41,13 +62,18 @@ serve(async (req) => {
     }
 
     const body = (await req.json()) as FeedbackPayload;
-    const { message_id, conversation_id, response_content, rating, metadata, timestamp } = body;
+    let { message_id, conversation_id, response_content, rating, metadata, timestamp, rl_context } = body;
 
     if (!message_id || !conversation_id || typeof response_content !== "string" || (rating !== 1 && rating !== -1)) {
       return new Response(
         JSON.stringify({ error: "Invalid payload: message_id, conversation_id, response_content, rating (+1|-1) required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
+    }
+
+    if (response_content.length > MAX_RESPONSE_CONTENT_CHARS) {
+      response_content =
+        response_content.slice(0, MAX_RESPONSE_CONTENT_CHARS) + "\n…[truncated]";
     }
 
     const sbUrl = Deno.env.get("SUPABASE_URL");
@@ -71,7 +97,7 @@ serve(async (req) => {
       // Continue without user_id
     }
 
-    const record = {
+    let record: Record<string, unknown> = {
       message_id,
       conversation_id,
       user_id,
@@ -79,9 +105,42 @@ serve(async (req) => {
       rating,
       metadata: metadata ?? { decisions: {}, inquiry_reason: null },
       timestamp: timestamp ?? new Date().toISOString(),
+      rl_context: rl_context ?? null,
     };
 
-    const jsonlLine = JSON.stringify(record) + "\n";
+    let line = JSON.stringify(record) + "\n";
+    if (utf8ByteLength(line) > MAX_RECORD_BYTES && record.rl_context) {
+      const slim: RlFeedbackContext = {
+        model: (record.rl_context as RlFeedbackContext).model,
+        engine: (record.rl_context as RlFeedbackContext).engine,
+        truncated: true,
+      };
+      record = { ...record, rl_context: slim };
+      line = JSON.stringify(record) + "\n";
+    }
+    if (utf8ByteLength(line) > MAX_RECORD_BYTES) {
+      record = { ...record, rl_context: null };
+      line = JSON.stringify(record) + "\n";
+    }
+    if (utf8ByteLength(line) > MAX_RECORD_BYTES) {
+      const rc = record.response_content as string;
+      const cap = Math.max(8_000, Math.floor(rc.length * (MAX_RECORD_BYTES / utf8ByteLength(line)) - 10_000));
+      record = {
+        ...record,
+        response_content:
+          rc.length > cap ? rc.slice(0, cap) + "\n…[truncated-hard]" : rc,
+        rl_context: null,
+      };
+      line = JSON.stringify(record) + "\n";
+    }
+    if (utf8ByteLength(line) > MAX_RECORD_BYTES) {
+      return new Response(
+        JSON.stringify({ error: "Payload too large", maxBytes: MAX_RECORD_BYTES }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const jsonlLine = line;
     const date = new Date().toISOString().slice(0, 10);
     const uuid = crypto.randomUUID();
     const path = `${date}/${uuid}.json`;

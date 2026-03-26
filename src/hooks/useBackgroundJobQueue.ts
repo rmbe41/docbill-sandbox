@@ -7,6 +7,7 @@ import { executeGoaeChatRequest } from "@/lib/executeGoaeChatRequest";
 import {
   buildAssistantStructuredContent,
   buildUserStructuredContent,
+  parseMessageStructured,
   type MessageStructuredContentV1,
 } from "@/lib/messageStructuredContent";
 import { frageAnswerToMarkdown } from "@/lib/frageAnswerStructured";
@@ -19,7 +20,9 @@ import {
   buildConversationTitle,
   conversationListTitleDisplay,
 } from "@/lib/conversationTitle";
+import type { GuidedWorkflowKind } from "@/lib/guidedWorkflow";
 import type { User } from "@supabase/supabase-js";
+import type { Json } from "@/integrations/supabase/types";
 import type { AppToastFn } from "@/hooks/use-toast";
 
 /**
@@ -34,6 +37,8 @@ export type BackgroundJobStatus = "queued" | "running" | "completed" | "failed" 
 export type BackgroundJobPayload = {
   fileNames?: string[];
   assistantPreview?: string;
+  guidedWorkflow?: GuidedWorkflowKind;
+  guidedPhase?: "collect";
 };
 
 export type BackgroundJobRow = {
@@ -58,7 +63,11 @@ export type ConversationRunInfo = {
   analysisStartTime: number | null;
 };
 
-type TaskSpec = { content: string; files?: File[] };
+type TaskSpec = {
+  content: string;
+  files?: File[];
+  guided?: { workflow: GuidedWorkflowKind; phase: "collect" };
+};
 
 function buildTaskList(content: string, files?: File[]): TaskSpec[] {
   if (!files?.length) return [{ content, files: undefined }];
@@ -133,6 +142,7 @@ export function useBackgroundJobQueue({
         | "content"
         | "invoiceResult"
         | "serviceBillingResult"
+        | "engine3Result"
         | "analysisTimeSeconds"
         | "frageAnswer"
       >
@@ -295,6 +305,16 @@ export function useBackgroundJobQueue({
       const dbMsgs = await loadMessages(conversationId);
       const apiMessages = dbMsgs.map((m) => ({ role: m.role, content: m.content }));
 
+      let lastEngine3Result: ChatMessage["engine3Result"] | undefined;
+      for (let i = dbMsgs.length - 1; i >= 0; i--) {
+        if (dbMsgs[i].role !== "assistant") continue;
+        const s = parseMessageStructured(dbMsgs[i].structured_content as Json);
+        if (s?.engine3Result) {
+          lastEngine3Result = s.engine3Result;
+          break;
+        }
+      }
+
       const controller = new AbortController();
       abortByJobIdRef.current.set(job.id, controller);
       const timeoutId = setTimeout(() => controller.abort(), 300_000);
@@ -310,16 +330,21 @@ export function useBackgroundJobQueue({
         assistantContent: string,
         invoiceData?: ChatMessage["invoiceResult"],
         serviceBillingData?: ChatMessage["serviceBillingResult"],
+        engine3Data?: ChatMessage["engine3Result"],
         analysisTimeSeconds?: number,
         messageId?: string,
         frageAnswer?: ChatMessage["frageAnswer"],
       ) => {
         const prevLive = liveAssistantByConvRef.current.get(conversationId);
         const mergedFrage = frageAnswer !== undefined ? frageAnswer : prevLive?.frageAnswer;
+        const mergedInv = invoiceData !== undefined ? invoiceData : prevLive?.invoiceResult;
+        const mergedSvc = serviceBillingData !== undefined ? serviceBillingData : prevLive?.serviceBillingResult;
+        const mergedE3 = engine3Data !== undefined ? engine3Data : prevLive?.engine3Result;
         liveAssistantByConvRef.current.set(conversationId, {
           content: assistantContent,
-          invoiceResult: invoiceData,
-          serviceBillingResult: serviceBillingData,
+          invoiceResult: mergedInv,
+          serviceBillingResult: mergedSvc,
+          engine3Result: mergedE3,
           ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
           ...(mergedFrage !== undefined ? { frageAnswer: mergedFrage } : {}),
         });
@@ -333,8 +358,10 @@ export function useBackgroundJobQueue({
                     ...m,
                     id: messageId ?? m.id,
                     content: assistantContent,
-                    invoiceResult: invoiceData,
-                    serviceBillingResult: serviceBillingData,
+                    invoiceResult: invoiceData !== undefined ? invoiceData : m.invoiceResult,
+                    serviceBillingResult:
+                      serviceBillingData !== undefined ? serviceBillingData : m.serviceBillingResult,
+                    engine3Result: engine3Data !== undefined ? engine3Data : m.engine3Result,
                     ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
                     ...(frageAnswer !== undefined ? { frageAnswer } : {}),
                   }
@@ -349,6 +376,7 @@ export function useBackgroundJobQueue({
               content: assistantContent,
               invoiceResult: invoiceData,
               serviceBillingResult: serviceBillingData,
+              engine3Result: engine3Data,
               ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
               ...(frageAnswer !== undefined ? { frageAnswer } : {}),
             },
@@ -358,6 +386,7 @@ export function useBackgroundJobQueue({
 
       try {
         const extra_rules = [globalSettings.default_rules, userSettings.custom_rules].filter(Boolean).join("\n\n");
+        const jobPayload = (job.payload ?? {}) as BackgroundJobPayload;
         const result = await executeGoaeChatRequest({
           supabaseKey,
           apiMessages,
@@ -365,6 +394,9 @@ export function useBackgroundJobQueue({
           model: effectiveModel,
           engine_type: userSettings.engine_type ?? globalSettings.default_engine,
           extra_rules,
+          lastEngine3Result,
+          guidedWorkflow: jobPayload.guidedWorkflow,
+          guidedPhase: jobPayload.guidedPhase,
           signal: controller.signal,
           onProgress: (p) => {
             void updateJobProgressDb(job.id, {
@@ -372,6 +404,25 @@ export function useBackgroundJobQueue({
               progress_step: p?.step ?? null,
               progress_total: p?.totalSteps ?? null,
             });
+            // #region agent log
+            fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "691e35" },
+              body: JSON.stringify({
+                sessionId: "691e35",
+                location: "useBackgroundJobQueue.ts:onProgress",
+                message: "UI pipeline step patch",
+                data: {
+                  conversationId,
+                  jobId: job.id,
+                  step: p?.step ?? null,
+                  totalSteps: p?.totalSteps ?? null,
+                },
+                timestamp: Date.now(),
+                hypothesisId: "H4",
+              }),
+            }).catch(() => {});
+            // #endregion
             patchRunState(conversationId, { pipelineStep: p, isRunning: true, analysisStartTime: startTs });
           },
           onStreamState: (state) => {
@@ -379,6 +430,7 @@ export function useBackgroundJobQueue({
               state.assistantContent,
               state.invoiceData,
               state.serviceBillingData,
+              state.engine3Data,
               undefined,
               undefined,
               state.frageStructured,
@@ -438,6 +490,7 @@ export function useBackgroundJobQueue({
           state.assistantContent,
           state.invoiceData,
           state.serviceBillingData,
+          state.engine3Data,
           analysisTimeSeconds,
           undefined,
           state.frageStructured,
@@ -446,17 +499,22 @@ export function useBackgroundJobQueue({
         const assistantStructured = buildAssistantStructuredContent({
           invoiceResult: state.invoiceData,
           serviceBillingResult: state.serviceBillingData,
+          engine3Result: state.engine3Data,
           analysisTimeSeconds,
           frageAnswer: state.frageStructured,
         });
         const hasAssistantText =
-          Boolean(state.assistantContent?.trim()) || Boolean(state.frageStructured);
+          Boolean(state.assistantContent?.trim()) ||
+          Boolean(state.frageStructured) ||
+          Boolean(state.engine3Data);
         const contentToPersist =
           state.assistantContent?.trim()
             ? state.assistantContent
             : state.frageStructured
               ? frageAnswerToMarkdown(state.frageStructured)
-              : "";
+              : state.engine3Data
+                ? "[DocBill: Engine 3 – strukturiertes Ergebnis]"
+                : "";
         if (hasAssistantText || assistantStructured) {
           const savedId = await saveMessage(
             conversationId,
@@ -469,6 +527,7 @@ export function useBackgroundJobQueue({
               state.assistantContent,
               state.invoiceData,
               state.serviceBillingData,
+              state.engine3Data,
               analysisTimeSeconds,
               savedId,
               state.frageStructured,
@@ -480,7 +539,8 @@ export function useBackgroundJobQueue({
           state.assistantContent.trim().slice(0, 160) ||
           state.frageStructured?.kurzantwort.trim().slice(0, 160) ||
           (state.invoiceData ? "Rechnungsprüfung abgeschlossen" : "") ||
-          (state.serviceBillingData ? "Leistungsvorschläge erstellt" : "");
+          (state.serviceBillingData ? "Leistungsvorschläge erstellt" : "") ||
+          (state.engine3Data ? "Engine 3 abgeschlossen" : "");
 
         const sseFailed = assistantContentHasSseError(state.assistantContent);
         const hasDeliverable = sseAccumStateHasDeliverable(state);
@@ -520,7 +580,13 @@ export function useBackgroundJobQueue({
             status: "queued",
           });
           const resultStatus =
-            state.invoiceData ? "invoice" : state.serviceBillingData ? "service" : "generic";
+            state.invoiceData
+              ? "invoice"
+              : state.serviceBillingData
+                ? "service"
+                : state.engine3Data
+                  ? "engine3"
+                  : "generic";
           const finalTitle = buildConversationTitle({
             userText: userTextForTitle,
             fileNames,
@@ -615,13 +681,19 @@ export function useBackgroundJobQueue({
   );
 
   const enqueueSend = useCallback(
-    async (content: string, files: File[] | undefined) => {
+    async (
+      content: string,
+      files: File[] | undefined,
+      guided?: { workflow: GuidedWorkflowKind; phase: "collect" },
+    ) => {
       if (!user) {
         toast({ title: "Anmeldung nötig", description: "Bitte melden Sie sich an, um Analysen zu starten." });
         return;
       }
 
-      const tasks = buildTaskList(content, files);
+      const tasks = buildTaskList(content, files).map((t, idx) =>
+        idx === 0 && guided ? { ...t, guided } : t,
+      );
       const singleTaskUsesActive = tasks.length === 1 && activeConversationId !== null;
 
       if (singleTaskUsesActive && activeConversationId && hasBlockingJobForConversation(activeConversationId)) {
@@ -722,6 +794,9 @@ export function useBackgroundJobQueue({
         sortCursor += 1;
         const jobPayload: BackgroundJobPayload = {
           fileNames: spec.files?.map((f) => f.name) ?? [],
+          ...(spec.guided?.workflow && spec.guided?.phase
+            ? { guidedWorkflow: spec.guided.workflow, guidedPhase: spec.guided.phase }
+            : {}),
         };
 
         const { data: jobRow, error: insErr } = await supabase
@@ -840,6 +915,7 @@ export function useBackgroundJobQueue({
         (!live.content?.trim() &&
           !live.invoiceResult &&
           !live.serviceBillingResult &&
+          !live.engine3Result &&
           !live.frageAnswer)
       ) {
         return base;
@@ -851,6 +927,7 @@ export function useBackgroundJobQueue({
         content: live.content ?? "",
         invoiceResult: live.invoiceResult,
         serviceBillingResult: live.serviceBillingResult,
+        engine3Result: live.engine3Result,
         analysisTimeSeconds: live.analysisTimeSeconds,
         frageAnswer: live.frageAnswer,
       };

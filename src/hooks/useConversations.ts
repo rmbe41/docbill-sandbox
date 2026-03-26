@@ -134,6 +134,28 @@ export const useConversations = () => {
     [activeConversationId, fetchConversations]
   );
 
+  const deleteAllArchivedConversations = useCallback(async () => {
+    if (!user) return;
+    const activeIsArchived =
+      activeConversationId != null &&
+      conversations.some((c) => c.id === activeConversationId && c.archived_at != null);
+    const { error } = await supabase
+      .from("conversations")
+      .delete()
+      .eq("user_id", user.id)
+      .not("archived_at", "is", null);
+    if (error) {
+      toast({
+        title: "Löschen fehlgeschlagen",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    if (activeIsArchived) setActiveConversationId(null);
+    await fetchConversations();
+  }, [user, activeConversationId, conversations, fetchConversations, toast]);
+
   const updateTitle = useCallback(
     async (id: string, title: string) => {
       await supabase.from("conversations").update({ title }).eq("id", id);
@@ -170,6 +192,24 @@ export const useConversations = () => {
     },
     [user, fetchConversations, toast]
   );
+
+  const archiveAllNonArchivedConversations = useCallback(async () => {
+    if (!user) return;
+    const { error } = await supabase
+      .from("conversations")
+      .update({ archived_at: new Date().toISOString() })
+      .eq("user_id", user.id)
+      .is("archived_at", null);
+    if (error) {
+      toast({
+        title: "Archivieren fehlgeschlagen",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    await fetchConversations();
+  }, [user, fetchConversations, toast]);
 
   const restoreConversation = useCallback(
     async (id: string) => {
@@ -217,10 +257,12 @@ export const useConversations = () => {
     saveMessage,
     updateMessageStructuredContent,
     deleteConversation,
+    deleteAllArchivedConversations,
     updateTitle,
     updateSourceFilename,
     fetchConversations,
     archiveConversation,
+    archiveAllNonArchivedConversations,
     restoreConversation,
     markConversationUnread,
     markConversationRead,

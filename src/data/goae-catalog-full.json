@@ -9202,7 +9202,7 @@
     "regelhoechstsatz": 7.34,
     "hoechstfaktor": 2.5,
     "hoechstsatz": 10.2,
-    "ausschlussziffern": [],
+    "ausschlussziffern": ["1256", "1257"],
     "abschnitt": "I"
   },
   {
@@ -9214,7 +9214,7 @@
     "regelhoechstsatz": 10.49,
     "hoechstfaktor": 2.5,
     "hoechstsatz": 14.57,
-    "ausschlussziffern": [],
+    "ausschlussziffern": ["1255", "1257"],
     "abschnitt": "I"
   },
   {
@@ -9226,7 +9226,7 @@
     "regelhoechstsatz": 25.39,
     "hoechstfaktor": 2.5,
     "hoechstsatz": 35.26,
-    "ausschlussziffern": [],
+    "ausschlussziffern": ["1255", "1256"],
     "abschnitt": "I"
   },
   {

@@ -1,0 +1,120 @@
+import { describe, expect, it } from "vitest";
+import {
+  applyEngine3AusschlussPass,
+  type Engine3ResultData,
+} from "../../supabase/functions/goae-chat/pipeline/engine3/validate.ts";
+
+const PUNKT = 0.0582873;
+const F = 2.3;
+
+function baseResult(overrides: Partial<Engine3ResultData>): Engine3ResultData {
+  return {
+    modus: "rechnung_pruefung",
+    klinischerKontext: "Test",
+    fachgebiet: "Allgemein",
+    positionen: [],
+    hinweise: [],
+    zusammenfassung: {
+      geschaetzteSumme: 0,
+      anzahlPositionen: 0,
+      fehler: 0,
+      warnungen: 0,
+    },
+    ...overrides,
+    positionen: overrides.positionen ?? [],
+  };
+}
+
+describe("applyEngine3AusschlussPass", () => {
+  it("adds Hinweis and escalates bei GOÄ 1 und 3 im selben Ergebnis", () => {
+    const betrag1 = Math.round(80 * PUNKT * F * 100) / 100;
+    const betrag3 = Math.round(150 * PUNKT * F * 100) / 100;
+    const raw = baseResult({
+      positionen: [
+        {
+          nr: 1,
+          ziffer: "1",
+          bezeichnung: "Beratung",
+          faktor: F,
+          betrag: betrag1,
+          status: "korrekt",
+        },
+        {
+          nr: 2,
+          ziffer: "3",
+          bezeichnung: "Eingehende Beratung",
+          faktor: F,
+          betrag: betrag3,
+          status: "korrekt",
+        },
+      ],
+    });
+
+    const out = applyEngine3AusschlussPass(raw);
+
+    expect(out.hinweise.some((h) => h.titel.includes("1") && h.titel.includes("3"))).toBe(true);
+    expect(out.positionen.every((p) => p.status === "fehler" || p.status === "warnung")).toBe(true);
+  });
+
+  it("im Leistungsmodus Schwelle warnung statt fehler", () => {
+    const raw = baseResult({
+      modus: "leistungen_abrechnen",
+      positionen: [
+        {
+          nr: 1,
+          ziffer: "1",
+          bezeichnung: "Beratung",
+          faktor: F,
+          betrag: Math.round(80 * PUNKT * F * 100) / 100,
+          status: "korrekt",
+        },
+        {
+          nr: 2,
+          ziffer: "3",
+          bezeichnung: "Eingehende Beratung",
+          faktor: F,
+          betrag: Math.round(150 * PUNKT * F * 100) / 100,
+          status: "korrekt",
+        },
+      ],
+    });
+
+    const out = applyEngine3AusschlussPass(raw);
+    const conflict = out.hinweise.find((h) => h.titel.includes("Ausschluss"));
+    expect(conflict?.schwere).toBe("warnung");
+    expect(out.positionen.every((p) => p.status === "warnung")).toBe(true);
+  });
+
+  it("adds Hinweis and escalates bei GOÄ 1256 und 1257 im selben Ergebnis (Tonometrie)", () => {
+    const fMt = 1.8;
+    const betrag1256 = Math.round(100 * PUNKT * fMt * 100) / 100;
+    const betrag1257 = Math.round(242 * PUNKT * fMt * 100) / 100;
+    const raw = baseResult({
+      positionen: [
+        {
+          nr: 1,
+          ziffer: "1256",
+          bezeichnung: "Applanationstonometrie",
+          faktor: fMt,
+          betrag: betrag1256,
+          status: "korrekt",
+        },
+        {
+          nr: 2,
+          ziffer: "1257",
+          bezeichnung: "Tonometrie-Kurve",
+          faktor: fMt,
+          betrag: betrag1257,
+          status: "korrekt",
+        },
+      ],
+    });
+
+    const out = applyEngine3AusschlussPass(raw);
+
+    expect(out.hinweise.some((h) => h.titel.includes("1256") && h.titel.includes("1257"))).toBe(
+      true,
+    );
+    expect(out.positionen.every((p) => p.status === "fehler" || p.status === "warnung")).toBe(true);
+  });
+});

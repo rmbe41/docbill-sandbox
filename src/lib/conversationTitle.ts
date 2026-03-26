@@ -5,7 +5,7 @@ export function conversationListTitleDisplay(title: string | null | undefined): 
   return t;
 }
 
-export type ConversationTitleStatus = "queued" | "invoice" | "service" | "generic";
+export type ConversationTitleStatus = "queued" | "invoice" | "service" | "engine3" | "generic";
 
 const MAX_TEXT_WITH_FILES = 48;
 const MAX_TEXT_ONLY = 72;
@@ -33,7 +33,9 @@ function resultSuffix(status: ConversationTitleStatus, hasFiles: boolean): strin
     case "invoice":
       return " · Rechnungsprüfung";
     case "service":
-      return " · GOÄ-Vorschläge";
+      return " · Vorschläge";
+    case "engine3":
+      return " · Engine 3";
     case "generic":
       return hasFiles ? " · Auswertung" : "";
   }
