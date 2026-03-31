@@ -13,6 +13,7 @@ import { runPipeline } from "./pipeline/orchestrator.ts";
 import { runSimplePipeline } from "./pipeline/simple-orchestrator.ts";
 import { runServiceBillingAsStream } from "./pipeline/service-billing-orchestrator.ts";
 import { runEngine3AsStream } from "./pipeline/engine3/orchestrator.ts";
+import { runDirectModelStream } from "./pipeline/direct-model.ts";
 import { extrahiereOptimizeFor } from "./pipeline/input-parser.ts";
 import { classifyByHeuristics, classifyIntent } from "./intent-classifier.ts";
 import { inferWelcomeStickyWorkflow } from "./infer-welcome-sticky.ts";
@@ -520,6 +521,26 @@ serve(async (req) => {
     const hasFiles = files && files.length > 0;
     const userMessage = (messages?.[messages.length - 1]?.content as string) || "";
 
+    if (engine_type === "direct") {
+      const directResp = await runDirectModelStream(
+        {
+          messages: (messages ?? []) as { role: string; content: string }[],
+          files: hasFiles ? files : undefined,
+          model: resolvedModel,
+          extraRules: extra_rules,
+        },
+        OPENROUTER_API_KEY,
+      );
+      const directHeaders = new Headers(directResp.headers);
+      for (const [key, value] of Object.entries(corsHeaders)) {
+        directHeaders.set(key, value);
+      }
+      return new Response(directResp.body, {
+        status: directResp.status,
+        headers: directHeaders,
+      });
+    }
+
     const lastResult: LastResultContext | undefined =
       last_invoice_result || last_service_result || last_engine3_result
         ? {
@@ -589,7 +610,8 @@ serve(async (req) => {
             lastUserHead: userMessage.slice(0, 120),
             mergeQueryHead: mergeQuery.slice(0, 200),
             historyHasCatCue: /\bcat\b|katze|katzen|kater|cats\b/.test(concat),
-            historyHasKnowledgeCue: /knowledge|\bwissensdatei\b|\bwissen\b|kenntnis/.test(concat),
+            historyHasKnowledgeCue:
+              /knowledge|\bwissensdatei\b|\bwissen\b|kenntnis|ki-kontext|\bki\s+kontext\b/.test(concat),
             historyTail: concat.slice(-400),
           },
           timestamp: Date.now(),

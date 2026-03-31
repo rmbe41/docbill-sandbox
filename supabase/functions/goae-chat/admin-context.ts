@@ -23,8 +23,8 @@ function normalizeChunkBody(s: string): string {
 
 /** Filename token → substrings that may appear in a German (or mixed) user query. */
 const STEM_TOKEN_ALIASES: Record<string, string[]> = {
-  cat: ["katze", "katzen", "kater", "cats", "kitty"],
-  cats: ["katze", "katzen", "kater"],
+  cat: ["katze", "katzen", "kater", "cats", "kitty", "ki-kontext", "ki kontext", "kikontext"],
+  cats: ["katze", "katzen", "kater", "ki-kontext", "ki kontext", "kikontext"],
   knowledge: ["wissen", "kenntnis", "wissensdaten", "ki-kontext", "ki kontext", "kontextdatei"],
 };
 

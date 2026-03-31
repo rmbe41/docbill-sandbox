@@ -25,6 +25,8 @@ export interface Engine3Hinweis {
   titel: string;
   detail: string;
   regelReferenz?: string;
+  /** Positionsnummern (`nr`), optional – UI-Zuordnung zu Tabellenzeilen */
+  betrifftPositionen?: number[];
 }
 
 export interface Engine3Summary {
@@ -87,6 +89,40 @@ function normalizeSchwere(v: unknown): "fehler" | "warnung" | "info" | null {
   if (s === "warnung" || s === "warning") return "warnung";
   if (s === "info" || s === "information") return "info";
   return null;
+}
+
+function normalizeBetrifftPositionen(raw: unknown): number[] | undefined {
+  const out: number[] = [];
+  const add = (n: number) => {
+    const r = Math.round(n);
+    if (!Number.isFinite(r)) return;
+    if (!out.includes(r)) out.push(r);
+  };
+  if (raw == null || raw === "") return undefined;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    add(raw);
+    return out.length ? out : undefined;
+  }
+  if (typeof raw === "string") {
+    for (const part of raw.split(/[,;\s]+/)) {
+      const t = part.trim();
+      if (!t) continue;
+      const n = Number(t);
+      if (Number.isFinite(n)) add(n);
+    }
+    return out.length ? out : undefined;
+  }
+  if (Array.isArray(raw)) {
+    for (const x of raw) {
+      if (typeof x === "number" && Number.isFinite(x)) add(x);
+      else if (typeof x === "string") {
+        const n = Number(x.trim());
+        if (Number.isFinite(n)) add(n);
+      }
+    }
+    return out.length ? out : undefined;
+  }
+  return undefined;
 }
 
 function coerceCtxStr(v: unknown): string {
@@ -194,11 +230,13 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
     if (!titel && detail) titel = "Hinweis";
     if (titel && !detail) detail = titel;
     if (!titel || !detail) continue;
+    const betrifftPositionen = normalizeBetrifftPositionen(hr.betrifftPositionen);
     hinweise.push({
       schwere,
       titel,
       detail,
       ...(typeof hr.regelReferenz === "string" ? { regelReferenz: hr.regelReferenz } : {}),
+      ...(betrifftPositionen?.length ? { betrifftPositionen } : {}),
     });
   }
   let optimierungen: Engine3Position[] | undefined;

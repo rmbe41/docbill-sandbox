@@ -597,6 +597,10 @@ export function useBackgroundJobQueue({
             fileNames,
             status: "queued",
           });
+          const effectiveEngine =
+            (userSettings.engine_type && userSettings.engine_type.trim() !== ""
+              ? userSettings.engine_type
+              : globalSettings.default_engine) ?? "";
           const resultStatus =
             state.invoiceData
               ? "invoice"
@@ -604,7 +608,9 @@ export function useBackgroundJobQueue({
                 ? "service"
                 : state.engine3Data
                   ? "engine3"
-                  : "generic";
+                  : effectiveEngine === "direct"
+                    ? "direct"
+                    : "generic";
           const finalTitle = buildConversationTitle({
             userText: userTextForTitle,
             fileNames,

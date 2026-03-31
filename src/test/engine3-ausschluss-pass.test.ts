@@ -52,7 +52,9 @@ describe("applyEngine3AusschlussPass", () => {
 
     const out = applyEngine3AusschlussPass(raw);
 
-    expect(out.hinweise.some((h) => h.titel.includes("1") && h.titel.includes("3"))).toBe(true);
+    const excl13 = out.hinweise.find((h) => h.titel.includes("1") && h.titel.includes("3"));
+    expect(excl13).toBeDefined();
+    expect(excl13?.betrifftPositionen?.sort((a, b) => a - b)).toEqual([1, 2]);
     expect(out.positionen).toHaveLength(1);
     expect(out.positionen[0].ziffer).toBe("3");
     expect(out.positionen[0].status).toBe("korrekt");
@@ -84,6 +86,7 @@ describe("applyEngine3AusschlussPass", () => {
     const out = applyEngine3AusschlussPass(raw);
     const conflict = out.hinweise.find((h) => h.titel.includes("Ausschluss"));
     expect(conflict?.schwere).toBe("warnung");
+    expect(conflict?.betrifftPositionen?.sort((a, b) => a - b)).toEqual([1, 2]);
     expect(out.positionen).toHaveLength(1);
     expect(out.positionen[0].ziffer).toBe("3");
   });
@@ -115,9 +118,9 @@ describe("applyEngine3AusschlussPass", () => {
 
     const out = applyEngine3AusschlussPass(raw);
 
-    expect(out.hinweise.some((h) => h.titel.includes("1256") && h.titel.includes("1257"))).toBe(
-      true,
-    );
+    const excl1256 = out.hinweise.find((h) => h.titel.includes("1256") && h.titel.includes("1257"));
+    expect(excl1256).toBeDefined();
+    expect(excl1256?.betrifftPositionen?.sort((a, b) => a - b)).toEqual([1, 2]);
     expect(out.positionen).toHaveLength(1);
     expect(out.positionen[0].ziffer).toBe("1257");
   });
@@ -151,8 +154,8 @@ describe("applyEngine3AusschlussPass", () => {
 
     expect(out.positionen).toHaveLength(1);
     expect(out.positionen[0].ziffer).toBe("1201");
-    expect(out.hinweise.some((h) => h.titel.includes("1201") && h.titel.includes("1202"))).toBe(
-      true,
-    );
+    const excl12 = out.hinweise.find((h) => h.titel.includes("1201") && h.titel.includes("1202"));
+    expect(excl12).toBeDefined();
+    expect(excl12?.betrifftPositionen?.sort((a, b) => a - b)).toEqual([1, 2]);
   });
 });

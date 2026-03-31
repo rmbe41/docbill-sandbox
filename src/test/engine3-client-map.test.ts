@@ -23,7 +23,7 @@ function fullBase(overrides: Partial<Engine3ResultData> = {}): Engine3ResultData
       },
     ],
     hinweise: [
-      { schwere: "fehler", titel: "A", detail: "d1" },
+      { schwere: "fehler", titel: "A", detail: "d1", betrifftPositionen: [1] },
       { schwere: "warnung", titel: "B", detail: "d2" },
       { schwere: "info", titel: "Info", detail: "nur intern" },
     ],
@@ -70,7 +70,7 @@ describe("toClientEngine3Result", () => {
         },
       ],
       hinweise: [
-        { schwere: "fehler", titel: "A", detail: "d1" },
+        { schwere: "fehler", titel: "A", detail: "d1", betrifftPositionen: [1] },
         { schwere: "warnung", titel: "B", detail: "d2" },
       ],
       optimierungen: [

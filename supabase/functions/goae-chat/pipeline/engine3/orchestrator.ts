@@ -125,6 +125,7 @@ Du erhältst extrahierte Rechnungsdaten (JSON), optional **klinischeDokumentatio
 - **Sonderbereiche** (Leichenschau, Zuschläge, Akupunktur): nur, wenn die Ziffer im Auszug steht; sonst Lücke in **hinweise**.
 - **BÄK / Auslegung / GOÄ-Kommentar:** Nur mit konkretem Nachweis im **ADMIN-KONTEXT** (Dateiname); jede inhaltlich verwendete Admin-Datei **mindestens einmal** in **adminQuellen** (kurzer Dateiname) aufführen. Ohne Treffer: Unsicherheit in **hinweise**, nichts erfinden.
 - **Hinweise:** Behauptet ein Eintrag eine konkrete Regel oder Auslegung, **muss** **regelReferenz** gesetzt sein (z. B. „GOÄ-Katalogauszug, Ziffer …“ oder „ADMIN-KONTEXT: [Dateiname]“).
+- **Hinweis-Zuordnung:** Betrifft ein Hinweis konkrete Tabellenzeilen, setze **betrifftPositionen** als Array der zugehörigen **nr**-Werte aus **positionen** oder **optimierungen**; bei rein allgemeinen Hinweisen weglassen oder leeres Array.
 
 **System-Nachbearbeitung (verbindlich):** Nach deiner Antwort wendet DocBill **deterministische** Prüfungen an (u. a. Ausschlusspaare, Beträge aus Punkten × Punktwert). Dieses Ergebnis ist **maßgeblich**. Setze **keine** Position auf **korrekt**, wenn der Katalogausschnitt einen Ausschlusszwang zu einer anderen abgerechneten Ziffer zeigt; verwende **fehler**/**warnung** und passende **hinweise**. Widerspricht dein Entwurf dem Katalog, korrigiere ihn vor der Ausgabe.
 
@@ -146,7 +147,7 @@ Antworte NUR mit JSON im folgenden Schema:
     }
   ],
   "hinweise": [
-    { "schwere": "fehler|warnung|info", "titel": "kurz", "detail": "1–3 Sätze", "regelReferenz": "optional" }
+    { "schwere": "fehler|warnung|info", "titel": "kurz", "detail": "1–3 Sätze", "regelReferenz": "optional", "betrifftPositionen": [1, 2] }
   ],
   "optimierungen": [],
   "adminQuellen": []
@@ -188,6 +189,7 @@ Markiere unsichere Zuordnungen mit status "warnung" und erkläre in anmerkung.
 - **Steigerung:** Faktor innerhalb Katalograhmen; über Schwellenwert → ausführliche **begruendung** (§ 5 Abs. 2 GOÄ), konkret und prüfernah.
 - **Sonderfälle** ( Leichenschau, Not-/Zeitzuschläge, Akupunktur): nur mit Ziffer im Auszug; sonst **hinweis** auf unvollständigen Kontext.
 - **BÄK / GOÄ-Kommentar:** Nur wenn **ADMIN-KONTEXT** eine belegbare Fundstelle liefert; jede verwendete Admin-Datei in **adminQuellen** nennen. Behauptete Regeln in **hinweise** mit **regelReferenz** belegen („GOÄ-Katalogauszug …“ oder „ADMIN-KONTEXT: …“).
+- **Hinweis-Zuordnung:** **betrifftPositionen**: **nr**-Werte der betroffenen Zeilen aus **positionen**/**optimierungen**; bei allgemeinen Hinweisen weglassen.
 
 **System-Nachbearbeitung:** Deterministische Regeln (Ausschlüsse, Betrag aus Punkten) können dein JSON anpassen; das ausgelieferte Ergebnis entspricht diesem **finalen** Stand. Keine vorgeschlagenen Ziffernkombinationen widersprüchlich zum **Ausschl:** im Auszug ausgeben.
 
@@ -208,7 +210,7 @@ Antworte NUR mit JSON:
       "begruendung": "optional"
     }
   ],
-  "hinweise": [ { "schwere": "info|warnung|fehler", "titel": "…", "detail": "…", "regelReferenz": "optional" } ],
+  "hinweise": [ { "schwere": "info|warnung|fehler", "titel": "…", "detail": "…", "regelReferenz": "optional", "betrifftPositionen": [1] } ],
   "optimierungen": [],
   "adminQuellen": []
 }
@@ -233,7 +235,8 @@ Gib das **vollständige korrigierte JSON** zurück (gleiche Keys, gleiche modus-
 Auslegungsbehauptungen (BÄK, GOÄ-Kommentar) nur, wenn sie im **ADMIN-KONTEXT** mit Dateinamen belegbar sind; sonst entfernen oder durch ehrliche Unsicherheit in **hinweise** ersetzen. **adminQuellen** und **regelReferenz** in **hinweise** müssen zu echten Fundstellen passen.
 Wenn unsicher: setze status auf warnung und erkläre in anmerkung.
 Erhalte **quelleText** je Position (Rechnungsprüfung und Leistungsmodus); fehlt es, ergänze einen sachlichen Bezug zur Eingabe statt das Feld zu löschen.
-Hinweis: Unmittelbar nach dieser Runde können **systemseitige** Regeln (Ausschlüsse, Betragsrechenregeln) das JSON nochmals anpassen – deine Ausgabe soll bereits mit dem Katalogausschnitt **konsistent** sein.`;
+Hinweis: Unmittelbar nach dieser Runde können **systemseitige** Regeln (Ausschlüsse, Betragsrechenregeln) das JSON nochmals anpassen – deine Ausgabe soll bereits mit dem Katalogausschnitt **konsistent** sein.
+Erhalte **betrifftPositionen** an **hinweise**, wo sinnvoll (Array der **nr** der betroffenen Zeilen).`;
 
 async function critiqueRefineIfNeeded(
   apiKey: string,

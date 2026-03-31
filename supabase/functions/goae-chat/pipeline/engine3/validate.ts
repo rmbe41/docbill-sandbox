@@ -38,6 +38,8 @@ export interface Engine3Hinweis {
   titel: string;
   detail: string;
   regelReferenz?: string;
+  /** Positionsnummern (`nr`) aus positionen/optimierungen, denen der Hinweis zugeordnet ist */
+  betrifftPositionen?: number[];
 }
 
 export interface Engine3Summary {
@@ -76,6 +78,7 @@ export interface Engine3ClientHinweis {
   schwere: "fehler" | "warnung" | "info";
   titel: string;
   detail: string;
+  betrifftPositionen?: number[];
 }
 
 export interface Engine3ClientResultData {
@@ -104,7 +107,12 @@ export function toClientEngine3Result(data: Engine3ResultData): Engine3ClientRes
   });
   const hinweise = data.hinweise
     .filter((h) => h.schwere === "fehler" || h.schwere === "warnung")
-    .map((h) => ({ schwere: h.schwere, titel: h.titel, detail: h.detail }));
+    .map((h) => ({
+      schwere: h.schwere,
+      titel: h.titel,
+      detail: h.detail,
+      ...(h.betrifftPositionen?.length ? { betrifftPositionen: h.betrifftPositionen } : {}),
+    }));
   const optimierungen = data.optimierungen?.map(slimPos);
   return {
     modus: data.modus,
@@ -187,6 +195,41 @@ function normalizeHinweisSchwere(v: unknown): "fehler" | "warnung" | "info" | nu
   if (s === "warnung" || s === "warning") return "warnung";
   if (s === "info" || s === "information" || s === "hinweis") return "info";
   return null;
+}
+
+/** Extrahiert Positionsnummern für Hinweis-Zuordnung (tolerant gegen LLM-Varianten). */
+function normalizeBetrifftPositionen(raw: unknown): number[] | undefined {
+  const out: number[] = [];
+  const add = (n: number) => {
+    const r = Math.round(n);
+    if (!Number.isFinite(r)) return;
+    if (!out.includes(r)) out.push(r);
+  };
+  if (raw == null || raw === "") return undefined;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    add(raw);
+    return out.length ? out : undefined;
+  }
+  if (typeof raw === "string") {
+    for (const part of raw.split(/[,;\s]+/)) {
+      const t = part.trim();
+      if (!t) continue;
+      const n = Number(t);
+      if (Number.isFinite(n)) add(n);
+    }
+    return out.length ? out : undefined;
+  }
+  if (Array.isArray(raw)) {
+    for (const x of raw) {
+      if (typeof x === "number" && Number.isFinite(x)) add(x);
+      else if (typeof x === "string") {
+        const n = Number(x.trim());
+        if (Number.isFinite(n)) add(n);
+      }
+    }
+    return out.length ? out : undefined;
+  }
+  return undefined;
 }
 
 function coerceEngine3TextField(v: unknown): string | null {
@@ -386,11 +429,13 @@ export function parseEngine3ResultJson(raw: unknown, modus: Engine3Modus): Engin
     if (!titel && detail) titel = "Hinweis";
     if (titel && !detail) detail = titel;
     if (!titel || !detail) continue;
+    const betrifftPositionen = normalizeBetrifftPositionen(hr.betrifftPositionen);
     hinweise.push({
       schwere,
       titel,
       detail,
       ...(typeof hr.regelReferenz === "string" ? { regelReferenz: hr.regelReferenz } : {}),
+      ...(betrifftPositionen?.length ? { betrifftPositionen } : {}),
     });
   }
 
@@ -534,6 +579,7 @@ export function applyEngine3AusschlussPass(data: Engine3ResultData): Engine3Resu
         titel,
         detail,
         regelReferenz: "Ausschlussziffern GOÄ-Katalog",
+        betrifftPositionen: [pi.nr, pj.nr],
       });
     }
 

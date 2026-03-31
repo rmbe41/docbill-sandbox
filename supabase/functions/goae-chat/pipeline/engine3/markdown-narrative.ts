@@ -1,7 +1,7 @@
 /**
  * Deterministischer Fließtext für den Chat (nach engine3_result), analog zur Hauptpipeline.
  */
-import type { Engine3ResultData } from "./validate.ts";
+import type { Engine3Hinweis, Engine3ResultData } from "./validate.ts";
 
 function fmtEuro(n: number): string {
   return `${n.toFixed(2).replace(".", ",")} €`;
@@ -13,7 +13,23 @@ function oneLine(s: string, max: number): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
+function collectKnownPositionNrs(data: Engine3ResultData): Set<number> {
+  const s = new Set<number>();
+  for (const p of data.positionen) s.add(p.nr);
+  for (const p of data.optimierungen ?? []) s.add(p.nr);
+  return s;
+}
+
+function isGlobalEngine3Hinweis(h: Engine3Hinweis, known: Set<number>): boolean {
+  const b = h.betrifftPositionen;
+  if (!b?.length) return true;
+  return b.every((nr) => !known.has(nr));
+}
+
+const narrativSchwere = (h: Engine3Hinweis) => h.schwere === "fehler" || h.schwere === "warnung";
+
 export function buildEngine3AssistantMarkdown(data: Engine3ResultData): string {
+  const knownNrs = collectKnownPositionNrs(data);
   const modusLabel = data.modus === "rechnung_pruefung" ? "Rechnungsprüfung" : "Leistungsvorschläge";
   const z = data.zusammenfassung;
   let md = `### Engine 3 – ${modusLabel}\n\n`;
@@ -38,14 +54,18 @@ export function buildEngine3AssistantMarkdown(data: Engine3ResultData): string {
     }
     const extra = [p.begruendung, p.anmerkung].filter(Boolean).join(" ");
     if (extra) md += `  - ${oneLine(extra, 420)}\n`;
+    for (const h of data.hinweise ?? []) {
+      if (!narrativSchwere(h) || !h.betrifftPositionen?.includes(p.nr)) continue;
+      md += `  - **${h.schwere.toUpperCase()}:** ${oneLine(h.titel, 180)} — ${oneLine(h.detail, 400)}\n`;
+    }
   }
 
-  const hinweiseNarrativ = (data.hinweise ?? []).filter(
-    (h) => h.schwere === "fehler" || h.schwere === "warnung",
+  const hinweiseNarrativGlobal = (data.hinweise ?? []).filter(
+    (h) => narrativSchwere(h) && isGlobalEngine3Hinweis(h, knownNrs),
   );
-  if (hinweiseNarrativ.length) {
+  if (hinweiseNarrativGlobal.length) {
     md += "\n#### Hinweise\n\n";
-    for (const h of hinweiseNarrativ) {
+    for (const h of hinweiseNarrativGlobal) {
       md += `- **${h.schwere.toUpperCase()}:** ${oneLine(h.titel, 180)} — ${oneLine(h.detail, 400)}\n`;
     }
   }
@@ -54,12 +74,16 @@ export function buildEngine3AssistantMarkdown(data: Engine3ResultData): string {
     md += "\n#### Vorschläge / Optimierungen\n\n";
     for (const p of data.optimierungen) {
       const bez = p.bezeichnung ? ` — ${oneLine(p.bezeichnung, 160)}` : "";
-      md += `- **GOÄ ${p.ziffer}** (${p.status}) · ${fmtEuro(p.betrag)}${bez}\n`;
+      md += `- **Nr. ${p.nr} · GOÄ ${p.ziffer}** (${p.status}) · ${fmtEuro(p.betrag)}${bez}\n`;
       if (p.quelleText?.trim()) {
         md += `  - *Quelle:* ${oneLine(p.quelleText, 300)}\n`;
       }
       const extra = [p.begruendung, p.anmerkung].filter(Boolean).join(" ");
       if (extra) md += `  - ${oneLine(extra, 320)}\n`;
+      for (const h of data.hinweise ?? []) {
+        if (!narrativSchwere(h) || !h.betrifftPositionen?.includes(p.nr)) continue;
+        md += `  - **${h.schwere.toUpperCase()}:** ${oneLine(h.titel, 180)} — ${oneLine(h.detail, 400)}\n`;
+      }
     }
   }
 

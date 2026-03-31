@@ -129,13 +129,15 @@ const parseGlobalRuleFields = (value: string): string[] => {
   return [value];
 };
 
-function engineFromDbGlobal(v: string | undefined): "simple" | "complex" | "engine3" {
-  if (v === "simple" || v === "engine3") return v;
+type ChatEngineChoice = "simple" | "complex" | "engine3" | "direct";
+
+function engineFromDbGlobal(v: string | undefined): ChatEngineChoice {
+  if (v === "simple" || v === "engine3" || v === "direct") return v;
   return "complex";
 }
 
-function engineFromDbUser(v: string | null | undefined): "simple" | "complex" | "engine3" | null {
-  if (v === "simple" || v === "complex" || v === "engine3") return v;
+function engineFromDbUser(v: string | null | undefined): ChatEngineChoice | null {
+  if (v === "simple" || v === "complex" || v === "engine3" || v === "direct") return v;
   return null;
 }
 
@@ -149,11 +151,11 @@ function initialStateFromChatHydration(h: SettingsChatHydration | undefined) {
   if (!h) {
     return {
       globalModel: "openrouter/free",
-      globalEngine: "complex" as "simple" | "complex" | "engine3",
+      globalEngine: "complex" as ChatEngineChoice,
       globalRules: "",
       globalRuleFields: [DEFAULT_GLOBAL_GUARDRAILS_RULES],
       userModel: null as string | null,
-      userEngine: null as "simple" | "complex" | "engine3" | null,
+      userEngine: null as ChatEngineChoice | null,
       userRules: null as string | null,
     };
   }
@@ -222,11 +224,11 @@ const SettingsContent = ({
     [],
   );
   const [globalModel, setGlobalModel] = useState(boot.globalModel);
-  const [globalEngine, setGlobalEngine] = useState<"simple" | "complex" | "engine3">(boot.globalEngine);
+  const [globalEngine, setGlobalEngine] = useState<ChatEngineChoice>(boot.globalEngine);
   const [globalRules, setGlobalRules] = useState(boot.globalRules);
   const [globalRuleFields, setGlobalRuleFields] = useState<string[]>(boot.globalRuleFields);
   const [userModel, setUserModel] = useState<string | null>(boot.userModel);
-  const [userEngine, setUserEngine] = useState<"simple" | "complex" | "engine3" | null>(boot.userEngine);
+  const [userEngine, setUserEngine] = useState<ChatEngineChoice | null>(boot.userEngine);
   const [userRules, setUserRules] = useState<string | null>(boot.userRules);
   const [loading, setLoading] = useState(() => !chatSettingsHydration);
   const rulesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -375,7 +377,7 @@ const SettingsContent = ({
   }, []);
 
   const saveGlobal = useCallback(
-    async (model?: string, rules?: string, engine?: "simple" | "complex" | "engine3") => {
+    async (model?: string, rules?: string, engine?: ChatEngineChoice) => {
       const m = model ?? globalModel;
       const r = rules ?? globalRules;
       const e = engine ?? globalEngine;
@@ -399,7 +401,7 @@ const SettingsContent = ({
   );
 
   const saveUser = useCallback(
-    async (model?: string | null, rules?: string | null, engine?: "simple" | "complex" | "engine3" | null) => {
+    async (model?: string | null, rules?: string | null, engine?: ChatEngineChoice | null) => {
       if (!user) return;
       const m = model !== undefined ? model : userModel;
       const r = rules !== undefined ? rules : userRules;
@@ -934,7 +936,14 @@ const SettingsContent = ({
   };
 
   const handleEngineSelect = (value: string) => {
-    const eng = value === "simple" ? "simple" : value === "engine3" ? "engine3" : "complex";
+    const eng: ChatEngineChoice =
+      value === "simple"
+        ? "simple"
+        : value === "engine3"
+          ? "engine3"
+          : value === "direct"
+            ? "direct"
+            : "complex";
     if (activeTab === "global") {
       setGlobalEngine(eng);
       saveGlobal(globalModel, serializeGlobalRuleFields(globalRuleFields), eng);
@@ -1299,7 +1308,8 @@ const SettingsContent = ({
               <p className="text-xs text-muted-foreground -mt-1">
                 Einfache Engine: schnell, 2 Schritte. Komplexe Engine: 6 Schritte mit klassischer Karten-Ansicht. Engine
                 3: neue Pipeline mit einheitlichem Ergebnis, GOÄ plus geprüftem KI-/Admin-Kontext (ohne Kontext: sofortiger
-                Hinweis).
+                Hinweis). Direktmodell: ein Aufruf nur mit dem gewählten Sprachmodell – keine Intent-Erkennung, keine GOÄ-
+                Pipeline, kein RAG (optional weiterhin persönliche/globale Regeln als Systemtext).
               </p>
               <Select
                 value={activeTab === "user" && userEngine === null ? "__global__" : currentEngine}
@@ -1328,6 +1338,9 @@ const SettingsContent = ({
                   </SelectItem>
                   <SelectItem value="engine3">
                     <span className="font-medium">Engine 3 (neu)</span>
+                  </SelectItem>
+                  <SelectItem value="direct">
+                    <span className="font-medium">Direktmodell</span>
                   </SelectItem>
                 </SelectContent>
               </Select>

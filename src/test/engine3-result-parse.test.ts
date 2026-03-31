@@ -32,6 +32,35 @@ describe("parseEngine3ResultData", () => {
     expect(p?.positionen[0]?.ziffer).toBe("1");
   });
 
+  it("parses betrifftPositionen on hinweise (dedupe, string list)", () => {
+    const raw = {
+      modus: "leistungen_abrechnen" as const,
+      klinischerKontext: "x",
+      fachgebiet: "y",
+      positionen: [
+        { nr: 1, ziffer: "1", bezeichnung: "B", faktor: 1, betrag: 1, status: "korrekt" as const },
+      ],
+      hinweise: [
+        {
+          schwere: "warnung" as const,
+          titel: "t",
+          detail: "d",
+          betrifftPositionen: [1, 1, 2],
+        },
+        { schwere: "info" as const, titel: "u", detail: "e", betrifftPositionen: "3, 4" },
+      ],
+      zusammenfassung: {
+        geschaetzteSumme: 1,
+        anzahlPositionen: 1,
+        fehler: 0,
+        warnungen: 0,
+      },
+    };
+    const p = parseEngine3ResultData(raw);
+    expect(p?.hinweise[0]?.betrifftPositionen).toEqual([1, 2]);
+    expect(p?.hinweise[1]?.betrifftPositionen).toEqual([3, 4]);
+  });
+
   it("rejects invalid modus", () => {
     expect(parseEngine3ResultData({ modus: "x" })).toBeNull();
   });
