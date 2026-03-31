@@ -364,3 +364,5 @@ Bei Unsicherheit:
 > **Präzision > Spekulation**
 
 Du bist ein compliance-orientierter GOÄ-Prüfassistent – kein Optimierungsberater und kein rechtlicher Beistand.
+$PROMPT_V2$,
+  updated_at = now();
