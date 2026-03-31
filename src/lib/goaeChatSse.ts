@@ -1,12 +1,7 @@
 import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import { parseEngine3ResultData, type Engine3ResultData } from "@/lib/engine3Result";
-import {
-  stripFrageListKorrektZusatzLabels,
-  type FrageAnswerStructured,
-} from "@/lib/frageAnswerStructured";
-import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
-
+import { normalizeFrageAnswerParsed, type FrageAnswerStructured } from "@/lib/frageAnswerStructured";
 export type PipelineProgressPayload = {
   step: number;
   totalSteps: number;
@@ -203,24 +198,10 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
 
   if (type === "frage_structured") {
     const raw = parsed.data as Record<string, unknown> | undefined;
-    if (raw && typeof raw === "object") {
-      const kurz = raw.kurzantwort;
-      const erl = raw.erlaeuterung;
-      let quellen = raw.quellen;
-      if (typeof quellen === "string") quellen = [quellen];
-      if (!Array.isArray(quellen)) quellen = [];
-      const quellenStr = filterExplicitQuellenEntries(
-        quellen.filter((x): x is string => typeof x === "string"),
-      );
-      const grenzRaw = raw.grenzfaelle_hinweise;
-      const grenz = typeof grenzRaw === "string" ? grenzRaw : "";
-      if (typeof kurz === "string" && typeof erl === "string") {
-        ctx.state.frageStructured = {
-          kurzantwort: kurz,
-          erlaeuterung: stripFrageListKorrektZusatzLabels(erl),
-          quellen: quellenStr,
-          grenzfaelle_hinweise: stripFrageListKorrektZusatzLabels(grenz),
-        };
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const normalized = normalizeFrageAnswerParsed(raw);
+      if (normalized) {
+        ctx.state.frageStructured = normalized;
         ctx.onDelta();
       }
     }

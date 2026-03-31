@@ -30,16 +30,20 @@ function withAdminContext(base: string, adminContext?: string): string {
   return `${base}\n\n## ADMIN-KONTEXT (Praxis):\n${a}`;
 }
 
-function buildSystemPrompt(): string {
-  return `Du bist Fachanwalt für GOÄ-Abrechnung und Vertragsarztrecht. Du formulierst **schriftliche Steigerungsbegründungen** für Positionen, deren **Steigerungsfaktor über dem GOÄ-Schwellenwert** liegt.
-
-RECHTSRAHMEN (inhaltlich, im Fließtext keine Paragraphenzeichen „§“ verwenden – stattdessen „nach GOÄ“, „gemäß GOÄ zur Bemessung der Gebühren“, „schriftliche Begründung auf der Rechnung nach GOÄ“):
+function buildSystemPrompt(kontextWissenEnabled = true): string {
+  const rechtsRahmenBlock = kontextWissenEnabled
+    ? `RECHTSRAHMEN (inhaltlich, im Fließtext keine Paragraphenzeichen „§“ verwenden – stattdessen „nach GOÄ“, „gemäß GOÄ zur Bemessung der Gebühren“, „schriftliche Begründung auf der Rechnung nach GOÄ“):
 
 ${GOAE_PARAGRAPHEN_KOMPAKT}
 
 LEITFADEN BEGRÜNDUNGEN:
 
-${GOAE_BEGRUENDUNGEN}
+${GOAE_BEGRUENDUNGEN}`
+    : `Es steht **kein** eingebetteter GOÄ-Paragraphen- oder Begründungsleitfaden zur Verfügung. Formuliere sachliche Steigerungsbegründungen aus dem **klinischen Kontext** und der **Leistungsbeschreibung**; vermeide wörtliche Paragraphenzitate; nutze Formulierungen wie „nach GOÄ üblich“ nur wenn sachlich angemessen.`;
+
+  return `Du bist Fachanwalt für GOÄ-Abrechnung und Vertragsarztrecht. Du formulierst **schriftliche Steigerungsbegründungen** für Positionen, deren **Steigerungsfaktor über dem GOÄ-Schwellenwert** liegt.
+
+${rechtsRahmenBlock}
 
 AUFGABE:
 - Du erhältst eine JSON-Liste von Positionen mit Faktor, Schwellenwert, Höchstfaktor, Leistungstext und klinischem Kontext.
@@ -113,12 +117,16 @@ export async function enrichSteigerungsBegruendungenBatch(
   apiKey: string,
   userModel: string,
   adminContext?: string,
+  kontextWissenEnabled = true,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (items.length === 0) return out;
 
   const model = pickExtractionModel(userModel);
-  const systemPrompt = withAdminContext(buildSystemPrompt(), adminContext);
+  const systemPrompt = withAdminContext(
+    buildSystemPrompt(kontextWissenEnabled),
+    kontextWissenEnabled ? adminContext : undefined,
+  );
 
   for (let offset = 0; offset < items.length; offset += BATCH_MAX) {
     const chunk = items.slice(offset, offset + BATCH_MAX);

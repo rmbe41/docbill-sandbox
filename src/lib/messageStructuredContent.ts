@@ -19,6 +19,8 @@ export type MessageStructuredContentV1 = {
     invoice?: Record<string, string>;
     service?: Record<string, string>;
   };
+  /** Direktmodus Kurzantworten: Status pro Vorschlags-id. */
+  kurzantwortenVorschlagStatus?: Record<string, "accepted" | "rejected">;
   attachments?: FilePayloadStored[];
 };
 
@@ -59,13 +61,15 @@ export function buildAssistantStructuredContent(params: {
   analysisTimeSeconds?: number;
   frageAnswer?: FrageAnswerStructured;
   suggestionDecisions?: MessageStructuredContentV1["suggestionDecisions"];
+  kurzantwortenVorschlagStatus?: MessageStructuredContentV1["kurzantwortenVorschlagStatus"];
 }): MessageStructuredContentV1 | null {
   if (
     params.invoiceResult == null &&
     params.serviceBillingResult == null &&
     params.engine3Result == null &&
     params.analysisTimeSeconds == null &&
-    params.frageAnswer == null
+    params.frageAnswer == null &&
+    params.kurzantwortenVorschlagStatus == null
   ) {
     return null;
   }
@@ -77,6 +81,7 @@ export function buildAssistantStructuredContent(params: {
     analysisTimeSeconds: params.analysisTimeSeconds,
     frageAnswer: params.frageAnswer,
     suggestionDecisions: params.suggestionDecisions,
+    kurzantwortenVorschlagStatus: params.kurzantwortenVorschlagStatus,
   };
 }
 
@@ -94,10 +99,17 @@ export function mergeStructuredContent(
           service: { ...base.suggestionDecisions?.service, ...pSvc },
         }
       : base.suggestionDecisions;
+  const pKurz = patch.kurzantwortenVorschlagStatus;
+  const mergedKurz =
+    pKurz !== undefined
+      ? { ...base.kurzantwortenVorschlagStatus, ...pKurz }
+      : base.kurzantwortenVorschlagStatus;
+  const { suggestionDecisions: _sd, kurzantwortenVorschlagStatus: _kv, ...patchRest } = patch;
   return {
     ...base,
-    ...patch,
+    ...patchRest,
     v: MESSAGE_STRUCTURED_VERSION,
     suggestionDecisions: mergedDecisions,
+    kurzantwortenVorschlagStatus: mergedKurz,
   };
 }

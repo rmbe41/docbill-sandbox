@@ -90,7 +90,19 @@ const Index = () => {
   const { toast } = useToast();
   const { user, isAdmin } = useAuth();
   const { prefs: shortcutPrefs } = useKeyboardShortcutPrefs();
-  const [userSettings, setUserSettings] = useState<{ selected_model: string | null; custom_rules: string | null; engine_type: string | null }>({ selected_model: null, custom_rules: null, engine_type: null });
+  const [userSettings, setUserSettings] = useState<{
+    selected_model: string | null;
+    custom_rules: string | null;
+    engine_type: string | null;
+    kurzantworten: boolean;
+    kontext_wissen: boolean;
+  }>({
+    selected_model: null,
+    custom_rules: null,
+    engine_type: null,
+    kurzantworten: false,
+    kontext_wissen: true,
+  });
   const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "simple" });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"user" | "display" | "global" | undefined>(undefined);
   const [settingsOpenSeq, setSettingsOpenSeq] = useState(0);
@@ -133,11 +145,22 @@ const Index = () => {
       default_engine: (gData as { default_engine?: string }).default_engine ?? "simple",
     });
     const { data: uData } = await supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle();
-    if (uData) setUserSettings({
-      selected_model: uData.selected_model,
-      custom_rules: uData.custom_rules,
-      engine_type: (uData as { engine_type?: string | null }).engine_type ?? null,
-    });
+    if (uData) {
+      const u = uData as {
+        selected_model?: string | null;
+        custom_rules?: string | null;
+        engine_type?: string | null;
+        kurzantworten?: boolean | null;
+        kontext_wissen?: boolean | null;
+      };
+      setUserSettings({
+        selected_model: u.selected_model ?? null,
+        custom_rules: u.custom_rules ?? null,
+        engine_type: u.engine_type ?? null,
+        kurzantworten: u.kurzantworten === true,
+        kontext_wissen: u.kontext_wissen !== false,
+      });
+    }
   }, [user]);
 
   useEffect(() => {
@@ -521,6 +544,9 @@ const Index = () => {
                         role: m.role,
                         content: m.content,
                       }))}
+                      onKurzantwortVorschlagComposer={(text) =>
+                        chatInputRef.current?.setComposerText(text)
+                      }
                     />
                   ))}
                   {isChatBusy && analysisStartTime != null && (

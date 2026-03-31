@@ -68,8 +68,29 @@ function buildSimplePrompt(parsed: ParsedRechnung): string {
   return lines.join("\n");
 }
 
-function buildSimpleSystemPrompt(parsed: ParsedRechnung): string {
+function buildSimpleSystemPrompt(parsed: ParsedRechnung, kontextWissenEnabled = true): string {
   const katalog = buildRelevantCatalog(parsed);
+  const goaeBlock = kontextWissenEnabled
+    ? `
+
+DEIN GOÄ-WISSEN:
+
+${GOAE_PARAGRAPHEN_KOMPAKT}
+
+${GOAE_ABSCHNITTE_KOMPAKT}
+
+${katalog}
+
+${GOAE_ANALOGE_BEWERTUNG}
+
+${GOAE_BEGRUENDUNGEN}`
+    : `
+
+Hinweis: Es wurde **kein** GOÄ-Katalog- oder Regelwerk-Block in den Prompt eingebunden. Arbeite **zurückhaltend** bei GOÄ-Ziffern und Beträgen; priorisiere die extrahierten Rechnungsdaten.`;
+  const goaeHint = kontextWissenEnabled
+    ? "- Beziehe dich auf den GOÄ-Katalog im Kontext"
+    : "- Kein eingebetteter GOÄ-Katalog: allgemeine Einordnung, Unsicherheit benennen";
+
   return `Du bist GOÄ-DocBill, ein KI-Experte für die Analyse und Optimierung von Arztrechnungen nach der Gebührenordnung für Ärzte (GOÄ).
 
 AUSGANGSLAGE: Der Nutzer hat eine **bestehende Rechnung oder einen Abrechnungsbeleg** hochgeladen. Die folgenden Daten stammen aus dem Dokument (Extrakt).
@@ -97,19 +118,8 @@ WICHTIG:
 - Antworte IMMER auf Deutsch
 - Verwende Euro-Beträge mit 2 Dezimalstellen
 - Keine personenbezogenen Daten
-- Beziehe dich auf den GOÄ-Katalog im Kontext
-
-DEIN GOÄ-WISSEN:
-
-${GOAE_PARAGRAPHEN_KOMPAKT}
-
-${GOAE_ABSCHNITTE_KOMPAKT}
-
-${katalog}
-
-${GOAE_ANALOGE_BEWERTUNG}
-
-${GOAE_BEGRUENDUNGEN}
+${goaeHint}
+${goaeBlock}
 `;
 }
 
@@ -134,7 +144,8 @@ export async function runSimplePipeline(
 
       await sendProgress(1, SIMPLE_PIPELINE_STEPS[1].label);
 
-      let systemContent = buildSimpleSystemPrompt(parsedRechnung);
+      const kontextOk = input.kontextWissenEnabled !== false;
+      let systemContent = buildSimpleSystemPrompt(parsedRechnung, kontextOk);
       if (adminContext) {
         systemContent += `\n\n## ADMIN-KONTEXT:\n${adminContext}`;
       }

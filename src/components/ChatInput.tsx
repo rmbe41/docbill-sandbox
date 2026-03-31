@@ -24,6 +24,8 @@ export type ChatInputHandle = {
   openAttachmentPicker: () => void;
   /** Cursor ins Nachrichtenfeld; z. B. nach „Neuer Chat“. */
   focusComposer: () => void;
+  /** Text setzen und Fokus (z. B. Kurzantworten-Vorschlag). */
+  setComposerText: (value: string) => void;
 };
 
 /** Outer height of the composer card when there are no file chips (border + py-3 + input row with min-h-[44px]). */
@@ -61,7 +63,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     focusComposer: () => {
       textareaRef.current?.focus({ preventScroll: true });
     },
-  }), []);
+    setComposerText: (value: string) => {
+      setText(value);
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus({ preventScroll: true });
+      });
+    },
+  }), [setText]);
 
   useEffect(() => {
     const key = composerDraftStorageKey(draftConversationId);

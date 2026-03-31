@@ -86,10 +86,13 @@ export async function runPipeline(
 
       // Step 2: Medizinisches NLP
       await sendProgress(1, PIPELINE_STEPS[1].label);
+      const kontextOk = input.kontextWissenEnabled !== false;
       const medizinischeAnalyse = await analysiereMedizinisch(
         parsedRechnung,
         apiKey,
         input.model,
+        undefined,
+        kontextOk,
       );
 
       // Step 3: Leistungs-Extraktion (deterministic)
@@ -107,6 +110,8 @@ export async function runPipeline(
         medizinischeAnalyse,
         apiKey,
         input.model,
+        undefined,
+        kontextOk,
       );
 
       // Step 5: Regelengine (deterministic)
@@ -145,6 +150,7 @@ export async function runPipeline(
         input.extraRules,
         adminContext,
         input.userMessage,
+        kontextOk,
       );
 
       // Pipe the text generation stream through

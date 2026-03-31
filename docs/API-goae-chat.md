@@ -18,8 +18,9 @@ Kanonische Beschreibung des HTTP-Vertrags und der **SSE-Payloads** mit Feld `typ
 | `messages` | Array `{ role, content }` | Chatverlauf; die letzte User-Nachricht wird als Haupteingabe genutzt. |
 | `files` | Optional Array `{ name, type, data }` | Base64-Kodierung o. ä. wie vom Client gesendet; fehlt oder leer = kein Upload. |
 | `model` | string | OpenRouter-Modell-ID; Default in der Function z. B. `openrouter/free`. |
-| `engine_type` | string | `simple` = zweistufige Rechnungsengine; `engine3` = neue Engine-3-Pipeline (siehe PIPELINE.md); sonst 6-Schritt-Pipeline (nur relevant wenn Dateien + nicht Legacy-Service-Billing). |
+| `engine_type` | string | `simple` = zweistufige Rechnungsengine; `engine3` = neue Engine-3-Pipeline (siehe PIPELINE.md); `direct` = ein Stream-Aufruf ohne GOÄ/RAG; `direct_local` = wie `direct`, aber mit selektivem GOÄ-Katalog, Regeltexten und Admin-RAG (KI-Kontext); sonst 6-Schritt-Pipeline (nur relevant wenn Dateien + nicht Legacy-Service-Billing). |
 | `extra_rules` | string | Zusammengefügte globale + nutzerspezifische Regeln. |
+| `kurzantworten` | Optional boolean | Wenn `true`: bei `engine_type` `direct` oder `direct_local` Kurz-Antwort per JSON (sofern ohne Datei-Upload) bzw. Markdown-Kurzformat mit begrenzter Länge; Vorschläge für Folgenachrichten im SSE `frage_structured`. Standard: nicht gesendet bzw. `false`. |
 | `last_invoice_result` | Optional Objekt | `{ pruefung: ... }` für RAG/Follow-up nach Rechnungsprüfung. |
 | `last_service_result` | Optional Objekt | Teilmenge der Service-Billing-Daten (`vorschlaege`, `optimierungen`, `klinischerKontext`, `fachgebiet`). |
 | `last_engine3_result` | Optional Objekt | Kompakter Vorläufer für Follow-ups (`modus`, `klinischerKontext`, `positionen`/`optimierungen` mit `ziffer`). |

@@ -100,7 +100,12 @@ type UseBackgroundJobQueueParams = {
   updateSourceFilename: (id: string, filename: string) => Promise<void>;
   updateTitle: (id: string, title: string) => Promise<void>;
   fetchConversations: () => Promise<void>;
-  userSettings: { engine_type: string | null; custom_rules: string | null };
+  userSettings: {
+    engine_type: string | null;
+    custom_rules: string | null;
+    kurzantworten?: boolean;
+    kontext_wissen?: boolean;
+  };
   globalSettings: { default_engine: string; default_rules: string };
   effectiveModel: string;
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -364,6 +369,7 @@ export function useBackgroundJobQueue({
                     engine3Result: engine3Data !== undefined ? engine3Data : m.engine3Result,
                     ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
                     ...(frageAnswer !== undefined ? { frageAnswer } : {}),
+                    kurzantwortenVorschlagStatus: m.kurzantwortenVorschlagStatus,
                   }
                 : m,
             );
@@ -394,6 +400,8 @@ export function useBackgroundJobQueue({
           model: effectiveModel,
           engine_type: userSettings.engine_type ?? globalSettings.default_engine,
           extra_rules,
+          kurzantworten: userSettings.kurzantworten === true,
+          kontext_wissen: userSettings.kontext_wissen === false ? false : undefined,
           lastEngine3Result,
           guidedWorkflow: jobPayload.guidedWorkflow,
           guidedPhase: jobPayload.guidedPhase,
@@ -610,7 +618,9 @@ export function useBackgroundJobQueue({
                   ? "engine3"
                   : effectiveEngine === "direct"
                     ? "direct"
-                    : "generic";
+                    : effectiveEngine === "direct_local"
+                      ? "direct_local"
+                      : "generic";
           const finalTitle = buildConversationTitle({
             userText: userTextForTitle,
             fileNames,
@@ -954,6 +964,8 @@ export function useBackgroundJobQueue({
         engine3Result: live.engine3Result,
         analysisTimeSeconds: live.analysisTimeSeconds,
         frageAnswer: live.frageAnswer,
+        kurzantwortenVorschlagStatus:
+          last?.role === "assistant" ? last.kurzantwortenVorschlagStatus : undefined,
       };
       if (last?.role === "assistant") {
         return [...base.slice(0, -1), mergedLast];

@@ -13,7 +13,12 @@ import { runPipeline } from "./pipeline/orchestrator.ts";
 import { runSimplePipeline } from "./pipeline/simple-orchestrator.ts";
 import { runServiceBillingAsStream } from "./pipeline/service-billing-orchestrator.ts";
 import { runEngine3AsStream } from "./pipeline/engine3/orchestrator.ts";
-import { runDirectModelStream } from "./pipeline/direct-model.ts";
+import {
+  buildDirectLocalShortJsonSystemPrompt,
+  buildDirectShortJsonSystemPrompt,
+  runDirectLocalModelStream,
+  runDirectModelStream,
+} from "./pipeline/direct-model.ts";
 import { extrahiereOptimizeFor } from "./pipeline/input-parser.ts";
 import { classifyByHeuristics, classifyIntent } from "./intent-classifier.ts";
 import { inferWelcomeStickyWorkflow } from "./infer-welcome-sticky.ts";
@@ -103,6 +108,34 @@ Erwähne NICHT Wikipedia, allgemeines Internet oder generelles Modell-Training.
 Nach den folgenden Blöcken **„ADMIN-KONTEXT“** (falls vorhanden) und **„DEIN GOÄ-WISSEN“** musst du beide nutzen; bei Konflikt gilt der **ADMIN-KONTEXT** zur Auslegung wie oben.`;
 }
 
+/** Fragemodus wenn Nutzer „Kontextwissen“ ausgeschaltet hat: kein GOÄ-/Admin-Block im Prompt. */
+function buildFrageSystemPromptIntroNoKontext(outputMode: "json" | "markdown_stream"): string {
+  const formatBlock = outputMode === "json" ? FRAGE_JSON_OUTPUT_RULES : FRAGE_MARKDOWN_STREAM_RULES;
+  return `## Modus: Frage und Einordnung (ohne DocBill-GOÄ-Kontext)
+
+**Pflicht:** In Aufzählungen **niemals** die Wörter „Korrekt:“ oder „Zusatz:“ (auch nicht fett) als Zeilenanfang.
+
+Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** Rechnung und keine tabellarische Honorarabrechnung.
+
+**Eingeschränkter Kontext:** Es gibt **keinen** eingebetteten GOÄ-Katalog, keine GOÄ-Paragraphen-/Regeltexte aus DocBill und **keinen** KI-Kontext aus Admin-Dateien. Nutze **allgemeines** Wissen **zurückhaltend**; **keine** erfundenen GOÄ-Ziffern, Beträge oder Paragraphen. Unsicherheit und fehlende belastbare Grundlagen klar benennen.
+
+- **Kurzantwort:** Wie im Format unten.
+- **Erläuterung:** Markdown-Liste mit \`- \`.
+- **Quellen:** Nur echte, verifizierbare Hinweise – ohne DocBill-Kontext in der Regel \`quellen: []\` bzw. weglassen.
+
+### Sprache und Darstellung
+- Auf **Deutsch**.
+- **Tabellen** nur als Fließtext – kein Rechnungslayout.
+
+⚠️ DATENSCHUTZ / DSGVO:
+- Gib NIEMALS personenbezogene Daten in deiner Antwort wieder
+- Referenziere Patienten nur als "Patient/in"
+
+${formatBlock}
+
+Du bist ein allgemeiner Assistenz-Modus **ohne** mitgelieferten DocBill-GOÄ-Kontext. Antworte **auf Deutsch**.`;
+}
+
 function buildFrageGoaeKnowledgeBlock(
   messages: { role: string; content: unknown }[],
   catalogMaxLines: number,
@@ -129,7 +162,15 @@ function buildFrageSystemContent(
   extraRules: string | undefined,
   outputMode: "json" | "markdown_stream",
   catalogMaxLines = 100,
+  kontextWissenEnabled = true,
 ): string {
+  if (!kontextWissenEnabled) {
+    let systemContent = buildFrageSystemPromptIntroNoKontext(outputMode);
+    if (extraRules?.trim()) {
+      systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules.trim()}`;
+    }
+    return systemContent;
+  }
   const ambiguous: { role: string; content: unknown }[] = messages.map((m) => ({
     role: m.role,
     content: m.content,
@@ -176,6 +217,7 @@ async function tryFrageStructuredCompletion(
   modelTry: string,
   apiKey: string,
   reasoningConfig: ReturnType<typeof getReasoningConfigForStream>,
+  maxTokens?: number,
 ): Promise<FrageAnswerStructured | null> {
   const body: Record<string, unknown> = {
     model: modelTry,
@@ -184,6 +226,7 @@ async function tryFrageStructuredCompletion(
     response_format: { type: "json_object" },
   };
   if (reasoningConfig) body.reasoning = reasoningConfig;
+  if (typeof maxTokens === "number" && maxTokens > 0) body.max_tokens = maxTokens;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -309,13 +352,27 @@ async function handleChatMode(
   apiKey: string,
   guidedCollectWorkflow?: GuidedCollectWorkflow,
   catalogMaxLines = 100,
+  kontextWissenEnabled = true,
 ): Promise<Response> {
   const collectExtra = guidedCollectWorkflow ? guidedCollectSystemExtra(guidedCollectWorkflow) : "";
   const systemJson =
-    buildFrageSystemContent(messages, adminContext, extraRules, "json", catalogMaxLines) + collectExtra;
+    buildFrageSystemContent(
+      messages,
+      adminContext,
+      extraRules,
+      "json",
+      catalogMaxLines,
+      kontextWissenEnabled,
+    ) + collectExtra;
   const systemStream =
-    buildFrageSystemContent(messages, adminContext, extraRules, "markdown_stream", catalogMaxLines) +
-    collectExtra;
+    buildFrageSystemContent(
+      messages,
+      adminContext,
+      extraRules,
+      "markdown_stream",
+      catalogMaxLines,
+      kontextWissenEnabled,
+    ) + collectExtra;
 
   // #region agent log
   debugCcb4cf("H2_H3", "goae-chat/handleChatMode:systemBuilt", "system prompt composition + catalog648 vs admin rule", {
@@ -497,6 +554,8 @@ serve(async (req) => {
       last_engine3_result,
       guided_workflow,
       guided_phase,
+      kurzantworten: kurzantwortenRaw,
+      kontext_wissen: kontext_wissen_raw,
     } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
@@ -519,15 +578,57 @@ serve(async (req) => {
     const requestedModel = model || "openrouter/free";
     const resolvedModel = resolveModel(requestedModel);
     const hasFiles = files && files.length > 0;
+    const kurzantworten = kurzantwortenRaw === true;
+    /** Default an (alte Clients / Feld fehlt). */
+    const kontextWissenEnabled = kontext_wissen_raw !== false;
     const userMessage = (messages?.[messages.length - 1]?.content as string) || "";
 
-    if (engine_type === "direct") {
+    const lastResult: LastResultContext | undefined =
+      last_invoice_result || last_service_result || last_engine3_result
+        ? {
+            last_invoice_result,
+            last_service_result,
+            last_engine3_result,
+          }
+        : undefined;
+
+    if (engine_type === "direct" || (engine_type === "direct_local" && !kontextWissenEnabled)) {
+      const msgs = (messages ?? []) as { role: string; content: string }[];
+      const userTail = msgs.map((m) => ({ role: m.role, content: m.content }));
+      if (kurzantworten && !hasFiles) {
+        const apiMessagesJson: unknown[] = [
+          { role: "system", content: buildDirectShortJsonSystemPrompt(extra_rules) },
+          ...userTail,
+        ];
+        const modelsToTry = buildFallbackModels(requestedModel);
+        const reasoningConfig = getReasoningConfigForStream(requestedModel);
+        for (let i = 0; i < modelsToTry.length; i++) {
+          const structured = await tryFrageStructuredCompletion(
+            apiMessagesJson,
+            modelsToTry[i],
+            OPENROUTER_API_KEY,
+            reasoningConfig,
+            1800,
+          );
+          if (structured) {
+            const md = frageAnswerToMarkdown(structured);
+            const synth = new Response(synthesizeFrageSseStream(structured, md), {
+              headers: { "Content-Type": "text/event-stream" },
+            });
+            const h = new Headers(synth.headers);
+            for (const [key, value] of Object.entries(corsHeaders)) h.set(key, value);
+            return new Response(synth.body, { status: synth.status, headers: h });
+          }
+        }
+      }
       const directResp = await runDirectModelStream(
         {
-          messages: (messages ?? []) as { role: string; content: string }[],
+          messages: msgs,
           files: hasFiles ? files : undefined,
           model: resolvedModel,
           extraRules: extra_rules,
+          preferShortMarkdown: kurzantworten,
+          maxTokens: kurzantworten ? 1200 : undefined,
         },
         OPENROUTER_API_KEY,
       );
@@ -541,16 +642,66 @@ serve(async (req) => {
       });
     }
 
-    const lastResult: LastResultContext | undefined =
-      last_invoice_result || last_service_result || last_engine3_result
-        ? {
-            last_invoice_result,
-            last_service_result,
-            last_engine3_result,
+    if (engine_type === "direct_local" && kontextWissenEnabled) {
+      const fullQuery = buildPipelineQuery(userMessage, undefined, lastResult);
+      const mergeQuery = enrichFrageRagQuery(buildFrageAdminRagQuery(messages, userMessage, fullQuery));
+      const vectorQuery = enrichFrageRagQuery(userMessage.trim() || mergeQuery);
+      const adminContext = await loadRelevantAdminContext(mergeQuery, OPENROUTER_API_KEY, { vectorQuery });
+      const msgs = (messages ?? []) as { role: string; content: string }[];
+      const userTail = msgs.map((m) => ({ role: m.role, content: m.content }));
+      if (kurzantworten && !hasFiles) {
+        const apiMessagesJson: unknown[] = [
+          {
+            role: "system",
+            content: buildDirectLocalShortJsonSystemPrompt(msgs, adminContext, extra_rules, 100),
+          },
+          ...userTail,
+        ];
+        const modelsToTry = buildFallbackModels(requestedModel);
+        const reasoningConfig = getReasoningConfigForStream(requestedModel);
+        for (let i = 0; i < modelsToTry.length; i++) {
+          const structured = await tryFrageStructuredCompletion(
+            apiMessagesJson,
+            modelsToTry[i],
+            OPENROUTER_API_KEY,
+            reasoningConfig,
+            1800,
+          );
+          if (structured) {
+            const md = frageAnswerToMarkdown(structured);
+            const synth = new Response(synthesizeFrageSseStream(structured, md), {
+              headers: { "Content-Type": "text/event-stream" },
+            });
+            const h = new Headers(synth.headers);
+            for (const [key, value] of Object.entries(corsHeaders)) h.set(key, value);
+            return new Response(synth.body, { status: synth.status, headers: h });
           }
-        : undefined;
+        }
+      }
+      const directLocalResp = await runDirectLocalModelStream(
+        {
+          messages: msgs,
+          files: hasFiles ? files : undefined,
+          model: resolvedModel,
+          extraRules: extra_rules,
+          adminContext,
+          preferShortMarkdown: kurzantworten,
+          maxTokens: kurzantworten ? 1200 : undefined,
+        },
+        OPENROUTER_API_KEY,
+      );
+      const dlHeaders = new Headers(directLocalResp.headers);
+      for (const [key, value] of Object.entries(corsHeaders)) {
+        dlHeaders.set(key, value);
+      }
+      return new Response(directLocalResp.body, {
+        status: directLocalResp.status,
+        headers: dlHeaders,
+      });
+    }
 
     const getAdminContext = async (result?: { medizinischeAnalyse?: unknown; pruefung?: unknown }) => {
+      if (!kontextWissenEnabled) return "";
       const fullQuery = buildPipelineQuery(userMessage, result, lastResult);
       const mergeQuery = enrichFrageRagQuery(
         result != null ? fullQuery : buildFrageAdminRagQuery(messages, userMessage, fullQuery),
@@ -657,6 +808,8 @@ serve(async (req) => {
         adminContext,
         OPENROUTER_API_KEY,
         guidedWorkflowNorm,
+        100,
+        kontextWissenEnabled,
       );
       const collectHeaders = new Headers(collectResponse.headers);
       for (const [key, value] of Object.entries(corsHeaders)) {
@@ -804,6 +957,7 @@ serve(async (req) => {
           extraRules: extra_rules,
           lastResult,
           lastEngine3Result: last_engine3_result,
+          kontextWissenEnabled,
         },
         OPENROUTER_API_KEY,
       );
@@ -818,6 +972,7 @@ serve(async (req) => {
           extraRules: extra_rules,
           lastResult,
           lastEngine3Result: last_engine3_result,
+          kontextWissenEnabled,
         },
         OPENROUTER_API_KEY,
       );
@@ -827,10 +982,9 @@ serve(async (req) => {
       // ═══════════════════════════════════════════════════════
       const ragQueryBilling = userMessage.trim() ||
         buildPipelineQuery(userMessage, undefined, lastResult);
-      const adminContextBilling = await loadRelevantAdminContext(
-        ragQueryBilling,
-        OPENROUTER_API_KEY,
-      );
+      const adminContextBilling = kontextWissenEnabled
+        ? await loadRelevantAdminContext(ragQueryBilling, OPENROUTER_API_KEY)
+        : "";
       response = await runServiceBillingAsStream(
         {
           files: hasFiles ? files : undefined,
@@ -839,6 +993,7 @@ serve(async (req) => {
           extraRules: extra_rules,
           optimizeFor: extrahiereOptimizeFor(userMessage),
           adminContext: adminContextBilling,
+          kontextWissenEnabled,
         },
         OPENROUTER_API_KEY,
       );
@@ -855,6 +1010,7 @@ serve(async (req) => {
             conversationHistory: messages,
             model: resolvedModel,
             extraRules: extra_rules,
+            kontextWissenEnabled,
           },
           () => getAdminContext(),
         );
@@ -872,6 +1028,7 @@ serve(async (req) => {
             conversationHistory: messages,
             model: resolvedModel,
             extraRules: extra_rules,
+            kontextWissenEnabled,
           },
           getAdminContext,
         );
@@ -904,6 +1061,7 @@ serve(async (req) => {
         OPENROUTER_API_KEY,
         undefined,
         engine_type === "engine3" ? 200 : 100,
+        kontextWissenEnabled,
       );
     }
 

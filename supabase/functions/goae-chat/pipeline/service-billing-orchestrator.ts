@@ -203,12 +203,15 @@ export interface ServiceBillingInput {
   optimizeFor?: OptimizeFor[];
   /** RAG-/Dateiname-abgestimmter Admin-KI-Kontext (wie im Chat/Rechnungsmodus) */
   adminContext?: string;
+  /** Default an: GOÄ-/Admin-Blöcke in LLM-Prompts */
+  kontextWissenEnabled?: boolean;
 }
 
 export async function runServiceBillingPipeline(
   input: ServiceBillingInput,
   apiKey: string,
 ): Promise<ServiceBillingResult> {
+  const kontextOk = input.kontextWissenEnabled !== false;
   let parsedRechnung: ParsedRechnung;
 
   if (input.files && input.files.length > 0) {
@@ -216,7 +219,7 @@ export async function runServiceBillingPipeline(
       input.files,
       apiKey,
       input.model,
-      input.adminContext,
+      kontextOk ? input.adminContext : undefined,
     );
     if (input.userMessage?.trim()) {
       parsedRechnung.rawText = `${input.userMessage}\n\n---\n\n${parsedRechnung.rawText}`;
@@ -234,7 +237,8 @@ export async function runServiceBillingPipeline(
     parsedRechnung,
     apiKey,
     input.model,
-    input.adminContext,
+    kontextOk ? input.adminContext : undefined,
+    kontextOk,
   );
 
   const leistungen = extrahiereLeistungenAusNlp(medizinischeAnalyse);
@@ -263,7 +267,8 @@ export async function runServiceBillingPipeline(
     medizinischeAnalyse,
     apiKey,
     input.model,
-    input.adminContext,
+    kontextOk ? input.adminContext : undefined,
+    kontextOk,
   );
 
   const katalog = getKatalogMap();
@@ -406,7 +411,8 @@ export async function runServiceBillingPipeline(
       medizinischeAnalyse,
       apiKey,
       input.model,
-      input.adminContext,
+      kontextOk ? input.adminContext : undefined,
+      kontextOk,
     );
     for (const v of vorschlaege) {
       const t = begrMap.get(serviceBillingRowId(false, v.ziffer, v.leistung));

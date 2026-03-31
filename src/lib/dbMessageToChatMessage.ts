@@ -24,6 +24,7 @@ export function dbRowToChatMessage(m: {
       analysisTimeSeconds: s.analysisTimeSeconds,
       frageAnswer: s.frageAnswer,
       suggestionDecisions: s.suggestionDecisions,
+      kurzantwortenVorschlagStatus: s.kurzantwortenVorschlagStatus,
     };
   }
   return base;

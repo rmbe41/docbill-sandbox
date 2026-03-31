@@ -56,11 +56,15 @@ function filterExplicitQuellenEntries(entries: string[]): string[] {
     .filter((s) => s.length > 0 && !isMetaQuelleDisclaimer(s));
 }
 
+export type KurzantwortVorschlag = { id: string; text: string };
+
 export type FrageAnswerStructured = {
   kurzantwort: string;
   erlaeuterung: string;
   quellen: string[];
   grenzfaelle_hinweise: string;
+  /** Optional: interaktive Folge-Prompts (Direktmodus Kurzantworten). */
+  vorschlaege?: KurzantwortVorschlag[];
 };
 
 /** Entfernt Modell-Artefakte „Korrekt:“ / „Zusatz:“ — synchron zu src/lib/frageAnswerStructured.ts. */
@@ -94,6 +98,26 @@ export function stripFrageListKorrektZusatzLabels(block: string): string {
   return out.join("\n");
 }
 
+function normalizeVorschlaegeParsed(raw: unknown): KurzantwortVorschlag[] {
+  if (!Array.isArray(raw)) return [];
+  const out: KurzantwortVorschlag[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i];
+    if (typeof item === "string") {
+      const t = item.trim();
+      if (t) out.push({ id: `s${i}`, text: t });
+      continue;
+    }
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const o = item as Record<string, unknown>;
+      const tid = typeof o.id === "string" ? o.id.trim() : "";
+      const ttext = typeof o.text === "string" ? o.text.trim() : "";
+      if (ttext) out.push({ id: tid || `s${i}`, text: ttext });
+    }
+  }
+  return out.slice(0, 5);
+}
+
 export function normalizeFrageAnswerParsed(raw: Record<string, unknown>): FrageAnswerStructured | null {
   const kurz = raw.kurzantwort;
   const erl = raw.erlaeuterung;
@@ -107,22 +131,50 @@ export function normalizeFrageAnswerParsed(raw: Record<string, unknown>): FrageA
   if (!kurz.trim() && !erl.trim()) return null;
   const grenzRaw = raw.grenzfaelle_hinweise;
   const grenz = typeof grenzRaw === "string" ? grenzRaw : "";
-  return {
+  const vorschlaege = normalizeVorschlaegeParsed(raw.vorschlaege);
+  const base: FrageAnswerStructured = {
     kurzantwort: kurz.trim(),
     erlaeuterung: stripFrageListKorrektZusatzLabels(erl.trim()),
     quellen: quellenStr,
     grenzfaelle_hinweise: stripFrageListKorrektZusatzLabels(grenz.trim()),
   };
+  if (vorschlaege.length > 0) base.vorschlaege = vorschlaege;
+  return base;
 }
 
 export function frageAnswerToMarkdown(a: FrageAnswerStructured): string {
   const grenz = (a.grenzfaelle_hinweise ?? "").trim();
-  let out = `### Kurzantwort\n\n${a.kurzantwort}\n\n### Erläuterung\n\n${a.erlaeuterung}\n\n`;
+  let out = `### Zusammenfassung\n\n${a.kurzantwort}\n\n### Erläuterung\n\n${a.erlaeuterung}\n\n`;
   if (grenz) out += `### Grenzfälle und Hinweise\n\n${grenz}\n\n`;
   const quellenOut = filterExplicitQuellenEntries(a.quellen);
   if (quellenOut.length > 0) out += `*Quellen:* ${quellenOut.join(" · ")}\n`;
+  if (a.vorschlaege?.length) {
+    out += `\n### Vorschläge zur Vertiefung\n\n`;
+    out += a.vorschlaege.map((v) => `- ${v.text}`).join("\n");
+    out += "\n";
+  }
   return out;
 }
+
+/** JSON-Schema-Hinweise für Direktmodus mit Kurzantworten (ein Objekt, Felder wie Fragemodus + vorschlaege). */
+export const DIRECT_SHORT_JSON_OUTPUT_RULES = `
+## Ausgabeformat Direktmodus – Kurzantworten (verbindlich)
+
+**Kontext:** Direktmodell (mit oder ohne lokales GOÄ/Admin-Kontext). Du lieferst **keine** Rechnungstabelle und keine Honoraraufstellung.
+
+**STRENG VERBOTEN** in \`erlaeuterung\` und \`grenzfaelle_hinweise\`: \`Korrekt:\`, \`Zusatz:\`, \`**Korrekt:**\`, \`**Zusatz:**\` am Zeilenanfang.
+
+Deine **gesamte** Antwort besteht aus **einem einzigen gültigen JSON-Objekt** (UTF-8). **Kein** Text vor oder nach dem JSON, **keine** Markdown-Codefences, **keine** Erklärung.
+
+**Reihenfolge der inhaltlichen Logik:** Zuerste die Kernaussage in \`kurzantwort\` – **kein** Gruß, keine Meta-Einleitung („Gerne helfe ich…“) in einem separaten Satz davor; der **erste** inhaltliche Satz der Antwort steht in \`kurzantwort\`.
+
+Erlaubtes Schema (alle Schlüssel **müssen** vorkommen):
+- \`kurzantwort\` (string): **Max. 1–2 sehr kurze Sätze**, direkte Antwort. Keine Aufzählung.
+- \`erlaeuterung\` (string): **Markdown-Liste** mit \`- …\`, **höchstens 5** Bullets, je Bullet höchstens zwei kurze Sätze. Keine langen Fließtexte, keine \`###\` in diesem String.
+- \`quellen\` (array von strings): Wie im Fragemodus – nur bei **konkreten** Fundstellen im **mitgelieferten** Kontext (GOÄ, Katalog, Admin-Dateiname). Sonst \`[]\`. Keine Platzhalter-„keine Quelle“-Einträge.
+- \`grenzfaelle_hinweise\` (string): Kurz; \`""\` wenn nichts Nötiges. Sonst \`- \` Listen wie \`erlaeuterung\`.
+- \`vorschlaege\` (array): **0 bis 3** Objekte \`{ "id": string, "text": string }\`. Jeder \`text\`: **eine** kurze, konkrete Folgefrage oder nächster Schritt, den der Nutzer **als nächste Chat-Nachricht** schreiben könnte (keine Werbung, keine Duplikate der Zusammenfassung). **Stabile** \`id\` z. B. \`s0\`, \`s1\`, \`s2\`. Wenn keine passenden Vorschläge: \`[]\`.
+`;
 
 /** Fallback wenn kein Modell zuverlässig JSON liefert: klassisches Markdown mit festen Überschriften. */
 export const FRAGE_MARKDOWN_STREAM_RULES = `

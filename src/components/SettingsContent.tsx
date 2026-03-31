@@ -129,22 +129,28 @@ const parseGlobalRuleFields = (value: string): string[] => {
   return [value];
 };
 
-type ChatEngineChoice = "simple" | "complex" | "engine3" | "direct";
+type ChatEngineChoice = "simple" | "complex" | "engine3" | "direct" | "direct_local";
 
 function engineFromDbGlobal(v: string | undefined): ChatEngineChoice {
-  if (v === "simple" || v === "engine3" || v === "direct") return v;
+  if (v === "simple" || v === "engine3" || v === "direct" || v === "direct_local") return v;
   return "complex";
 }
 
 function engineFromDbUser(v: string | null | undefined): ChatEngineChoice | null {
-  if (v === "simple" || v === "complex" || v === "engine3" || v === "direct") return v;
+  if (v === "simple" || v === "complex" || v === "engine3" || v === "direct" || v === "direct_local") return v;
   return null;
 }
 
 /** Von Index übergeben: bereits geladene global/user Settings → kein blockierendes „Laden…“ beim Panel-Öffnen. */
 export type SettingsChatHydration = {
   global: { default_model: string; default_rules: string; default_engine: string };
-  user: { selected_model: string | null; custom_rules: string | null; engine_type: string | null };
+  user: {
+    selected_model: string | null;
+    custom_rules: string | null;
+    engine_type: string | null;
+    kurzantworten?: boolean;
+    kontext_wissen?: boolean;
+  };
 };
 
 function initialStateFromChatHydration(h: SettingsChatHydration | undefined) {
@@ -157,6 +163,8 @@ function initialStateFromChatHydration(h: SettingsChatHydration | undefined) {
       userModel: null as string | null,
       userEngine: null as ChatEngineChoice | null,
       userRules: null as string | null,
+      userKurzantworten: false,
+      userKontextWissen: true,
     };
   }
   const eng = h.user.engine_type;
@@ -168,6 +176,8 @@ function initialStateFromChatHydration(h: SettingsChatHydration | undefined) {
     userModel: h.user.selected_model,
     userEngine: engineFromDbUser(eng),
     userRules: h.user.custom_rules,
+    userKurzantworten: h.user.kurzantworten === true,
+    userKontextWissen: h.user.kontext_wissen !== false,
   };
 }
 
@@ -230,6 +240,8 @@ const SettingsContent = ({
   const [userModel, setUserModel] = useState<string | null>(boot.userModel);
   const [userEngine, setUserEngine] = useState<ChatEngineChoice | null>(boot.userEngine);
   const [userRules, setUserRules] = useState<string | null>(boot.userRules);
+  const [userKurzantworten, setUserKurzantworten] = useState(() => boot.userKurzantworten);
+  const [userKontextWissen, setUserKontextWissen] = useState(() => boot.userKontextWissen);
   const [loading, setLoading] = useState(() => !chatSettingsHydration);
   const rulesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -294,6 +306,8 @@ const SettingsContent = ({
           const eng = (uData as { engine_type?: string | null }).engine_type;
           setUserEngine(engineFromDbUser(eng));
           setUserRules(uData.custom_rules);
+          setUserKurzantworten((uData as { kurzantworten?: boolean | null }).kurzantworten === true);
+          setUserKontextWissen((uData as { kontext_wissen?: boolean | null }).kontext_wissen !== false);
           const ps = (uData as { praxis_stammdaten?: PraxisStammdaten }).praxis_stammdaten as PraxisStammdaten | undefined;
           setPraxisStammdaten(ps && typeof ps === "object" ? ps : {});
         }
@@ -401,11 +415,19 @@ const SettingsContent = ({
   );
 
   const saveUser = useCallback(
-    async (model?: string | null, rules?: string | null, engine?: ChatEngineChoice | null) => {
+    async (
+      model?: string | null,
+      rules?: string | null,
+      engine?: ChatEngineChoice | null,
+      kurzantworten?: boolean,
+      kontextWissen?: boolean,
+    ) => {
       if (!user) return;
       const m = model !== undefined ? model : userModel;
       const r = rules !== undefined ? rules : userRules;
       const e = engine !== undefined ? engine : userEngine;
+      const k = kurzantworten !== undefined ? kurzantworten : userKurzantworten;
+      const kw = kontextWissen !== undefined ? kontextWissen : userKontextWissen;
       const { data: existing } = await supabase
         .from("user_settings")
         .select("id")
@@ -417,6 +439,8 @@ const SettingsContent = ({
           selected_model: m,
           custom_rules: r,
           engine_type: e,
+          kurzantworten: k,
+          kontext_wissen: kw,
           updated_at: new Date().toISOString(),
         }).eq("id", existing.id);
       } else {
@@ -425,12 +449,14 @@ const SettingsContent = ({
           selected_model: m,
           custom_rules: r,
           engine_type: e,
+          kurzantworten: k,
+          kontext_wissen: kw,
         });
       }
       toast({ title: "Gespeichert", description: "Ihre Einstellungen wurden aktualisiert." });
       onSettingsSaved?.();
     },
-    [user, userModel, userRules, userEngine, toast, onSettingsSaved]
+    [user, userModel, userRules, userEngine, userKurzantworten, userKontextWissen, toast, onSettingsSaved]
   );
 
   const savePraxisStammdaten = useCallback(
@@ -943,7 +969,9 @@ const SettingsContent = ({
           ? "engine3"
           : value === "direct"
             ? "direct"
-            : "complex";
+            : value === "direct_local"
+              ? "direct_local"
+              : "complex";
     if (activeTab === "global") {
       setGlobalEngine(eng);
       saveGlobal(globalModel, serializeGlobalRuleFields(globalRuleFields), eng);
@@ -1309,7 +1337,9 @@ const SettingsContent = ({
                 Einfache Engine: schnell, 2 Schritte. Komplexe Engine: 6 Schritte mit klassischer Karten-Ansicht. Engine
                 3: neue Pipeline mit einheitlichem Ergebnis, GOÄ plus geprüftem KI-/Admin-Kontext (ohne Kontext: sofortiger
                 Hinweis). Direktmodell: ein Aufruf nur mit dem gewählten Sprachmodell – keine Intent-Erkennung, keine GOÄ-
-                Pipeline, kein RAG (optional weiterhin persönliche/globale Regeln als Systemtext).
+                Pipeline, kein RAG (optional weiterhin persönliche/globale Regeln als Systemtext). Direktmodell 2.0 (lokal):
+                wie Direktmodell, zusätzlich GOÄ-JSON (selektiv) und KI-Kontext (Admin-RAG), weiterhin ohne Abrechnungs-
+                Pipeline.
               </p>
               <Select
                 value={activeTab === "user" && userEngine === null ? "__global__" : currentEngine}
@@ -1342,6 +1372,9 @@ const SettingsContent = ({
                   <SelectItem value="direct">
                     <span className="font-medium">Direktmodell</span>
                   </SelectItem>
+                  <SelectItem value="direct_local">
+                    <span className="font-medium">Direktmodell 2.0 (lokal)</span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
               {activeTab === "user" && userEngine !== null && (
@@ -1350,6 +1383,50 @@ const SettingsContent = ({
                 </Button>
               )}
             </div>
+            {activeTab === "user" && user ? (
+              <div className="flex items-start justify-between gap-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground">Kurzantworten</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Für <span className="font-medium">Direktmodell</span> und{" "}
+                    <span className="font-medium">Direktmodell 2.0 (lokal)</span>: Antworten mit Zusammenfassung oben,
+                    knapper Erläuterung und wählbaren Vorschlägen für die nächste Nachricht.
+                  </p>
+                </div>
+                <Switch
+                  checked={userKurzantworten}
+                  onCheckedChange={(v) => {
+                    setUserKurzantworten(v);
+                    void saveUser(undefined, undefined, undefined, v);
+                  }}
+                  className="shrink-0 mt-0.5"
+                  aria-label="Kurzantworten für Direktmodell"
+                />
+              </div>
+            ) : null}
+            {activeTab === "user" && user ? (
+              <div className="flex items-start justify-between gap-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground">Kontextwissen</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Steuert, ob der Assistent <span className="font-medium">GOÄ-Ziffern und Katalogtexte</span>, den{" "}
+                    <span className="font-medium">lokalen GOÄ-Wissensblock</span> und den{" "}
+                    <span className="font-medium">KI-Kontext</span> (Admin-Wissensdateien per RAG) in die Anfrage
+                    einbezieht. Aus: Antworten sind weniger GOÄ-verankert; Abrechnungs- und Prüfmodi können
+                    unzuverlässiger werden.
+                  </p>
+                </div>
+                <Switch
+                  checked={userKontextWissen}
+                  onCheckedChange={(v) => {
+                    setUserKontextWissen(v);
+                    void saveUser(undefined, undefined, undefined, undefined, v);
+                  }}
+                  className="shrink-0 mt-0.5"
+                  aria-label="Kontextwissen für Chat und Pipelines"
+                />
+              </div>
+            ) : null}
           </section>
 
           <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-4">

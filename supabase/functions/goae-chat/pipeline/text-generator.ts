@@ -71,6 +71,9 @@ Der medizinische Kontext betrifft einen Patienten in der Augenheilkunde mit vere
 - GOÄ 1257 beibehalten (höherer Betrag).
 - Begründung für Steigerungsfaktor ergänzen: „Eingehende Beratung von ca. 20 Min. aufgrund [Diagnose]. Faktor 3,0× gemäß § 5 Abs. 2 GOÄ gerechtfertigt."
 \`\`\`
+`;
+
+const TEXT_SYSTEM_GOAE_BLOCK = `
 
 DEIN KONTEXTWISSEN:
 
@@ -80,6 +83,17 @@ ${GOAE_ANALOGE_BEWERTUNG}
 
 ${GOAE_BEGRUENDUNGEN}
 `;
+
+const TEXT_SYSTEM_NO_EMBEDDED_KNOWLEDGE = `
+
+Hinweis: Es steht **kein** eingebetteter GOÄ-Katalog oder Regelwerk-Block zur Verfügung. Formuliere **zurückhaltend** bei GOÄ-Details; verlasse dich primär auf die strukturierten Prüfergebnisse in der Nutzernachricht.`;
+
+function buildTextSystemPrompt(kontextWissenEnabled: boolean): string {
+  return TEXT_SYSTEM_PROMPT + (kontextWissenEnabled ? TEXT_SYSTEM_GOAE_BLOCK : TEXT_SYSTEM_NO_EMBEDDED_KNOWLEDGE);
+}
+
+/** @deprecated Prefer buildTextSystemPrompt(true) — behält bisheriges Verhalten. */
+const TEXT_SYSTEM_PROMPT_LEGACY = buildTextSystemPrompt(true);
 
 export function buildTextGenerationPrompt(result: PipelineResult): string {
   const lines: string[] = [];
@@ -156,8 +170,9 @@ export async function generateTextStream(
   extraRules?: string,
   adminContext?: string,
   userMessage?: string,
+  kontextWissenEnabled = true,
 ): Promise<ReadableStream<Uint8Array>> {
-  let systemContent = TEXT_SYSTEM_PROMPT;
+  let systemContent = buildTextSystemPrompt(kontextWissenEnabled);
   if (adminContext) {
     systemContent += `\n\n## ADMIN-KONTEXT:\n${adminContext}`;
   }
@@ -222,4 +237,4 @@ export async function generateTextStream(
   throw new Error(lastError);
 }
 
-export { TEXT_SYSTEM_PROMPT };
+export { TEXT_SYSTEM_PROMPT_LEGACY as TEXT_SYSTEM_PROMPT };

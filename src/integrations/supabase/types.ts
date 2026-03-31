@@ -215,6 +215,8 @@ export type Database = {
           custom_rules: string | null
           engine_type: string | null
           id: string
+          kontext_wissen: boolean
+          kurzantworten: boolean
           praxis_stammdaten: Record<string, unknown> | null
           selected_model: string | null
           updated_at: string
@@ -224,6 +226,8 @@ export type Database = {
           custom_rules?: string | null
           engine_type?: string | null
           id?: string
+          kontext_wissen?: boolean
+          kurzantworten?: boolean
           praxis_stammdaten?: Record<string, unknown> | null
           selected_model?: string | null
           updated_at?: string
@@ -233,6 +237,8 @@ export type Database = {
           custom_rules?: string | null
           engine_type?: string | null
           id?: string
+          kontext_wissen?: boolean
+          kurzantworten?: boolean
           praxis_stammdaten?: Record<string, unknown> | null
           selected_model?: string | null
           updated_at?: string

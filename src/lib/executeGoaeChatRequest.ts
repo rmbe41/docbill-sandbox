@@ -21,6 +21,10 @@ export type ExecuteGoaeChatParams = {
   model: string;
   engine_type: string;
   extra_rules: string;
+  /** Kürzere strukturierte Direktmodus-Antworten (Server + UI). */
+  kurzantworten?: boolean;
+  /** GOÄ-Katalog, lokaler Wissensblock und Admin-RAG in LLM-Prompts (Default an). */
+  kontext_wissen?: boolean;
   lastInvoiceResult?: InvoiceResultData;
   lastServiceResult?: ServiceBillingResultData;
   lastEngine3Result?: Engine3ResultData;
@@ -63,6 +67,8 @@ export async function executeGoaeChatRequest(
         model: params.model,
         engine_type: params.engine_type,
         extra_rules: params.extra_rules,
+        ...(params.kurzantworten === true ? { kurzantworten: true } : {}),
+        ...(params.kontext_wissen === false ? { kontext_wissen: false } : {}),
         ...(params.lastInvoiceResult && {
           last_invoice_result: { pruefung: params.lastInvoiceResult },
         }),

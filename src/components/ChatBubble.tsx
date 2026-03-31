@@ -46,6 +46,7 @@ export type ChatMessage = {
     invoice?: Record<string, string>;
     service?: Record<string, string>;
   };
+  kurzantwortenVorschlagStatus?: Record<string, "accepted" | "rejected">;
 };
 
 type ChatBubbleProps = {
@@ -61,6 +62,8 @@ type ChatBubbleProps = {
   feedbackSessionMeta?: { model: string; engine: string };
   /** Letzte Nachrichten derselben Konversation bis inkl. dieser Bubble. */
   feedbackPriorMessages?: { role: "user" | "assistant"; content: string }[];
+  /** Kurzantworten-Vorschlag in den Composer übernehmen (Direktmodus). */
+  onKurzantwortVorschlagComposer?: (text: string) => void;
 };
 
 const MAX_RL_MSG_CHARS = 4000;
@@ -177,13 +180,44 @@ function displayNameFromUser(user: SupabaseUser): string | null {
   return n || null;
 }
 
-function FrageStructuredReply({ data }: { data: FrageAnswerStructured }) {
+function FrageStructuredReply({
+  data,
+  vorschlagStatus,
+  messageId,
+  updateMessageStructuredContent,
+  onVorschlagComposer,
+}: {
+  data: FrageAnswerStructured;
+  vorschlagStatus?: Record<string, "accepted" | "rejected">;
+  messageId?: string;
+  updateMessageStructuredContent?: (
+    id: string,
+    patch: Partial<MessageStructuredContentV1>,
+  ) => Promise<boolean>;
+  onVorschlagComposer?: (text: string) => void;
+}) {
   const quellen = filterExplicitQuellenEntries(data.quellen?.filter(Boolean) ?? []);
+  const [optimisticVorschlag, setOptimisticVorschlag] = useState<
+    Record<string, "accepted" | "rejected">
+  >({});
+  useEffect(() => {
+    setOptimisticVorschlag({});
+  }, [messageId]);
+
+  const effectiveVorschlagStatus = { ...vorschlagStatus, ...optimisticVorschlag };
+
+  const persistVorschlagStatus = (id: string, status: "accepted" | "rejected") => {
+    setOptimisticVorschlag((prev) => ({ ...prev, [id]: status }));
+    if (!messageId || !updateMessageStructuredContent) return;
+    void updateMessageStructuredContent(messageId, {
+      kurzantwortenVorschlagStatus: { [id]: status },
+    });
+  };
   return (
     <div className="space-y-4 not-prose text-foreground">
       <section className="rounded-lg border border-border/80 bg-muted/30 px-4 py-3">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-          Kurzantwort
+          Zusammenfassung
         </h3>
         <div className="markdown-output prose prose-sm max-w-none text-sm leading-relaxed">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={frageSectionMarkdownComponents}>
@@ -220,6 +254,61 @@ function FrageStructuredReply({ data }: { data: FrageAnswerStructured }) {
           </p>
         </footer>
       ) : null}
+      {data.vorschlaege && data.vorschlaege.length > 0 ? (
+        <section className="pt-1 border-t border-border/30 space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Vorschläge
+          </h3>
+          <ul className="space-y-2 list-none p-0 m-0">
+            {data.vorschlaege.map((v) => {
+              const st = effectiveVorschlagStatus?.[v.id];
+              if (st === "rejected") return null;
+              if (st === "accepted") {
+                return (
+                  <li
+                    key={v.id}
+                    className="text-xs text-muted-foreground rounded-md border border-border/50 bg-muted/20 px-3 py-2"
+                  >
+                    <span className="line-through opacity-70">{v.text}</span>
+                    <span className="block mt-1 font-medium text-foreground/80">Übernommen in die Eingabe</span>
+                  </li>
+                );
+              }
+              return (
+                <li
+                  key={v.id}
+                  className="rounded-md border border-border/60 bg-card/80 px-3 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2"
+                >
+                  <p className="text-sm text-foreground flex-1 min-w-0 leading-snug">{v.text}</p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => {
+                        onVorschlagComposer?.(v.text);
+                        persistVorschlagStatus(v.id, "accepted");
+                      }}
+                    >
+                      Annehmen
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => persistVorschlagStatus(v.id, "rejected")}
+                    >
+                      Ablehnen
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -245,6 +334,7 @@ const ChatBubble = ({
   invoiceReviewSourcePdf = null,
   feedbackSessionMeta,
   feedbackPriorMessages,
+  onKurzantwortVorschlagComposer,
 }: ChatBubbleProps) => {
   const isUser = message.role === "user";
   const { user: authUser } = useAuth();
@@ -635,7 +725,15 @@ const ChatBubble = ({
               />
             )}
             {message.engine3Result && <Engine3Result data={message.engine3Result} />}
-            {message.frageAnswer && <FrageStructuredReply data={message.frageAnswer} />}
+            {message.frageAnswer && (
+              <FrageStructuredReply
+                data={message.frageAnswer}
+                vorschlagStatus={message.kurzantwortenVorschlagStatus}
+                messageId={message.id}
+                updateMessageStructuredContent={updateMessageStructuredContent}
+                onVorschlagComposer={onKurzantwortVorschlagComposer}
+              />
+            )}
             {(message.content ||
               (message.invoiceResult && !message.content) ||
               (message.serviceBillingResult && !message.content) ||

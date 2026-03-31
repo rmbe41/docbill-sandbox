@@ -25,6 +25,7 @@ export async function mappeGoae(
   apiKey: string,
   userModel: string,
   adminContext?: string,
+  kontextWissenEnabled = true,
 ): Promise<GoaeMappingResult> {
   const zuordnungen: GoaeZuordnung[] = [];
   const nichtZugeordnet: ExtrahierteLeistung[] = [];
@@ -55,6 +56,7 @@ export async function mappeGoae(
       apiKey,
       userModel,
       adminContext,
+      kontextWissenEnabled,
     );
     zuordnungen.push(...llmMappings.zuordnungen);
     return {
@@ -114,29 +116,38 @@ async function suggestMappingsViaLlm(
   apiKey: string,
   userModel: string,
   adminContext?: string,
+  kontextWissenEnabled = true,
 ): Promise<GoaeMappingResult> {
   const model = pickExtractionModel(userModel);
 
   const leistungTexts = leistungen.flatMap((l) =>
     [l.bezeichnung, l.beschreibung].filter(Boolean) as string[],
   );
-  const katalogMd = buildMappingCatalogMarkdown({
-    leistungTexts,
-    fachgebiet: analyse.fachgebiet,
-    maxLines: 200,
-  });
+  const katalogMd = kontextWissenEnabled
+    ? buildMappingCatalogMarkdown({
+        leistungTexts,
+        fachgebiet: analyse.fachgebiet,
+        maxLines: 200,
+      })
+    : "";
+  const katalogSection = kontextWissenEnabled
+    ? `\n## GOÄ-Katalog (Auszug):\n${katalogMd}`
+    : "\n## Hinweis\nEs wurde **kein** GOÄ-Katalogauszug mitgeliefert. Ordne **zurückhaltend** zu; erfinde keine Ziffern. Nutze Analogbewertung nur bei plausibler fachlicher Begründung; sonst in **fehlendeMappings** listen.";
   const prompt = [
     "## Nicht zugeordnete Leistungen:\n",
     ...leistungen.map((l, i) => `${i + 1}. ${l.bezeichnung}: ${l.beschreibung}`),
     `\n## Klinischer Kontext: ${analyse.klinischerKontext}`,
     `\n## Fachgebiet: ${analyse.fachgebiet}`,
-    `\n## GOÄ-Katalog (Auszug):\n${katalogMd}`,
+    katalogSection,
   ].join("\n");
 
   const raw = await callLlm({
     apiKey,
     model,
-    systemPrompt: withAdminContextPrompt(MAPPING_PROMPT, adminContext),
+    systemPrompt: withAdminContextPrompt(
+      MAPPING_PROMPT,
+      kontextWissenEnabled ? adminContext : undefined,
+    ),
     userContent: [{ type: "text", text: prompt }],
     jsonMode: true,
     temperature: 0.1,

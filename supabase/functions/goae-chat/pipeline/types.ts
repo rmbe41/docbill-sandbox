@@ -14,6 +14,8 @@ export interface PipelineInput {
   conversationHistory?: { role: string; content: string }[];
   model: string;
   extraRules?: string;
+  /** false: keine GOÄ-/Admin-Blöcke in LLM-Prompts (Nutzer-Einstellung). Default an. */
+  kontextWissenEnabled?: boolean;
 }
 
 export interface FilePayload {

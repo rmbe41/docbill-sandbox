@@ -63,6 +63,8 @@ export interface Engine3StreamInput {
   lastResult?: LastResultContext;
   /** Rohes letztes Engine-3-Ergebnis für Follow-up-Kontext (optional, JSON vom Client) */
   lastEngine3Result?: unknown;
+  /** Default an: GOÄ-Katalog, Regeltexte und Admin-RAG in LLM-Prompts */
+  kontextWissenEnabled?: boolean;
 }
 
 function extractAdminFilenamesFromBlock(adminBlock: string): string[] {
@@ -78,6 +80,19 @@ function extractAdminFilenamesFromBlock(adminBlock: string): string[] {
 
 /** Einheitliche, systemseitige Quellenliste für UI und Nachvollziehbarkeit (nicht modell-halluziniert). */
 function buildEngine3SystemQuellen(input: Engine3StreamInput, data: Engine3ResultData): string[] {
+  if (input.kontextWissenEnabled === false) {
+    const lines: string[] = [];
+    const nFiles = input.files?.length ?? 0;
+    if (nFiles > 0) lines.push(`Eingabe: hochgeladene Datei(en) (${nFiles})`);
+    else if (input.modus === "leistungen_abrechnen") {
+      lines.push("Eingabe: Freitext der Nutzeranfrage (ohne eingebetteten GOÄ-Prompt-Katalog)");
+    }
+    for (const a of data.adminQuellen ?? []) {
+      const t = String(a).trim();
+      if (t) lines.push(`Interner Kontext (RAG): ${t}`);
+    }
+    return lines.length > 0 ? lines : ["Kein mitgeliefertes Kontextwissen (Nutzer-Einstellung)"];
+  }
   const lines: string[] = [
     "GOÄ-Paragraphen und Bewertungsregeln (eingebetteter DocBill-Referenzblock)",
     "GOÄ-Ziffern und Punktwerte (kontextbezogener Katalogauszug, DocBill JSON)",
@@ -247,6 +262,7 @@ async function critiqueRefineIfNeeded(
   const model = pickExtractionModel(userModel);
   const body = JSON.stringify(data);
   if (body.length > 48_000) return data;
+  if (!katalogMd.trim()) return data;
 
   try {
     const raw = await callLlm({
@@ -322,8 +338,9 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
 
   (async () => {
     try {
+      const kontextOk = input.kontextWissenEnabled !== false;
       await sendProgress(0, ENGINE3_STEPS[0].label);
-      await preflightEngine3KiContext(apiKey);
+      if (kontextOk) await preflightEngine3KiContext(apiKey);
 
       await sendProgress(1, ENGINE3_STEPS[1].label);
       let parsed: ParsedRechnung;
@@ -347,7 +364,7 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
         }
       }
 
-      const med = await analysiereMedizinisch(parsed, apiKey, input.model);
+      const med = await analysiereMedizinisch(parsed, apiKey, input.model, undefined, kontextOk);
 
       await sendProgress(2, ENGINE3_STEPS[2].label);
       const mergeQuery = enrichRagQueryForAuslegung(
@@ -357,25 +374,35 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
           input.lastResult,
         ),
       );
-      const adminBlock = await loadRelevantAdminContext(mergeQuery, apiKey, {
-        vectorQuery: enrichRagQueryForAuslegung(input.userMessage.trim() || mergeQuery),
-      });
+      const adminBlock = kontextOk
+        ? await loadRelevantAdminContext(mergeQuery, apiKey, {
+            vectorQuery: enrichRagQueryForAuslegung(input.userMessage.trim() || mergeQuery),
+          })
+        : "";
       const adminQuellenHint = extractAdminFilenamesFromBlock(adminBlock);
 
       const leistungTexts = leistungstexteFromParsed(parsed, input.userMessage);
-      const katalogMd = buildMappingCatalogMarkdown({
-        leistungTexts,
-        fachgebiet: med.fachgebiet,
-        maxLines: 200,
-      });
+      const katalogMd = kontextOk
+        ? buildMappingCatalogMarkdown({
+            leistungTexts,
+            fachgebiet: med.fachgebiet,
+            maxLines: 200,
+          })
+        : "";
 
-      const staticGoae = [
-        GOAE_PARAGRAPHEN_KOMPAKT,
-        GOAE_ABSCHNITTE_KOMPAKT,
-        GOAE_SONDERBEREICHE_KOMPAKT,
-        GOAE_ANALOGE_BEWERTUNG,
-        GOAE_BEGRUENDUNGEN,
-      ].join("\n\n");
+      const staticGoae = kontextOk
+        ? [
+            GOAE_PARAGRAPHEN_KOMPAKT,
+            GOAE_ABSCHNITTE_KOMPAKT,
+            GOAE_SONDERBEREICHE_KOMPAKT,
+            GOAE_ANALOGE_BEWERTUNG,
+            GOAE_BEGRUENDUNGEN,
+          ].join("\n\n")
+        : "";
+
+      const katalogBundle = kontextOk
+        ? `${staticGoae}\n\n${katalogMd}`
+        : "(Hinweis für das Modell: Der Nutzer hat **Kontextwissen** ausgeschaltet. Es gibt keinen eingebetteten GOÄ-Regelblock, keinen Katalogauszug und keinen ADMIN-KONTEXT. Nutze ausschließlich die Eingabe-JSONs; erfinde keine Ziffern oder Beträge; Unsicherheit in **hinweise**.)";
 
       await sendProgress(3, ENGINE3_STEPS[3].label);
 
@@ -398,28 +425,38 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
           ? rechnungPruefungPrompt(
               parsedCompact,
               analyseCompact,
-              `${staticGoae}\n\n${katalogMd}`,
+              katalogBundle,
               adminBlock,
               input.extraRules ?? "",
             )
           : leistungenPrompt(
               parsedCompact,
               analyseCompact,
-              `${staticGoae}\n\n${katalogMd}`,
+              katalogBundle,
               adminBlock,
               input.extraRules ?? "",
             );
 
-      const systemStatic = `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
+      const systemStatic = kontextOk
+        ? `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
 Punktwert GOÄ: 0,0582873 EUR pro Punkt. Betrag = Punkte × Punktwert × Faktor (auf Cent runden).
 Keine personenbezogenen Daten in Freitextfeldern wiederholen. Patient nur als „Patient/in“.
 Auslegungsfragen (z. B. BÄK): nur mit konkreter Fundstelle aus dem mitgelieferten **ADMIN-KONTEXT**; ohne solche Quelle keine behauptete amtliche Position.
 Alle GOÄ-Ziffern-, Punktwert- und Auslegungsaussagen beziehen sich ausschließlich auf die mitgelieferten Blöcke (GOÄ-Regeltext, Katalogauszug, ADMIN-KONTEXT, Eingabedaten). Keine frei erfundenen Paragraphen oder externen Behauptungen; eine einheitliche **Quellen**-Liste setzt das System nach deiner Antwort. Jede **Position** braucht ein nicht leeres **quelleText** (Bezug zur Eingabe); bei Auslegung aus dem Admin-Kontext **adminQuellen** mit Dateinamen füllen.
 ${
-        input.lastEngine3Result != null
-          ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(input.lastEngine3Result).slice(0, 8000)}`
-          : ""
-      }`;
+            input.lastEngine3Result != null
+              ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(input.lastEngine3Result).slice(0, 8000)}`
+              : ""
+          }`
+        : `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
+Punktwert GOÄ: 0,0582873 EUR pro Punkt. Betrag = Punkte × Punktwert × Faktor (auf Cent runden).
+Keine personenbezogenen Daten in Freitextfeldern wiederholen. Patient nur als „Patient/in“.
+**Kein** eingebetteter GOÄ-Katalog, Regelblock oder ADMIN-KONTEXT in dieser Anfrage (Nutzer hat Kontextwissen ausgeschaltet). Nutze ausschließlich die **Eingabe-JSONs** im Nutzerprompt. Erfinde keine Ziffern; Unsicherheit und Lücken klar in **hinweise**; **warnung**/**fehler** wo angebracht. Jede **Position** ein nicht leeres **quelleText** mit Bezug zur Eingabe. Keine behaupteten Auslegungen oder Kommentar-Zitate ohne Beleg.
+${
+            input.lastEngine3Result != null
+              ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(input.lastEngine3Result).slice(0, 8000)}`
+              : ""
+          }`;
 
       let resultData: Engine3ResultData | null = null;
       const modelsToTry = buildFallbackModels(input.model, { multimodal: false });

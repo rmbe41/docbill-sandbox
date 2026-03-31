@@ -1,8 +1,19 @@
 /**
  * Direktmodell: ein einziger Streaming-LLM-Aufruf mit dem vom Nutzer gewählten Modell.
  * Keine Intent-Klassifikation, keine GOÄ-/RAG-Blöcke, keine Parser- oder Pipeline-Zwischenschritte.
+ *
+ * Direktmodell 2.0 (lokal): gleicher Ablauf, aber mit selektivem GOÄ-Katalog/Regeln und Admin-RAG (KI-Kontext).
  */
 
+import { buildChatSelectiveCatalogMarkdown } from "../goae-catalog-json.ts";
+import { GOAE_PARAGRAPHEN } from "../goae-paragraphen.ts";
+import {
+  GOAE_ABSCHNITTE,
+  GOAE_ANALOGE_BEWERTUNG,
+  GOAE_BEGRUENDUNGEN,
+  GOAE_SONDERBEREICHE_KOMPAKT,
+} from "../goae-regeln.ts";
+import { DIRECT_SHORT_JSON_OUTPUT_RULES } from "../frage-answer-format.ts";
 import type { FilePayload } from "./types.ts";
 import { getReasoningConfigForStream, isFreeModel, resolveModel } from "../model-resolver.ts";
 
@@ -10,12 +21,99 @@ const DIRECT_SYSTEM_CORE = `Du antwortest als Assistent. In diesem **Direktmodel
 
 Antworte **auf Deutsch**, sofern der Nutzer nicht ausdrücklich eine andere Sprache wünscht.`;
 
+const DIRECT_LOCAL_SYSTEM_CORE = `Du antwortest als Assistent im **Direktmodell 2.0 (lokal)**.
+
+Wie beim klassischen Direktmodell läuft **ein** Streaming-Aufruf mit dem gewählten Sprachmodell: **keine** Intent-Klassifikation und **keine** mehrstufige Abrechnungs-Pipeline.
+
+**Eingebunden** sind:
+- **DEIN GOÄ-WISSEN** – DocBill-GOÄ-Katalog (selektiv zum Chat) sowie die mitgelieferten GOÄ-Paragraphen- und Regeltexte,
+- **ADMIN-KONTEXT** – relevante Ausschnitte aus den **KI-Kontext**-Wissensdateien (falls im Systemprompt vorhanden).
+
+Verpflichtend:
+- Bevorzuge **konkrete Fakten** aus diesen Blöcken gegenüber allgemeinem Modellwissen. Bei Widerspruch gilt der **mitgelieferte Kontext**.
+- Nutzt du den ADMIN-KONTEXT, nenne die **Quelle** (Dateiname wie im Kontext angegeben).
+- **Keine** erfundenen GOÄ-Ziffern oder Beträge: nur was im DEIN GOÄ-WISSEN- oder Admin-Text steht, oder klar als allgemeine Orientierung ohne konkrete Ziffer kennzeichnen.
+
+Antworte **auf Deutsch**, sofern der Nutzer nicht ausdrücklich eine andere Sprache wünscht.`;
+
+/** Wenn JSON-Kurzantwort fehlschlägt: strukturiertes Markdown-Streaming mit Zusammenfassung zuerst. */
+const DIRECT_SHORT_MARKDOWN_STREAM_APPENDIX = `
+
+## Kurzantworten (verbindlich, Markdown)
+
+- **Zuerst** genau die Überschrift \`### Zusammenfassung\` (kein Text davor): darunter **1–2 Sätze** Kernaussage.
+- **Danach** \`### Erläuterung\` mit **höchstens 5** Bullets (\`- …\`), kurz und sachlich.
+- **Optional** \`### Zum Vertiefen\` mit **2–3** Bullets – jeweils eine **konkrete** Folgefrage als nächste Nutzernachricht formuliert.
+- Keine langen Fließtexte, keine Wiederholung der Zusammenfassung in den Bullets.`;
+
 function buildDirectSystemPrompt(extraRules?: string): string {
   let s = DIRECT_SYSTEM_CORE;
   if (extraRules?.trim()) {
     s += `\n\n## Zusätzliche Regeln (vom Administrator/Nutzer):\n${extraRules.trim()}`;
   }
   return s;
+}
+
+function buildDirectLocalGoaeKnowledgeBlock(
+  messages: { role: string; content: unknown }[],
+  catalogMaxLines: number,
+): string {
+  const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, catalogMaxLines);
+  return `DEIN GOÄ-WISSEN:
+
+${GOAE_PARAGRAPHEN}
+
+${GOAE_ABSCHNITTE}
+
+${GOAE_SONDERBEREICHE_KOMPAKT}
+
+${goaeKatalogMarkdown}
+
+${GOAE_ANALOGE_BEWERTUNG}
+
+${GOAE_BEGRUENDUNGEN}`;
+}
+
+function buildDirectLocalSystemPrompt(
+  messages: { role: string; content: string }[],
+  adminContext: string,
+  extraRules?: string,
+  catalogMaxLines = 100,
+): string {
+  const ambiguous: { role: string; content: unknown }[] = messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+  const knowledge = buildDirectLocalGoaeKnowledgeBlock(ambiguous, catalogMaxLines);
+  const adminTrim = adminContext.trim();
+  let systemContent = DIRECT_LOCAL_SYSTEM_CORE;
+  if (adminTrim) {
+    systemContent += `\n\n${adminTrim}`;
+  }
+  systemContent += `\n\n${knowledge}`;
+  if (extraRules?.trim()) {
+    systemContent += `\n\n## Zusätzliche Regeln (vom Administrator/Nutzer):\n${extraRules.trim()}`;
+  }
+  return systemContent;
+}
+
+/** Systemprompt für JSON-Kurzantworten (klassisches Direktmodell, ohne GOÄ-Block). */
+export function buildDirectShortJsonSystemPrompt(extraRules?: string): string {
+  let s = `${DIRECT_SYSTEM_CORE}\n\n${DIRECT_SHORT_JSON_OUTPUT_RULES}`;
+  if (extraRules?.trim()) {
+    s += `\n\n## Zusätzliche Regeln (vom Administrator/Nutzer):\n${extraRules.trim()}`;
+  }
+  return s;
+}
+
+/** Systemprompt für JSON-Kurzantworten (Direkt lokal mit GOÄ + Admin). */
+export function buildDirectLocalShortJsonSystemPrompt(
+  messages: { role: string; content: string }[],
+  adminContext: string,
+  extraRules?: string,
+  catalogMaxLines = 100,
+): string {
+  return `${buildDirectLocalSystemPrompt(messages, adminContext, extraRules, catalogMaxLines)}\n\n${DIRECT_SHORT_JSON_OUTPUT_RULES}`;
 }
 
 function filePartsFromPayloads(files: FilePayload[]): unknown[] {
@@ -117,11 +215,17 @@ export async function runDirectModelStream(
     files?: FilePayload[];
     model: string;
     extraRules?: string;
+    /** Hängt Kurzformat-Anweisung an (ohne JSON). */
+    preferShortMarkdown?: boolean;
+    maxTokens?: number;
   },
   apiKey: string,
 ): Promise<Response> {
   const resolved = resolveModel(input.model);
-  const systemPrompt = buildDirectSystemPrompt(input.extraRules);
+  let systemPrompt = buildDirectSystemPrompt(input.extraRules);
+  if (input.preferShortMarkdown) {
+    systemPrompt += DIRECT_SHORT_MARKDOWN_STREAM_APPENDIX;
+  }
   const tail = buildMessagesForDirect(input.messages, input.files);
   const apiMessages: unknown[] = [{ role: "system", content: systemPrompt }, ...tail];
 
@@ -133,6 +237,78 @@ export async function runDirectModelStream(
     stream: true,
   };
   if (reasoningConfig) body.reasoning = reasoningConfig;
+  if (typeof input.maxTokens === "number" && input.maxTokens > 0) {
+    body.max_tokens = input.maxTokens;
+  }
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (response.ok && response.body) {
+    return new Response(response.body, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }
+
+  if (response.status === 429) {
+    return new Response(
+      JSON.stringify({ error: "Rate Limit erreicht. Bitte warten Sie einen Moment." }),
+      { status: 429, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  if (response.status === 402) {
+    return new Response(
+      JSON.stringify({ error: "Credits erschöpft. Bitte laden Sie Credits auf." }),
+      { status: 402, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  return jsonErrorFromOpenRouter(response, { requestedModelId: input.model, resolvedModel: resolved });
+}
+
+export async function runDirectLocalModelStream(
+  input: {
+    messages: { role: string; content: string }[];
+    files?: FilePayload[];
+    model: string;
+    extraRules?: string;
+    adminContext: string;
+    catalogMaxLines?: number;
+    preferShortMarkdown?: boolean;
+    maxTokens?: number;
+  },
+  apiKey: string,
+): Promise<Response> {
+  const resolved = resolveModel(input.model);
+  let systemPrompt = buildDirectLocalSystemPrompt(
+    input.messages,
+    input.adminContext,
+    input.extraRules,
+    input.catalogMaxLines ?? 100,
+  );
+  if (input.preferShortMarkdown) {
+    systemPrompt += DIRECT_SHORT_MARKDOWN_STREAM_APPENDIX;
+  }
+  const tail = buildMessagesForDirect(input.messages, input.files);
+  const apiMessages: unknown[] = [{ role: "system", content: systemPrompt }, ...tail];
+
+  const reasoningConfig = getReasoningConfigForStream(input.model);
+
+  const body: Record<string, unknown> = {
+    model: resolved,
+    messages: apiMessages,
+    stream: true,
+  };
+  if (reasoningConfig) body.reasoning = reasoningConfig;
+  if (typeof input.maxTokens === "number" && input.maxTokens > 0) {
+    body.max_tokens = input.maxTokens;
+  }
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
