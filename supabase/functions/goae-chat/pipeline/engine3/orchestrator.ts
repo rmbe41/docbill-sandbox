@@ -133,7 +133,7 @@ Markiere unsichere Zuordnungen mit status "warnung" und erkläre in anmerkung.
 **Pflicht-Checkliste**
 - Nur Ziffern aus dem Katalogauszug; keine halluzinierten Nummern.
 - **Ausschlüsse:** alle vorgeschlagenen Ziffern paarweise gegen die Ausschl-Angaben im Auszug prüfen; Konflikte → **hinweise** + ggf. Position „warnung“/„fehler“.
-- **Steigerung:** Faktor innerhalb Katalograhmen; über Schwellenwert → ausführliche **begruendung** (§ 5 Abs. 2 GOÄ), konkret und prüfernah. Optional **begruendungBeispiele** (Array mit 3–5 vollständigen, direkt übernehmbaren Absätzen) nur wenn sinnvoll; DocBill ergänzt ggf. kanonische Vorlagen.
+- **Steigerung:** Faktor innerhalb Katalograhmen; über Schwellenwert → ausführliche **begruendung** (§ 5 Abs. 2 GOÄ), konkret und prüfernah. Optional **begruendungBeispiele** (Array mit bis zu drei vollständigen, direkt übernehmbaren Absätzen) nur wenn sinnvoll; DocBill ergänzt ggf. kanonische Vorlagen (drei Varianten).
 - **Sonderfälle** ( Leichenschau, Not-/Zeitzuschläge, Akupunktur): nur mit Ziffer im Auszug; sonst **hinweis** auf unvollständigen Kontext.
 - **BÄK / GOÄ-Kommentar:** Nur wenn **ADMIN-KONTEXT** eine belegbare Fundstelle liefert; jede verwendete Admin-Datei in **adminQuellen** nennen. Behauptete Regeln in **hinweise** mit **regelReferenz** belegen („GOÄ-Katalogauszug …“ oder „ADMIN-KONTEXT: …“).
 - **Hinweis-Zuordnung:** **betrifftPositionen**: **nr**-Werte der betroffenen Zeilen aus **positionen**/**optimierungen**; bei allgemeinen Hinweisen weglassen.
@@ -156,7 +156,7 @@ Antworte NUR mit JSON:
       "anmerkung": "optional",
       "quelleText": "Pflicht: Bezug zum Leistungstext",
       "begruendung": "optional",
-      "begruendungBeispiele": ["optional: 3–5 fertige Absätze"]
+      "begruendungBeispiele": ["optional: bis zu 3 fertige Absätze"]
     }
   ],
   "hinweise": [ { "schwere": "info|warnung|fehler", "titel": "…", "detail": "…", "regelReferenz": "optional", "betrifftPositionen": [1] } ],

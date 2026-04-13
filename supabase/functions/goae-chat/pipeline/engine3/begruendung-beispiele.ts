@@ -53,10 +53,105 @@ const MAP: Record<string, readonly string[]> = {
   "1225": [B1225_GLUKOM, B1225_NEURO, B1225_KINDER, B1225_REGELHOECHST, B1225_STEIGERUNG],
 };
 
-export function getBegruendungBeispiele(ziffer: string, faktor: number): string[] {
+export const DEFAULT_BERATUNG_MINUTEN_PHRASE = "15–20 Minuten";
+
+export type BegruendungBeispieleOpts = {
+  rotation?: number;
+  quelleText?: string;
+  begruendung?: string;
+  anmerkung?: string;
+};
+
+export function isBeratungsZiffer(ziffer: string): boolean {
+  const n = parseInt(String(ziffer ?? "").replace(/\D/g, ""), 10) || 0;
+  return n >= 1 && n <= 4;
+}
+
+export function extractBeratungsMinutenAusText(...sources: (string | undefined)[]): string | undefined {
+  const text = sources.filter(Boolean).join(" ");
+  if (!text.trim()) return undefined;
+  const rangeRe =
+    /\b(?:ca\.?\s*)?(\d{1,2})\s*[–\-]\s*(\d{1,2})\s*(?:Min|Minuten|min)\b/i;
+  const m1 = text.match(rangeRe);
+  if (m1) return `${m1[1]}–${m1[2]} Minuten`;
+  const singleRe = /\b(?:ca\.?\s*)?(\d{1,2})\s*(?:Min|Minuten|min)\b/i;
+  const m2 = text.match(singleRe);
+  if (m2) return `${m2[1]} Minuten`;
+  return undefined;
+}
+
+function beratungsMinutenEinleitung(ziffer: string, opts: BegruendungBeispieleOpts): string {
+  if (!isBeratungsZiffer(ziffer)) return "";
+  const parsed = extractBeratungsMinutenAusText(opts.quelleText, opts.begruendung, opts.anmerkung);
+  const phrase = parsed ?? DEFAULT_BERATUNG_MINUTEN_PHRASE;
+  return `Die Gesprächsdauer wurde im vorliegenden Dokument mit ca. ${phrase} bezogen (GOÄ-Abrechnungspraxis eingehende Beratung, GOÄ 1–4). `;
+}
+
+export function pickThreeFromPool<T>(list: readonly T[], rotation: number): T[] {
+  const n = list.length;
+  const rot = Math.max(0, Math.floor(rotation));
+  if (n === 0) return [];
+  if (n <= 3) {
+    if (n < 3) return [...list];
+    const r = rot % 3;
+    return [list[r]!, list[(r + 1) % 3]!, list[(r + 2) % 3]!];
+  }
+  const out: T[] = [];
+  for (let i = 0; i < 3; i++) {
+    out.push(list[(rot * 3 + i) % n]!);
+  }
+  return out;
+}
+
+function beratungVorlagenListe(ziffer: string): readonly string[] | undefined {
+  const z = String(ziffer ?? "").trim().replace(/^A/i, "");
+  const own = MAP[z];
+  if (own?.length) return own;
+  if (isBeratungsZiffer(z) && MAP["1"]?.length) return MAP["1"];
+  return undefined;
+}
+
+function adaptBeratungGoaeZifferInText(text: string, ziffer: string): string {
+  const z = String(ziffer ?? "").trim().replace(/^A/i, "");
+  if (z === "1" || !isBeratungsZiffer(z)) return text;
+  return text.replace(/\bGOÄ 1\b/g, `GOÄ ${z}`);
+}
+
+export function getBegruendungBeispiele(
+  ziffer: string,
+  faktor: number,
+  opts?: BegruendungBeispieleOpts,
+): string[] {
   void faktor;
   const z = String(ziffer ?? "").trim().replace(/^A/i, "");
-  const list = MAP[z];
+  const list = beratungVorlagenListe(z);
+  const rotation = opts?.rotation ?? 0;
   if (!list?.length) return [];
-  return [...list];
+  const picked = pickThreeFromPool(list, rotation).map((t) => adaptBeratungGoaeZifferInText(t, z));
+  const ein = beratungsMinutenEinleitung(z, opts ?? {});
+  if (!ein) return picked;
+  return picked.map((t) => ein + t);
+}
+
+export type BegruendungBeispielePositionInput = {
+  ziffer: string;
+  faktor: number;
+  quelleText?: string;
+  begruendung?: string;
+  anmerkung?: string;
+  begruendungBeispiele?: string[];
+};
+
+export function getBegruendungBeispieleTriple(
+  p: BegruendungBeispielePositionInput,
+  rotation = 0,
+): string[] {
+  const canon = getBegruendungBeispiele(p.ziffer, p.faktor, {
+    rotation,
+    quelleText: p.quelleText,
+    begruendung: p.begruendung,
+    anmerkung: p.anmerkung,
+  });
+  if (canon.length > 0) return canon;
+  return pickThreeFromPool(p.begruendungBeispiele ?? [], rotation);
 }

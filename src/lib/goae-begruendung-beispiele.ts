@@ -1,5 +1,5 @@
 /**
- * Kanonische, vollständig ausformulierte Begründungs-Beispiele für die GOÄ-Abrechnung (copy-paste-tauglich).
+ * Kanonische, vollständig ausformulierte Begründungs-Beispiele für die GOÄ-Abrechnung.
  * Erweiterbar pro Ziffer; Rückgabe leer, wenn keine Vorlagen hinterlegt sind.
  */
 
@@ -54,16 +54,122 @@ const MAP: Record<string, readonly string[]> = {
   "1225": [B1225_GLUKOM, B1225_NEURO, B1225_KINDER, B1225_REGELHOECHST, B1225_STEIGERUNG],
 };
 
+/** Entspricht der Beratungslogik in `regelengine.ts` (ca. 15–20 Min. eingehende Beratung). */
+export const DEFAULT_BERATUNG_MINUTEN_PHRASE = "15–20 Minuten";
+
+export type BegruendungBeispieleOpts = {
+  /** Rotation für „Neu generieren“ (wechselt die drei aus einem größeren Pool). */
+  rotation?: number;
+  quelleText?: string;
+  begruendung?: string;
+  anmerkung?: string;
+};
+
+/** GOÄ 1–4 (Beratung): numerische Ziffer 1–4, optional mit Buchstaben-Suffix. */
+export function isBeratungsZiffer(ziffer: string): boolean {
+  const n = parseInt(String(ziffer ?? "").replace(/\D/g, ""), 10) || 0;
+  return n >= 1 && n <= 4;
+}
+
 /**
- * Liefert bis zu fünf vollständige Begründungstexte für die angegebene GOÄ-Ziffer.
- * @param faktor aktueller Abrechnungsfaktor (für spätere ziffernspezifische Filterung nutzbar)
+ * Extrahiert eine Minutenangabe aus Freitext (Quelle, Begründung, Anmerkung).
+ * Liefert z. B. "18 Minuten" oder "15–20 Minuten".
  */
-export function getBegruendungBeispiele(ziffer: string, faktor: number): string[] {
+export function extractBeratungsMinutenAusText(...sources: (string | undefined)[]): string | undefined {
+  const text = sources.filter(Boolean).join(" ");
+  if (!text.trim()) return undefined;
+  const rangeRe =
+    /\b(?:ca\.?\s*)?(\d{1,2})\s*[–\-]\s*(\d{1,2})\s*(?:Min|Minuten|min)\b/i;
+  const m1 = text.match(rangeRe);
+  if (m1) return `${m1[1]}–${m1[2]} Minuten`;
+  const singleRe = /\b(?:ca\.?\s*)?(\d{1,2})\s*(?:Min|Minuten|min)\b/i;
+  const m2 = text.match(singleRe);
+  if (m2) return `${m2[1]} Minuten`;
+  return undefined;
+}
+
+function beratungsMinutenEinleitung(ziffer: string, opts: BegruendungBeispieleOpts): string {
+  if (!isBeratungsZiffer(ziffer)) return "";
+  const parsed = extractBeratungsMinutenAusText(opts.quelleText, opts.begruendung, opts.anmerkung);
+  const phrase = parsed ?? DEFAULT_BERATUNG_MINUTEN_PHRASE;
+  return `Die Gesprächsdauer wurde im vorliegenden Dokument mit ca. ${phrase} bezogen (GOÄ-Abrechnungspraxis eingehende Beratung, GOÄ 1–4). `;
+}
+
+/** Wählt drei Einträge aus einer Liste; bei n>3 Fenster-Rotation, bei n===3 zyklische Permutation. */
+export function pickThreeFromPool<T>(list: readonly T[], rotation: number): T[] {
+  const n = list.length;
+  const rot = Math.max(0, Math.floor(rotation));
+  if (n === 0) return [];
+  if (n <= 3) {
+    if (n < 3) return [...list];
+    const r = rot % 3;
+    return [list[r]!, list[(r + 1) % 3]!, list[(r + 2) % 3]!];
+  }
+  const out: T[] = [];
+  for (let i = 0; i < 3; i++) {
+    out.push(list[(rot * 3 + i) % n]!);
+  }
+  return out;
+}
+
+/**
+ * Liefert genau drei vollständige Begründungstexte für die angegebene GOÄ-Ziffer.
+ * Bei Beratungsziffern (1–4) wird eine Minutenbezugnahme vorangestellt (aus Quelle/Begründung/Anmerkung oder Standard 15–20 Min.).
+ */
+function beratungVorlagenListe(ziffer: string): readonly string[] | undefined {
+  const z = String(ziffer ?? "").trim().replace(/^A/i, "");
+  const own = MAP[z];
+  if (own?.length) return own;
+  if (isBeratungsZiffer(z) && MAP["1"]?.length) return MAP["1"];
+  return undefined;
+}
+
+function adaptBeratungGoaeZifferInText(text: string, ziffer: string): string {
+  const z = String(ziffer ?? "").trim().replace(/^A/i, "");
+  if (z === "1" || !isBeratungsZiffer(z)) return text;
+  return text.replace(/\bGOÄ 1\b/g, `GOÄ ${z}`);
+}
+
+export function getBegruendungBeispiele(
+  ziffer: string,
+  faktor: number,
+  opts?: BegruendungBeispieleOpts,
+): string[] {
   void faktor;
   const z = String(ziffer ?? "").trim().replace(/^A/i, "");
-  const list = MAP[z];
+  const list = beratungVorlagenListe(z);
+  const rotation = opts?.rotation ?? 0;
   if (!list?.length) return [];
-  return [...list];
+  const picked = pickThreeFromPool(list, rotation).map((t) => adaptBeratungGoaeZifferInText(t, z));
+  const ein = beratungsMinutenEinleitung(z, opts ?? {});
+  if (!ein) return picked;
+  return picked.map((t) => ein + t);
+}
+
+export type BegruendungBeispielePositionInput = {
+  ziffer: string;
+  faktor: number;
+  quelleText?: string;
+  begruendung?: string;
+  anmerkung?: string;
+  begruendungBeispiele?: string[];
+};
+
+/**
+ * Drei Vorschläge für die UI: zuerst kanonische Vorlagen, sonst (max.) drei aus dem LLM-Array mit Rotation.
+ */
+export function getBegruendungBeispieleTriple(
+  p: BegruendungBeispielePositionInput,
+  rotation = 0,
+): string[] {
+  const canon = getBegruendungBeispiele(p.ziffer, p.faktor, {
+    rotation,
+    quelleText: p.quelleText,
+    begruendung: p.begruendung,
+    anmerkung: p.anmerkung,
+  });
+  if (canon.length > 0) return canon;
+  return pickThreeFromPool(p.begruendungBeispiele ?? [], rotation);
 }
 
 /**
@@ -75,14 +181,21 @@ export function getSteigerungFallbackBeispiel(params: {
   bezeichnung: string;
   faktor: number;
   betragFormatted: string;
+  quelleText?: string;
 }): string {
   const z = String(params.ziffer ?? "").trim();
   const bez = String(params.bezeichnung ?? "").trim();
   const f = String(params.faktor).replace(".", ",");
   const kopf = `GOÄ ${z}${bez ? ` (${bez})` : ""} · Faktor ${f} (Betrag ${params.betragFormatted}).`;
+  const min = extractBeratungsMinutenAusText(params.quelleText);
+  const minTeil = min
+    ? ` Konkret ist die Gesprächsdauer im Dokument mit ca. ${min} bezogen.`
+    : isBeratungsZiffer(z)
+      ? ` Konkret ist die Gesprächsdauer im Dokument mit ca. ${DEFAULT_BERATUNG_MINUTEN_PHRASE} (eingehende Beratung, GOÄ-üblich) zu dokumentieren.`
+      : "";
   return (
     `${kopf} Erhöhter Zeitaufwand und besondere Schwierigkeit bei der Durchführung der genannten Leistung: Es waren ` +
-    `mehrfache Erklärungsschritte, wiederholte Messungen bzw. Anpassungen und eine ausführlichere Erfassung als im Regelfall üblich erforderlich, bis ein belastbares Ergebnis für die weitere Behandlung vorlag. ` +
-    `Gesprächsdauer (Minuten), medizinischer Anlass und konkrete Erschwernis sind im Behandlungsverlauf dokumentiert.`
+    `mehrfache Erklärungsschritte, wiederholte Messungen bzw. Anpassungen und eine ausführlichere Erfassung als im Regelfall üblich erforderlich, bis ein belastbares Ergebnis für die weitere Behandlung vorlag.${minTeil} ` +
+    `Medizinischer Anlass und konkrete Erschwernis sind im Behandlungsverlauf dokumentiert.`
   );
 }

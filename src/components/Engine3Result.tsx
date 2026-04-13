@@ -29,7 +29,7 @@ import { BegruendungBeispielePicker } from "@/components/BegruendungBeispielePic
 import { goaeByZiffer } from "@/data/goae-catalog";
 import { calculateAmountOrScaled, goaeFaktorLimits } from "@/lib/goae-validator";
 import { buildHoechstfaktorHinweisText, isFaktorUeberSchwelle } from "@/lib/format-goae-hinweis";
-import { getSteigerungFallbackBeispiel } from "@/lib/goae-begruendung-beispiele";
+import { getBegruendungBeispieleTriple, getSteigerungFallbackBeispiel } from "@/lib/goae-begruendung-beispiele";
 
 export type { Engine3ResultData } from "@/lib/engine3Result";
 
@@ -542,6 +542,20 @@ export default function Engine3Result({
     setBegruendungOverrides(next);
   }, [data, messageId, decisionKeyPrefix, initialEngine3BegruendungText]);
 
+  const [begruendungRotation, setBegruendungRotation] = useState<Record<string, number>>({});
+  useEffect(() => {
+    setBegruendungRotation({});
+  }, [data, messageId, decisionKeyPrefix]);
+
+  const bumpBegruendungRotation = useCallback((rk: string) => {
+    setBegruendungRotation((prev) => ({ ...prev, [rk]: (prev[rk] ?? 0) + 1 }));
+    setBegruendungOverrides((prev) => {
+      const next = { ...prev };
+      delete next[rk];
+      return next;
+    });
+  }, []);
+
   const allRows: RowWithOpt[] = useMemo(() => {
     const apply = (pBase: Engine3Position, isOpt: boolean) => {
       const rk = rowKeyWithPrefix(decisionKeyPrefix, isOpt, pBase);
@@ -815,6 +829,8 @@ export default function Engine3Result({
     hasNextGroup: boolean,
   ) => {
     const rk = rowKey(isOpt, p);
+    const rot = begruendungRotation[rk] ?? 0;
+    const beispieleTriple = getBegruendungBeispieleTriple(p, rot);
     const st = decisions[rk] ?? "pending";
     const stripe = positionGroupStripeClass(groupIndex);
     const cat = goaeByZiffer.get(p.ziffer);
@@ -931,20 +947,21 @@ export default function Engine3Result({
                   </p>
                 ) : null}
                 {isFaktorUeberSchwelle(p.ziffer, p.faktor) ? (
-                  p.begruendungBeispiele && p.begruendungBeispiele.length > 0 ? (
+                  beispieleTriple.length > 0 ? (
                     <>
                       <p className={cn("text-xs font-medium leading-snug", engine3MessageBodyClass("warnung"))}>
                         Faktor über dem Regelhöchstsatz — für die Abrechnung ist eine nachvollziehbare ärztliche
                         Begründung erforderlich.
                       </p>
                       <p className={engine3MessageSubLabelClass("warnung")}>
-                        Begründung für die Akte (Variante wählen oder anpassen)
+                        Begründung für die Akte (eine von drei Varianten wählen oder anpassen)
                       </p>
                       <BegruendungBeispielePicker
-                        key={`${messageId ?? "noid"}-${rk}-stg`}
-                        beispiele={p.begruendungBeispiele}
+                        key={`${messageId ?? "noid"}-${rk}-stg-${rot}`}
+                        beispiele={beispieleTriple}
                         persistedText={begruendungOverrides[rk]}
                         onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
+                        onRegenerate={() => bumpBegruendungRotation(rk)}
                         surface="warnung"
                       />
                     </>
@@ -961,6 +978,7 @@ export default function Engine3Result({
                           bezeichnung: p.bezeichnung,
                           faktor: p.faktor,
                           betragFormatted: formatEuro(p.betrag),
+                          quelleText: p.quelleText,
                         })}
                       </p>
                     </>
@@ -1012,19 +1030,20 @@ export default function Engine3Result({
                   )}
                 >
                   <p className={engine3MessageSeverityTitleClass("warnung")}>Warnung</p>
-                  {p.begruendungBeispiele && p.begruendungBeispiele.length > 0 ? (
+                  {beispieleTriple.length > 0 ? (
                     <>
                       <p className={engine3MessageBodyClass("warnung")}>
-                        Wählen Sie eine Formulierung oder passen Sie den Text für die Patientenakte an.
+                        Wählen Sie eine der drei Formulierungen oder passen Sie den Text für die Patientenakte an.
                       </p>
                       <p className={cn(engine3MessageSubLabelClass("warnung"), "pt-0.5")}>
                         Formulierungsvorschläge
                       </p>
                       <BegruendungBeispielePicker
-                        key={`${messageId ?? "noid"}-${rk}-fb`}
-                        beispiele={p.begruendungBeispiele}
+                        key={`${messageId ?? "noid"}-${rk}-fb-${rot}`}
+                        beispiele={beispieleTriple}
                         persistedText={begruendungOverrides[rk]}
                         onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
+                        onRegenerate={() => bumpBegruendungRotation(rk)}
                         surface="warnung"
                       />
                     </>
@@ -1042,14 +1061,15 @@ export default function Engine3Result({
                   )}
                 </div>
               ) : null}
-              {hasRowHints && p.begruendungBeispiele && p.begruendungBeispiele.length > 0 ? (
+              {hasRowHints && beispieleTriple.length > 0 ? (
                 <div className="mt-2 space-y-1.5">
                   <p className={engine3MessageSubLabelClass("warnung")}>Zusätzliche Formulierungsvorschläge</p>
                   <BegruendungBeispielePicker
-                    key={`${messageId ?? "noid"}-${rk}-hint`}
-                    beispiele={p.begruendungBeispiele}
+                    key={`${messageId ?? "noid"}-${rk}-hint-${rot}`}
+                    beispiele={beispieleTriple}
                     persistedText={begruendungOverrides[rk]}
                     onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
+                    onRegenerate={() => bumpBegruendungRotation(rk)}
                     surface="warnung"
                   />
                 </div>

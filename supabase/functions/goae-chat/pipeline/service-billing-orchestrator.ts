@@ -316,7 +316,10 @@ export async function runServiceBillingPipeline(
       }
 
       const quelleBeschreibung = quelleBeschreibungFuerLeistungstext(z.leistung, leistungen);
-      const begruendungBeispiele = getBegruendungBeispiele(z.ziffer, faktor);
+      const begruendungBeispiele = getBegruendungBeispiele(z.ziffer, faktor, {
+        quelleText: quelleBeschreibung,
+        begruendung,
+      });
       return {
         ziffer: z.ziffer,
         bezeichnung: z.bezeichnung,
@@ -359,7 +362,10 @@ export async function runServiceBillingPipeline(
       }
 
       const altQuelle = quelleBeschreibungFuerLeistungstext(z.leistung, leistungen);
-      const beispOpt = getBegruendungBeispiele(altZiffer, faktor);
+      const beispOpt = getBegruendungBeispiele(altZiffer, faktor, {
+        quelleText: altQuelle,
+        begruendung,
+      });
       optimierungen.push({
         ziffer: altZiffer,
         bezeichnung: eintrag.bezeichnung,

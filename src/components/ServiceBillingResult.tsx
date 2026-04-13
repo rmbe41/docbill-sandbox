@@ -21,7 +21,7 @@ import {
   stripDuplicateBegruendungPrefix,
   formatBegruendungFuerPdf,
 } from "@/lib/format-goae-hinweis";
-import { getBegruendungBeispiele } from "@/lib/goae-begruendung-beispiele";
+import { getBegruendungBeispieleTriple } from "@/lib/goae-begruendung-beispiele";
 import { BegruendungBeispielePicker } from "@/components/BegruendungBeispielePicker";
 import type { MessageStructuredContentV1, ServiceBegruendungTextPatch } from "@/lib/messageStructuredContent";
 
@@ -106,10 +106,18 @@ function formatFaktorDisplay(f: number): string {
 
 const QUELLE_MAX_LEN = 220;
 
-function begruendungBeispieleFuerPosition(v: ServiceBillingPosition): string[] {
-  if (v.begruendungBeispiele?.length) return v.begruendungBeispiele;
-  const canon = getBegruendungBeispiele(v.ziffer, v.faktor);
-  if (canon.length) return canon;
+function begruendungTripleFuerPosition(v: ServiceBillingPosition, rotation: number): string[] {
+  const triple = getBegruendungBeispieleTriple(
+    {
+      ziffer: v.ziffer,
+      faktor: v.faktor,
+      quelleText: v.quelleBeschreibung ?? v.leistung,
+      begruendung: v.begruendung,
+      begruendungBeispiele: v.begruendungBeispiele,
+    },
+    rotation,
+  );
+  if (triple.length > 0) return triple;
   if (isFaktorUeberSchwelle(v.ziffer, v.faktor) && v.begruendung?.trim()) {
     return [v.begruendung.trim()];
   }
@@ -185,6 +193,8 @@ function ServiceBillingPositionsTable({
   begrOverrides,
   setBegrOverride,
   initialServiceBegruendungText,
+  begrRotation,
+  bumpBegrRotation,
 }: {
   positions: ServiceBillingPosition[];
   isOpt: boolean;
@@ -194,6 +204,8 @@ function ServiceBillingPositionsTable({
   begrOverrides: Record<string, string>;
   setBegrOverride: (key: string, text: string) => void;
   initialServiceBegruendungText?: Record<string, string> | null;
+  begrRotation: Record<string, number>;
+  bumpBegrRotation: (key: string) => void;
 }) {
   if (positions.length === 0) return null;
   return (
@@ -216,7 +228,8 @@ function ServiceBillingPositionsTable({
             const isAccepted = decision === "accepted";
             const isPending = decision === "pending";
             const unterzeile = leistungUnterzeile(v);
-            const beispiele = begruendungBeispieleFuerPosition(v);
+            const rot = begrRotation[key] ?? 0;
+            const beispiele = begruendungTripleFuerPosition(v, rot);
             return (
               <Fragment key={key}>
               <tr
@@ -293,10 +306,11 @@ function ServiceBillingPositionsTable({
                         Begründung für die Akte (Variante wählen oder anpassen)
                       </p>
                       <BegruendungBeispielePicker
-                        key={`${messageId ?? "noid"}-${key}`}
+                        key={`${messageId ?? "noid"}-${key}-${rot}`}
                         beispiele={beispiele}
                         persistedText={begrOverrides[key] ?? initialServiceBegruendungText?.[key]}
                         onTextChange={(t) => setBegrOverride(key, t)}
+                        onRegenerate={() => bumpBegrRotation(key)}
                       />
                     </div>
                   </td>
@@ -323,13 +337,27 @@ const ServiceBillingResult = ({
   const [begrOverrides, setBegrOverrides] = useState<Record<string, string>>(() => ({
     ...(initialServiceBegruendungText ?? {}),
   }));
+  const [begrRotation, setBegrRotation] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setBegrOverrides({ ...(initialServiceBegruendungText ?? {}) });
   }, [data, messageId, initialServiceBegruendungText]);
 
+  useEffect(() => {
+    setBegrRotation({});
+  }, [data, messageId]);
+
   const setBegrOverride = useCallback((key: string, text: string) => {
     setBegrOverrides((prev) => ({ ...prev, [key]: text }));
+  }, []);
+
+  const bumpBegrRotation = useCallback((key: string) => {
+    setBegrRotation((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
+    setBegrOverrides((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   }, []);
 
   const knownServiceKeys = useMemo(() => {
@@ -559,6 +587,8 @@ const ServiceBillingResult = ({
           begrOverrides={begrOverrides}
           setBegrOverride={setBegrOverride}
           initialServiceBegruendungText={initialServiceBegruendungText}
+          begrRotation={begrRotation}
+          bumpBegrRotation={bumpBegrRotation}
         />
 
         {/* Sachkosten */}
@@ -597,6 +627,8 @@ const ServiceBillingResult = ({
               begrOverrides={begrOverrides}
               setBegrOverride={setBegrOverride}
               initialServiceBegruendungText={initialServiceBegruendungText}
+              begrRotation={begrRotation}
+              bumpBegrRotation={bumpBegrRotation}
             />
           </>
         )}

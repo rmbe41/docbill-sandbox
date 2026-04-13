@@ -23,7 +23,8 @@ function coerceBegruendungBeispiele(raw: unknown): string[] | undefined {
   const out = raw
     .filter((x): x is string => typeof x === "string")
     .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .filter((s) => s.length > 0)
+    .slice(0, 3);
   return out.length ? out : undefined;
 }
 
@@ -569,7 +570,11 @@ export function applyRecalcAndConsistency(data: Engine3ResultData): Engine3Resul
 }
 
 function enrichPositionBegruendungBeispiele(p: Engine3Position): Engine3Position {
-  const canonical = getBegruendungBeispiele(p.ziffer, p.faktor);
+  const canonical = getBegruendungBeispiele(p.ziffer, p.faktor, {
+    quelleText: p.quelleText,
+    begruendung: p.begruendung,
+    anmerkung: p.anmerkung,
+  });
   if (canonical.length > 0) return { ...p, begruendungBeispiele: canonical };
   return p;
 }

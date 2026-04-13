@@ -71,7 +71,7 @@ Du erhältst extrahierte Rechnungsdaten (JSON), optional **klinischeDokumentatio
 **Pflicht-Checkliste**
 - Ziffern/Bezeichnungen/Punkte: nur aus dem Katalogauszug; fehlende Ziffer → in **hinweise**, nichts erfinden.
 - **Ausschlüsse:** Jede Kombination von Positionsziffern anhand der **Ausschl:**-Angaben der Katalogzeilen prüfen; Konflikt → **hinweise** (schwere fehler/warnung) mit **regelReferenz** „Ausschlussziffern GOÄ-Katalog“.
-- **Steigerung:** Schwellen-/Höchstfaktor aus Katalogzeile; über Schwelle → **begruendung** mit konkretem Sachbezug (Dauer Min., Erschwernis), § 5 Abs. 2 GOÄ; keine Leerformeln (siehe Regelblock Begründungen). Optional **begruendungBeispiele** (3–5 vollständige Absätze) nur wenn sinnvoll; DocBill ergänzt ggf. kanonische Vorlagen.
+- **Steigerung:** Schwellen-/Höchstfaktor aus Katalogzeile; über Schwelle → **begruendung** mit konkretem Sachbezug (Dauer Min., Erschwernis), § 5 Abs. 2 GOÄ; keine Leerformeln (siehe Regelblock Begründungen). Optional **begruendungBeispiele** (bis zu drei vollständige Absätze) nur wenn sinnvoll; DocBill ergänzt ggf. kanonische Vorlagen (drei Varianten).
 - **Sonderbereiche** (Leichenschau, Zuschläge, Akupunktur): nur, wenn die Ziffer im Auszug steht; sonst Lücke in **hinweise**.
 - **BÄK / Auslegung / GOÄ-Kommentar:** Nur mit konkretem Nachweis im **ADMIN-KONTEXT** (Dateiname); jede inhaltlich verwendete Admin-Datei **mindestens einmal** in **adminQuellen** (kurzer Dateiname) aufführen. Ohne Treffer: Unsicherheit in **hinweise**, nichts erfinden.
 - **Hinweise:** Behauptet ein Eintrag eine konkrete Regel oder Auslegung, **muss** **regelReferenz** gesetzt sein (z. B. „GOÄ-Katalogauszug, Ziffer …“ oder „ADMIN-KONTEXT: [Dateiname]“).
@@ -95,7 +95,7 @@ Antworte NUR mit JSON im folgenden Schema:
       "anmerkung": "optional",
       "quelleText": "Pflicht: Bezug zur Rechnungszeile / Position im Text / klinischeDokumentation",
       "begruendung": "optional bei hohem Faktor",
-      "begruendungBeispiele": ["optional: 3–5 fertige Absätze"]
+      "begruendungBeispiele": ["optional: bis zu 3 fertige Absätze"]
     }
   ],
   "hinweise": [
