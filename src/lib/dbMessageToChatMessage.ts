@@ -21,10 +21,13 @@ export function dbRowToChatMessage(m: {
       invoiceResult: s.invoiceResult,
       serviceBillingResult: s.serviceBillingResult,
       engine3Result: s.engine3Result,
+      engine3Cases: s.engine3Cases,
+      engine3SegmentationProposal: s.engine3SegmentationProposal,
       analysisTimeSeconds: s.analysisTimeSeconds,
       frageAnswer: s.frageAnswer,
       suggestionDecisions: s.suggestionDecisions,
       kurzantwortenVorschlagStatus: s.kurzantwortenVorschlagStatus,
+      engine3FaktorOverrides: s.engine3FaktorOverrides,
     };
   }
   return base;

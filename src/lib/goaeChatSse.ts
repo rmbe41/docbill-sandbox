@@ -2,10 +2,14 @@ import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import { parseEngine3ResultData, type Engine3ResultData } from "@/lib/engine3Result";
 import { normalizeFrageAnswerParsed, type FrageAnswerStructured } from "@/lib/frageAnswerStructured";
+import type { Engine3CaseStored, Engine3SegmentationProposalStored } from "@/lib/messageStructuredContent";
+
 export type PipelineProgressPayload = {
   step: number;
   totalSteps: number;
   label: string;
+  caseIndex?: number;
+  totalCases?: number;
 };
 
 export type SseAccumState = {
@@ -13,6 +17,9 @@ export type SseAccumState = {
   invoiceData?: InvoiceResultData;
   serviceBillingData?: ServiceBillingResultData;
   engine3Data?: Engine3ResultData;
+  /** Mehrere Engine-3-Vorgänge (nach engine3_batch_complete bzw. akkumuliert). */
+  engine3Cases?: Engine3CaseStored[];
+  engine3SegmentationPending?: Engine3SegmentationProposalStored | null;
   frageStructured?: FrageAnswerStructured;
 };
 
@@ -56,6 +63,8 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
     const step = (parsed.step as number) ?? 1;
     const total = (parsed.totalSteps as number) ?? 6;
     const label = (parsed.label as string) ?? "";
+    const caseIndex = typeof parsed.caseIndex === "number" ? parsed.caseIndex : undefined;
+    const totalCases = typeof parsed.totalCases === "number" ? parsed.totalCases : undefined;
     // #region agent log
     fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
       method: "POST",
@@ -70,7 +79,7 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
       }),
     }).catch(() => {});
     // #endregion
-    ctx.onProgress({ step, totalSteps: total, label });
+    ctx.onProgress({ step, totalSteps: total, label, caseIndex, totalCases });
     return true;
   }
 
@@ -124,6 +133,72 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
   if (type === "service_billing_error") {
     ctx.onProgress(null);
     ctx.state.assistantContent += `\n\n❌ **Fehler:** ${parsed.error as string}`;
+    ctx.onDelta();
+    return true;
+  }
+
+  if (type === "engine3_segmentation_pending") {
+    ctx.onProgress(null);
+    const d = parsed.data as Engine3SegmentationProposalStored | undefined;
+    if (d && typeof d === "object" && Array.isArray(d.cases) && Array.isArray(d.fileNames)) {
+      ctx.state.engine3SegmentationPending = d;
+    }
+    ctx.onDelta();
+    return true;
+  }
+
+  if (type === "engine3_case_result") {
+    ctx.onProgress(null);
+    const caseId = typeof parsed.caseId === "string" ? parsed.caseId : "";
+    const caseIndex = typeof parsed.caseIndex === "number" ? parsed.caseIndex : 0;
+    const totalCases = typeof parsed.totalCases === "number" ? parsed.totalCases : 1;
+    const title = typeof parsed.title === "string" ? parsed.title : `Vorgang ${caseIndex}`;
+    const filenames = Array.isArray(parsed.filenames)
+      ? (parsed.filenames as unknown[]).map((x) => String(x))
+      : [];
+    const parsedData = parseEngine3ResultData(parsed.data);
+    if (parsedData && caseId) {
+      const entry: Engine3CaseStored = {
+        caseId,
+        caseIndex,
+        title,
+        filenames,
+        result: parsedData,
+      };
+      const prev = ctx.state.engine3Cases ?? [];
+      const without = prev.filter((c) => c.caseId !== caseId);
+      without.push(entry);
+      without.sort((a, b) => a.caseIndex - b.caseIndex);
+      ctx.state.engine3Cases = without;
+    }
+    ctx.onDelta();
+    return true;
+  }
+
+  if (type === "engine3_batch_complete") {
+    ctx.onProgress(null);
+    const casesRaw = parsed.cases;
+    if (Array.isArray(casesRaw)) {
+      const built: Engine3CaseStored[] = [];
+      for (const row of casesRaw) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        const r = row as Record<string, unknown>;
+        const caseId = typeof r.caseId === "string" ? r.caseId : "";
+        const caseIndex = typeof r.caseIndex === "number" ? r.caseIndex : built.length + 1;
+        const title = typeof r.title === "string" ? r.title : `Vorgang ${caseIndex}`;
+        const filenames = Array.isArray(r.filenames)
+          ? (r.filenames as unknown[]).map((x) => String(x))
+          : [];
+        const parsedData = parseEngine3ResultData(r.data);
+        if (parsedData && caseId) {
+          built.push({ caseId, caseIndex, title, filenames, result: parsedData });
+        }
+      }
+      if (built.length > 0) {
+        ctx.state.engine3Cases = built.sort((a, b) => a.caseIndex - b.caseIndex);
+        ctx.state.engine3Data = built[0]?.result;
+      }
+    }
     ctx.onDelta();
     return true;
   }
@@ -258,6 +333,8 @@ export function sseAccumStateHasDeliverable(state: SseAccumState): boolean {
   if (state.serviceBillingData != null) return true;
   if (state.invoiceData != null) return true;
   if (state.engine3Data != null) return true;
+  if (state.engine3Cases != null && state.engine3Cases.length > 0) return true;
+  if (state.engine3SegmentationPending != null) return true;
   return false;
 }
 

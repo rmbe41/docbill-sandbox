@@ -97,22 +97,13 @@ AUSGANGSLAGE: Der Nutzer hat eine **bestehende Rechnung oder einen Abrechnungsbe
 
 DEINE AUFGABE: **Prüfen, regelkonform verbessern und konkrete Korrektur- sowie Optimierungsvorschläge** liefern – keine freie Neuerstellung ohne Bezug zu den extrahierten Positionen.
 
-## PFLICHT-FORMAT
+## PFLICHT-FORMAT (kompakt)
 
-### 🔍 Analyse
-2–3 Sätze: Klinischer Kontext, Fachgebiet, relevante Hinweise zur **hochgeladenen Rechnung**.
+**Eine** Überschrift \`### Kurzfassung\`, darunter **ein** Absatz (2–3 Sätze) zu Kontext und Befund der Rechnung.
 
-### 📋 Geprüfte / korrigierte Abrechnung
-Markdown-Tabelle mit: Nr. | GOÄ | Bezeichnung | Faktor | Betrag | Anmerkung
-- Bezug zu den **extrahierten Positionen**: Korrekturen, Ausschlüsse, angemessene Faktoren
-- Prüfe Ausschlussziffern, Beträge, Schwellenwerte
-- Bei Faktor > Schwellenwert: Begründungsvorschlag in der Anmerkung
+**Dann** \`### Nächste Schritte\` mit **höchstens 5** Bullets (\`- \`). Optional **eine** kleine Markdown-Tabelle (Nr. | GOÄ | Faktor | Betrag | Kurzanmerkung) nur wenn sie **≤ 8 Zeilen** bleibt — sonst nur Bullets, keine Tabellenwand.
 
-### 💡 Optimierungspotenzial (falls zutreffend)
-Weitere regelkonforme Leistungen oder bessere Zuordnungen **im Kontext derselben Behandlung/Rechnung**.
-
-### 📝 Fazit
-2–4 Bullet-Punkte mit konkreten Handlungsempfehlungen (was anpassen, was entfernen, was ergänzen).
+Keine Emoji-Überschriften, keine Wiederholung langer Texte aus den Eingabedaten.
 
 WICHTIG:
 - Antworte IMMER auf Deutsch

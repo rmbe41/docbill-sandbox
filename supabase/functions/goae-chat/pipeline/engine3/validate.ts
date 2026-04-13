@@ -74,6 +74,11 @@ export interface Engine3ClientPosition {
   quelleText?: string;
 }
 
+export interface Engine3ClientTopVorschlag extends Engine3ClientPosition {
+  rang: 1 | 2 | 3;
+  empfohlen?: boolean;
+}
+
 export interface Engine3ClientHinweis {
   schwere: "fehler" | "warnung" | "info";
   titel: string;
@@ -88,9 +93,61 @@ export interface Engine3ClientResultData {
   positionen: Engine3ClientPosition[];
   hinweise: Engine3ClientHinweis[];
   optimierungen?: Engine3ClientPosition[];
+  topVorschlaege?: Engine3ClientTopVorschlag[];
   zusammenfassung: Engine3Summary;
   /** System: GOÄ-Blöcke, Katalog, Eingabe, RAG-Dateien */
   quellen?: string[];
+}
+
+function hinweisCountsForNr(hinweise: Engine3Hinweis[], nr: number): { fehler: number; warnung: number } {
+  let fehler = 0;
+  let warnung = 0;
+  for (const h of hinweise) {
+    if (!h.betrifftPositionen?.includes(nr)) continue;
+    if (h.schwere === "fehler") fehler += 1;
+    else if (h.schwere === "warnung") warnung += 1;
+  }
+  return { fehler, warnung };
+}
+
+export function rankEngine3TopVorschlaege(data: Engine3ResultData): Engine3ClientTopVorschlag[] {
+  const all = [...data.positionen, ...(data.optimierungen ?? [])];
+  const ranked = all.map((p) => {
+    const h = hinweisCountsForNr(data.hinweise, p.nr);
+    const statusScore = p.status === "korrekt" || p.status === "vorschlag"
+      ? 0
+      : p.status === "warnung"
+      ? 1
+      : 2;
+    const missingQuelle = !p.quelleText?.trim();
+    return {
+      p,
+      statusScore,
+      fehlerCount: h.fehler,
+      warnCount: h.warnung,
+      missingQuelle,
+    };
+  });
+  ranked.sort((a, b) =>
+    a.statusScore - b.statusScore ||
+    a.fehlerCount - b.fehlerCount ||
+    a.warnCount - b.warnCount ||
+    Number(a.missingQuelle) - Number(b.missingQuelle) ||
+    b.p.betrag - a.p.betrag ||
+    a.p.ziffer.localeCompare(b.p.ziffer, "de") ||
+    a.p.nr - b.p.nr
+  );
+  return ranked.slice(0, 3).map(({ p }, idx) => ({
+    nr: p.nr,
+    ziffer: p.ziffer,
+    bezeichnung: p.bezeichnung,
+    faktor: p.faktor,
+    betrag: p.betrag,
+    status: p.status,
+    ...(p.quelleText?.trim() ? { quelleText: p.quelleText.trim() } : {}),
+    rang: (idx + 1) as 1 | 2 | 3,
+    ...(idx === 0 ? { empfohlen: true } : {}),
+  }));
 }
 
 export function toClientEngine3Result(data: Engine3ResultData): Engine3ClientResultData {
@@ -114,6 +171,7 @@ export function toClientEngine3Result(data: Engine3ResultData): Engine3ClientRes
       ...(h.betrifftPositionen?.length ? { betrifftPositionen: h.betrifftPositionen } : {}),
     }));
   const optimierungen = data.optimierungen?.map(slimPos);
+  const topVorschlaege = rankEngine3TopVorschlaege(data);
   return {
     modus: data.modus,
     klinischerKontext: data.klinischerKontext,
@@ -121,6 +179,7 @@ export function toClientEngine3Result(data: Engine3ResultData): Engine3ClientRes
     positionen: data.positionen.map(slimPos),
     hinweise,
     ...(optimierungen?.length ? { optimierungen } : {}),
+    ...(topVorschlaege.length ? { topVorschlaege } : {}),
     zusammenfassung: data.zusammenfassung,
     ...(data.quellen?.length ? { quellen: data.quellen } : {}),
   };
@@ -651,4 +710,63 @@ export function enforceEngine3Quellenbezug(data: Engine3ResultData): Engine3Resu
   };
   next.zusammenfassung = summarize(next);
   return next;
+}
+
+const SYNTH_RATIONALE_REF = "DocBill:SyntheticRationaleTemplate";
+/** Mindestlänge zusammengefasster Begründungstext (Position + zugeordnete Hinweise). */
+const MIN_RATIONALE_CHARS = 120;
+
+function combinedRationaleLength(hinweise: Engine3Hinweis[], p: Engine3Position): number {
+  const posPart = [p.begruendung, p.anmerkung].filter(Boolean).join(" ").trim();
+  const fromH = hinweise
+    .filter((h) => h.betrifftPositionen?.includes(p.nr))
+    .map((h) => `${h.titel} ${h.detail}`)
+    .join(" ")
+    .trim();
+  return `${posPart} ${fromH}`.trim().length;
+}
+
+/**
+ * Stellt sicher, dass jede Position mit warnung/fehler genug erklärenden Text für die UI hat.
+ * Ergänzt deterministisch einen Hinweis mit übernehmbaren Formulierungsvorschlägen, falls das Modell zu knapp war.
+ */
+export function ensureWarnungFehlerHaveUIFacingRationale(data: Engine3ResultData): Engine3ResultData {
+  let hinweise = [...data.hinweise];
+  const allRows: Engine3Position[] = [...data.positionen, ...(data.optimierungen ?? [])];
+
+  for (const p of allRows) {
+    if (p.status !== "warnung" && p.status !== "fehler") continue;
+    if (combinedRationaleLength(hinweise, p) >= MIN_RATIONALE_CHARS) continue;
+    if (hinweise.some((h) => h.regelReferenz === SYNTH_RATIONALE_REF && h.betrifftPositionen?.includes(p.nr))) {
+      continue;
+    }
+
+    const f = String(p.faktor).replace(".", ",");
+    const euro = `${p.betrag.toFixed(2).replace(".", ",")} €`;
+    const bez = (p.bezeichnung ?? "").trim();
+    const q = (p.quelleText ?? "").trim().slice(0, 220);
+    const detail =
+      `Formulierungsvorschläge (zutreffende Teile direkt in die Patientendokumentation übernehmen, Rest anpassen oder streichen):\n\n` +
+      `(1) Zur Leistung GOÄ ${p.ziffer} «${bez}» (Pos. ${p.nr}): Faktor ${f}, Betrag ${euro}. ` +
+      `Dokumentieren Sie Indikation, Umfang und zeitlichen Ablauf der erbrachten Leistung im Rahmen der vorliegenden Befunde und des Abrechnungsfalls.\n\n` +
+      `(2) Abrechnungshinweis: Die Bewertung erfolgt unter Berücksichtigung der GOÄ; bei parallelen Ziffern oder Mehrfachleistungen dokumentieren Sie die medizinische Notwendigkeit je Sitzung bzw. je erbrachter Leistung.\n\n` +
+      (q
+        ? `(3) Bezug aus der zugrundeliegenden Angabe: ${q}\n\n`
+        : "") +
+      `Hinweis: Diese Sätze sind Entwürfe ohne individuelle Diagnosestellung; vor der Aktennotiz medizinisch-juristisch prüfen.`;
+
+    hinweise.push({
+      schwere: p.status === "fehler" ? "fehler" : "warnung",
+      titel: `Begründung / Aktennotiz zu Pos. ${p.nr} (GOÄ ${p.ziffer})`,
+      detail,
+      regelReferenz: SYNTH_RATIONALE_REF,
+      betrifftPositionen: [p.nr],
+    });
+  }
+
+  if (hinweise.length === data.hinweise.length) return data;
+  return applyRecalcAndConsistency({
+    ...data,
+    hinweise,
+  });
 }

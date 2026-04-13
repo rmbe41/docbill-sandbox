@@ -168,7 +168,8 @@ type ChatEngineChoice = "simple" | "complex" | "engine3" | "engine3_1" | "direct
 
 function engineFromDbGlobal(v: string | undefined): ChatEngineChoice {
   if (v === "simple" || v === "engine3" || v === "engine3_1" || v === "direct" || v === "direct_local") return v;
-  return "complex";
+  if (v === "complex") return "complex";
+  return "engine3_1";
 }
 
 function engineFromDbUser(v: string | null | undefined): ChatEngineChoice | null {
@@ -192,7 +193,7 @@ function initialStateFromChatHydration(h: SettingsChatHydration | undefined) {
   if (!h) {
     return {
       globalModel: "openrouter/free",
-      globalEngine: "complex" as ChatEngineChoice,
+      globalEngine: "engine3_1" as ChatEngineChoice,
       globalRules: "",
       globalRuleFields: [DEFAULT_GLOBAL_GUARDRAILS_RULES],
       userModel: null as string | null,
@@ -445,6 +446,7 @@ const SettingsContent = ({
         summaries: payload.summaries,
         historyRuns: payload.historyRuns ?? [],
       });
+      setBenchmarkRunning(payload?.latestRun?.status === "running");
       toast({
         title: "Benchmark gestartet",
         description: payload.runId ? `Run-ID: ${payload.runId}` : "Benchmark-Lauf wurde ausgeführt.",

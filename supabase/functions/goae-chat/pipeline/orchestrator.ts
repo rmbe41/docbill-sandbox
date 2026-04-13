@@ -134,12 +134,6 @@ export async function runPipeline(
       // Send structured result for frontend storage
       await sendPipelineResult(pipelineResult);
 
-      // Intro-Text vor Stream – Fallback bei Client-Timeout, damit message.content nie leer bleibt
-      const explanationIntro = `data: ${JSON.stringify({
-        choices: [{ delta: { content: "Die detaillierte Erklärung:\n\n" } }],
-      })}\n\n`;
-      await writer.write(encoder.encode(explanationIntro));
-
       // Step 6: Textgenerierung (streaming)
       await sendProgress(5, PIPELINE_STEPS[5].label);
       const adminContext = await getAdminContext(pipelineResult);

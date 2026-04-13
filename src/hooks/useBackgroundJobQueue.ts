@@ -15,11 +15,13 @@ import {
   assistantContentHasSseError,
   sseAccumStateHasDeliverable,
   sseErrorSummaryFromAssistantContent,
+  type PipelineProgressPayload,
 } from "@/lib/goaeChatSse";
 import {
   buildConversationTitle,
   conversationListTitleDisplay,
 } from "@/lib/conversationTitle";
+import { validateEngine3CaseGroups as validateE3CaseGroups } from "@/lib/engine3CaseGroupsValidate";
 import type { GuidedWorkflowKind } from "@/lib/guidedWorkflow";
 import type { User } from "@supabase/supabase-js";
 import type { Json } from "@/integrations/supabase/types";
@@ -39,6 +41,8 @@ export type BackgroundJobPayload = {
   assistantPreview?: string;
   guidedWorkflow?: GuidedWorkflowKind;
   guidedPhase?: "collect";
+  /** Fortsetzung nach Segmentierungs-Rückfrage (Rechnungsprüfung, mehrere PDFs). */
+  engine3CaseGroups?: number[][];
 };
 
 export type BackgroundJobRow = {
@@ -59,7 +63,7 @@ export type BackgroundJobRow = {
 
 export type ConversationRunInfo = {
   isRunning: boolean;
-  pipelineStep: { step: number; totalSteps: number; label: string } | null;
+  pipelineStep: PipelineProgressPayload | null;
   analysisStartTime: number | null;
 };
 
@@ -135,6 +139,10 @@ export function useBackgroundJobQueue({
   const pendingFilePayloadsRef = useRef(
     new Map<string, { name: string; type: string; data: string }[]>(),
   );
+  /** Dateien für „Segmentierung bestätigen“ bis zur erfolgreichen Engine-3-Antwort. */
+  const pendingEngine3FilesByConversationRef = useRef(
+    new Map<string, { name: string; type: string; data: string }[]>(),
+  );
   const abortByJobIdRef = useRef(new Map<string, AbortController>());
   const runningJobIdsRef = useRef(new Set<string>());
   const drainMutexRef = useRef(false);
@@ -148,6 +156,8 @@ export function useBackgroundJobQueue({
         | "invoiceResult"
         | "serviceBillingResult"
         | "engine3Result"
+        | "engine3Cases"
+        | "engine3SegmentationProposal"
         | "analysisTimeSeconds"
         | "frageAnswer"
       >
@@ -292,6 +302,9 @@ export function useBackgroundJobQueue({
         return;
       }
 
+      const filePayloadsSnapshot =
+        filePayloads && filePayloads.length > 0 ? filePayloads.map((f) => ({ ...f })) : [];
+
       pendingFilePayloadsRef.current.delete(job.id);
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -314,6 +327,10 @@ export function useBackgroundJobQueue({
       for (let i = dbMsgs.length - 1; i >= 0; i--) {
         if (dbMsgs[i].role !== "assistant") continue;
         const s = parseMessageStructured(dbMsgs[i].structured_content as Json);
+        if (s?.engine3Cases?.length) {
+          lastEngine3Result = s.engine3Cases[0].result;
+          break;
+        }
         if (s?.engine3Result) {
           lastEngine3Result = s.engine3Result;
           break;
@@ -339,17 +356,26 @@ export function useBackgroundJobQueue({
         analysisTimeSeconds?: number,
         messageId?: string,
         frageAnswer?: ChatMessage["frageAnswer"],
+        engine3Cases?: ChatMessage["engine3Cases"],
+        engine3SegmentationProposal?: ChatMessage["engine3SegmentationProposal"],
       ) => {
         const prevLive = liveAssistantByConvRef.current.get(conversationId);
         const mergedFrage = frageAnswer !== undefined ? frageAnswer : prevLive?.frageAnswer;
         const mergedInv = invoiceData !== undefined ? invoiceData : prevLive?.invoiceResult;
         const mergedSvc = serviceBillingData !== undefined ? serviceBillingData : prevLive?.serviceBillingResult;
         const mergedE3 = engine3Data !== undefined ? engine3Data : prevLive?.engine3Result;
+        const mergedCases = engine3Cases !== undefined ? engine3Cases : prevLive?.engine3Cases;
+        const mergedSeg =
+          engine3SegmentationProposal !== undefined
+            ? engine3SegmentationProposal
+            : prevLive?.engine3SegmentationProposal;
         liveAssistantByConvRef.current.set(conversationId, {
           content: assistantContent,
           invoiceResult: mergedInv,
           serviceBillingResult: mergedSvc,
           engine3Result: mergedE3,
+          engine3Cases: mergedCases,
+          engine3SegmentationProposal: mergedSeg,
           ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
           ...(mergedFrage !== undefined ? { frageAnswer: mergedFrage } : {}),
         });
@@ -367,6 +393,11 @@ export function useBackgroundJobQueue({
                     serviceBillingResult:
                       serviceBillingData !== undefined ? serviceBillingData : m.serviceBillingResult,
                     engine3Result: engine3Data !== undefined ? engine3Data : m.engine3Result,
+                    engine3Cases: engine3Cases !== undefined ? engine3Cases : m.engine3Cases,
+                    engine3SegmentationProposal:
+                      engine3SegmentationProposal !== undefined
+                        ? engine3SegmentationProposal
+                        : m.engine3SegmentationProposal,
                     ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
                     ...(frageAnswer !== undefined ? { frageAnswer } : {}),
                     kurzantwortenVorschlagStatus: m.kurzantwortenVorschlagStatus,
@@ -383,6 +414,8 @@ export function useBackgroundJobQueue({
               invoiceResult: invoiceData,
               serviceBillingResult: serviceBillingData,
               engine3Result: engine3Data,
+              engine3Cases,
+              engine3SegmentationProposal,
               ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
               ...(frageAnswer !== undefined ? { frageAnswer } : {}),
             },
@@ -405,6 +438,9 @@ export function useBackgroundJobQueue({
           lastEngine3Result,
           guidedWorkflow: jobPayload.guidedWorkflow,
           guidedPhase: jobPayload.guidedPhase,
+          ...(jobPayload.engine3CaseGroups?.length
+            ? { engine3CaseGroups: jobPayload.engine3CaseGroups }
+            : {}),
           signal: controller.signal,
           onProgress: (p) => {
             void updateJobProgressDb(job.id, {
@@ -442,6 +478,8 @@ export function useBackgroundJobQueue({
               undefined,
               undefined,
               state.frageStructured,
+              state.engine3Cases,
+              state.engine3SegmentationPending ?? undefined,
             );
           },
           onFreeModelsExhausted: onFreeModelsExhausted,
@@ -502,6 +540,8 @@ export function useBackgroundJobQueue({
           analysisTimeSeconds,
           undefined,
           state.frageStructured,
+          state.engine3Cases,
+          state.engine3SegmentationPending ?? undefined,
         );
         // #region agent log
         if (state.engine3Data != null && !state.assistantContent?.trim()) {
@@ -522,25 +562,35 @@ export function useBackgroundJobQueue({
         }
         // #endregion
 
+        const engine3CasesStored =
+          state.engine3Cases && state.engine3Cases.length > 0 ? state.engine3Cases : undefined;
         const assistantStructured = buildAssistantStructuredContent({
           invoiceResult: state.invoiceData,
           serviceBillingResult: state.serviceBillingData,
-          engine3Result: state.engine3Data,
+          engine3Result: engine3CasesStored ? undefined : state.engine3Data,
+          engine3Cases: engine3CasesStored,
+          engine3SegmentationProposal: state.engine3SegmentationPending ?? undefined,
           analysisTimeSeconds,
           frageAnswer: state.frageStructured,
         });
         const hasAssistantText =
           Boolean(state.assistantContent?.trim()) ||
           Boolean(state.frageStructured) ||
-          Boolean(state.engine3Data);
+          Boolean(state.engine3Data) ||
+          Boolean(engine3CasesStored?.length) ||
+          Boolean(state.engine3SegmentationPending);
         const contentToPersist =
           state.assistantContent?.trim()
             ? state.assistantContent
             : state.frageStructured
               ? frageAnswerToMarkdown(state.frageStructured)
-              : state.engine3Data
-                ? "[DocBill: Engine 3 – strukturiertes Ergebnis]"
-                : "";
+              : engine3CasesStored
+                ? "[DocBill: Engine 3 – mehrere Vorgänge]"
+                : state.engine3Data
+                  ? "[DocBill: Engine 3 – strukturiertes Ergebnis]"
+                  : state.engine3SegmentationPending
+                    ? "[DocBill: Engine 3 – Zuordnung offen]"
+                    : "";
         if (hasAssistantText || assistantStructured) {
           const savedId = await saveMessage(
             conversationId,
@@ -557,8 +607,17 @@ export function useBackgroundJobQueue({
               analysisTimeSeconds,
               savedId,
               state.frageStructured,
+              state.engine3Cases,
+              state.engine3SegmentationPending ?? undefined,
             );
           }
+        }
+
+        if (state.engine3SegmentationPending && filePayloadsSnapshot.length > 0) {
+          pendingEngine3FilesByConversationRef.current.set(conversationId, filePayloadsSnapshot);
+        }
+        if (!state.engine3SegmentationPending && (engine3CasesStored?.length || state.engine3Data)) {
+          pendingEngine3FilesByConversationRef.current.delete(conversationId);
         }
 
         const preview =
@@ -566,7 +625,9 @@ export function useBackgroundJobQueue({
           state.frageStructured?.kurzantwort.trim().slice(0, 160) ||
           (state.invoiceData ? "Rechnungsprüfung abgeschlossen" : "") ||
           (state.serviceBillingData ? "Leistungsvorschläge erstellt" : "") ||
-          (state.engine3Data ? "Engine 3 abgeschlossen" : "");
+          (engine3CasesStored ? "Engine 3: mehrere Vorgänge" : "") ||
+          (state.engine3Data ? "Engine 3 abgeschlossen" : "") ||
+          (state.engine3SegmentationPending ? "Engine 3: Zuordnung offen" : "");
 
         const sseFailed = assistantContentHasSseError(state.assistantContent);
         const hasDeliverable = sseAccumStateHasDeliverable(state);
@@ -614,7 +675,7 @@ export function useBackgroundJobQueue({
               ? "invoice"
               : state.serviceBillingData
                 ? "service"
-                : state.engine3Data
+                : state.engine3Data || engine3CasesStored?.length
                   ? "engine3"
                   : effectiveEngine === "direct"
                     ? "direct"
@@ -939,6 +1000,75 @@ export function useBackgroundJobQueue({
 
   const activeRunInfo = activeConversationId ? runStates[activeConversationId] : undefined;
 
+  const resumeEngine3WithCaseGroups = useCallback(
+    async (conversationId: string, caseGroups: number[][]) => {
+      if (!user) {
+        toast({ title: "Anmeldung nötig", description: "Bitte melden Sie sich an.", variant: "destructive" });
+        return;
+      }
+      if (hasBlockingJobForConversation(conversationId)) {
+        toast({
+          title: "Bitte warten",
+          description: "In diesem Gespräch läuft bereits eine Analyse oder eine steht in der Warteschlange.",
+        });
+        return;
+      }
+      const files = pendingEngine3FilesByConversationRef.current.get(conversationId);
+      if (!files?.length) {
+        toast({
+          title: "Dateien nicht mehr verfügbar",
+          description: "Bitte die PDFs erneut anhängen und eine neue Analyse starten.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!validateE3CaseGroups(files.length, caseGroups)) {
+        toast({
+          title: "Ungültige Zuordnung",
+          description: "Jede Datei muss genau einem Vorgang zugeordnet sein.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { data: maxRow } = await supabase
+        .from("background_jobs")
+        .select("sort_order")
+        .eq("user_id", user.id)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const sortCursor = ((maxRow?.sort_order as number | undefined) ?? 0) + 1;
+
+      const { data: jobRow, error: insErr } = await supabase
+        .from("background_jobs")
+        .insert({
+          user_id: user.id,
+          conversation_id: conversationId,
+          status: "queued",
+          sort_order: sortCursor,
+          payload: {
+            fileNames: files.map((f) => f.name),
+            engine3CaseGroups: caseGroups,
+          } as unknown as Record<string, unknown>,
+        })
+        .select()
+        .single();
+
+      if (insErr || !jobRow) {
+        console.error(insErr);
+        toast({ title: "Fehler", description: "Aufgabe konnte nicht eingereiht werden.", variant: "destructive" });
+        return;
+      }
+
+      const jobId = jobRow.id as string;
+      pendingFilePayloadsRef.current.set(jobId, files);
+      await fetchJobs();
+      void drainQueue();
+    },
+    [user, toast, hasBlockingJobForConversation, fetchJobs, drainQueue],
+  );
+
   const mergeMessagesWithLiveStream = useCallback(
     async (conversationId: string): Promise<ChatMessage[]> => {
       const db = await loadMessages(conversationId);
@@ -950,6 +1080,8 @@ export function useBackgroundJobQueue({
           !live.invoiceResult &&
           !live.serviceBillingResult &&
           !live.engine3Result &&
+          !live.engine3Cases?.length &&
+          !live.engine3SegmentationProposal &&
           !live.frageAnswer)
       ) {
         return base;
@@ -962,6 +1094,8 @@ export function useBackgroundJobQueue({
         invoiceResult: live.invoiceResult,
         serviceBillingResult: live.serviceBillingResult,
         engine3Result: live.engine3Result,
+        engine3Cases: live.engine3Cases,
+        engine3SegmentationProposal: live.engine3SegmentationProposal,
         analysisTimeSeconds: live.analysisTimeSeconds,
         frageAnswer: live.frageAnswer,
         kurzantwortenVorschlagStatus:
@@ -985,5 +1119,6 @@ export function useBackgroundJobQueue({
     stopBackgroundForActiveConversation,
     cancelQueuedJob,
     mergeMessagesWithLiveStream,
+    resumeEngine3WithCaseGroups,
   };
 }

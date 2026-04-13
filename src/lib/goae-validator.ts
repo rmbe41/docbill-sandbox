@@ -82,6 +82,27 @@ export function calculateAmount(ziffer: string, faktor: number): number | null {
   return round2(z.punkte * PUNKTWERT * faktor);
 }
 
+/** Mindest- und Höchstfaktor nach Katalog (ohne Ziffer: 1,0–3,5). */
+export function goaeFaktorLimits(ziffer: string): { min: number; max: number } {
+  const z = goaeByZiffer.get(ziffer);
+  if (!z) return { min: 1, max: 3.5 };
+  return { min: 1, max: z.hoechstfaktor };
+}
+
+/**
+ * Betrag aus Katalog (Punkte × Punktwert × Faktor), sonst proportional zum Ausgangswert.
+ */
+export function calculateAmountOrScaled(
+  ziffer: string,
+  faktor: number,
+  base: { betrag: number; faktor: number },
+): number {
+  const calc = calculateAmount(ziffer, faktor);
+  if (calc != null) return calc;
+  if (base.faktor <= 0) return round2(base.betrag);
+  return round2((base.betrag / base.faktor) * faktor);
+}
+
 /**
  * Tries to parse GOÄ positions from the AI response text.
  * Looks for table rows with GOÄ numbers, factors, and amounts.

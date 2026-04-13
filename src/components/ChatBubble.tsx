@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
@@ -13,6 +13,7 @@ import InvoiceResult, {
 } from "@/components/InvoiceResult";
 import ServiceBillingResult, { type ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import Engine3Result, { type Engine3ResultData } from "@/components/Engine3Result";
+import { BulkReviewQueue, type BulkReviewCase } from "@/components/BulkReviewQueue";
 import FileOverlay from "@/components/FileOverlay";
 import { useFeedback, type RlFeedbackContext } from "@/hooks/useFeedback";
 import { useToast } from "@/hooks/use-toast";
@@ -28,9 +29,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import type { MessageStructuredContentV1 } from "@/lib/messageStructuredContent";
+import type {
+  Engine3CaseStored,
+  Engine3SegmentationProposalStored,
+  MessageStructuredContentV1,
+} from "@/lib/messageStructuredContent";
 import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
-import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
+import { frageAnswerSuggestsExportFinalize } from "@/lib/frageAnswerStructured";
 
 export type ChatMessage = {
   id: string;
@@ -40,13 +45,17 @@ export type ChatMessage = {
   invoiceResult?: InvoiceResultData;
   serviceBillingResult?: ServiceBillingResultData;
   engine3Result?: Engine3ResultData;
+  engine3Cases?: Engine3CaseStored[];
+  engine3SegmentationProposal?: Engine3SegmentationProposalStored;
   analysisTimeSeconds?: number;
   frageAnswer?: FrageAnswerStructured;
   suggestionDecisions?: {
     invoice?: Record<string, string>;
     service?: Record<string, string>;
+    engine3?: Record<string, string>;
   };
   kurzantwortenVorschlagStatus?: Record<string, "accepted" | "rejected">;
+  engine3FaktorOverrides?: Record<string, number>;
 };
 
 type ChatBubbleProps = {
@@ -64,6 +73,8 @@ type ChatBubbleProps = {
   feedbackPriorMessages?: { role: "user" | "assistant"; content: string }[];
   /** Kurzantworten-Vorschlag in den Composer übernehmen (Direktmodus). */
   onKurzantwortVorschlagComposer?: (text: string) => void;
+  /** Fortsetzung nach engine3_segmentation_pending (Gruppen von Datei-Indizes). */
+  onResumeEngine3WithCaseGroups?: (conversationId: string, caseGroups: number[][]) => void;
 };
 
 const MAX_RL_MSG_CHARS = 4000;
@@ -77,12 +88,14 @@ function buildRlFeedbackContext(
     message.invoiceResult != null ||
     message.serviceBillingResult != null ||
     message.engine3Result != null ||
+    (message.engine3Cases != null && message.engine3Cases.length > 0) ||
     message.frageAnswer != null;
   const structured_snapshot = hasStructured
     ? {
         ...(message.invoiceResult ? { invoiceResult: message.invoiceResult } : {}),
         ...(message.serviceBillingResult ? { serviceBillingResult: message.serviceBillingResult } : {}),
         ...(message.engine3Result ? { engine3Result: message.engine3Result } : {}),
+        ...(message.engine3Cases?.length ? { engine3Cases: message.engine3Cases } : {}),
         ...(message.frageAnswer ? { frageAnswer: message.frageAnswer } : {}),
       }
     : undefined;
@@ -117,7 +130,9 @@ function assistantMessageFeedbackBody(m: ChatMessage): string {
   if (m.frageAnswer) return "[DocBill: Frage-Antwort strukturiert]";
   if (m.invoiceResult) return "[DocBill: Rechnungsprüfung strukturiert]";
   if (m.serviceBillingResult) return "[DocBill: Gebühren-/Leistungsprüfung strukturiert]";
-  if (m.engine3Result) return "[DocBill: Engine 3 strukturiert]";
+  if (m.engine3Result || (m.engine3Cases != null && m.engine3Cases.length > 0)) {
+    return "[DocBill: Engine 3 strukturiert]";
+  }
   return "";
 }
 
@@ -196,7 +211,6 @@ function FrageStructuredReply({
   ) => Promise<boolean>;
   onVorschlagComposer?: (text: string) => void;
 }) {
-  const quellen = filterExplicitQuellenEntries(data.quellen?.filter(Boolean) ?? []);
   const [optimisticVorschlag, setOptimisticVorschlag] = useState<
     Record<string, "accepted" | "rejected">
   >({});
@@ -216,43 +230,62 @@ function FrageStructuredReply({
   return (
     <div className="space-y-4 not-prose text-foreground">
       <section className="rounded-lg border border-border/80 bg-muted/30 px-4 py-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-          Zusammenfassung
-        </h3>
         <div className="markdown-output prose prose-sm max-w-none text-sm leading-relaxed">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={frageSectionMarkdownComponents}>
             {data.kurzantwort}
           </ReactMarkdown>
         </div>
       </section>
-      <section>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-          Erläuterung
-        </h3>
-        <div className="markdown-output prose prose-sm max-w-none text-sm leading-relaxed">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={frageSectionMarkdownComponents}>
-            {data.erlaeuterung}
-          </ReactMarkdown>
-        </div>
-      </section>
-      {data.grenzfaelle_hinweise?.trim() ? (
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-            Grenzfälle und Hinweise
+      {onVorschlagComposer && frageAnswerSuggestsExportFinalize(data) ? (
+        <section className="pt-1 border-t border-border/30 space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Datenexport
           </h3>
-          <div className="markdown-output prose prose-sm max-w-none text-sm leading-relaxed">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={frageSectionMarkdownComponents}>
-              {data.grenzfaelle_hinweise}
-            </ReactMarkdown>
+          <p className="text-xs text-muted-foreground">
+            Soll die Antwort als exportfertige Liste (PDF, TXT, PAD/DAT) finalisiert werden?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() =>
+                onVorschlagComposer(
+                  "Bitte die in deiner letzten Antwort genannten GOÄ-Positionen als exportfertige Tabelle (TSV/TXT) mit Nr, Ziffer, Bezeichnung, Faktor, Betrag, Quelle ausgeben. Danach kurz erklären, welche Angaben für PDF und PAD/DAT noch fehlen.",
+                )
+              }
+            >
+              TXT vorbereiten
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() =>
+                onVorschlagComposer(
+                  "Bitte die genannten GOÄ-Positionen so strukturieren, dass ich daraus eine Rechnungs-PDF (Kopfzeile, Patient optional, Summen) erzeugen kann. Liste fehlende Stammdaten auf.",
+                )
+              }
+            >
+              PDF vorbereiten
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() =>
+                onVorschlagComposer(
+                  "Bitte die genannten Positionen im PAD/DAT-Stil (Referenz PV880441-1.DAT: feste Zeilenlänge, PAD-DATEN-Kopf, Windows-1252) als Entwurf beschreiben oder Zeilen generieren.",
+                )
+              }
+            >
+              PAD/DAT
+            </Button>
           </div>
         </section>
-      ) : null}
-      {quellen.length > 0 ? (
-        <footer className="mt-1 pt-3 border-t border-border/30">
-          <p className="text-xs leading-relaxed text-muted-foreground break-words">
-            <span className="font-bold">Quellen:</span> {quellen.join(", ")}
-          </p>
-        </footer>
       ) : null}
       {data.vorschlaege && data.vorschlaege.length > 0 ? (
         <section className="pt-1 border-t border-border/30 space-y-2">
@@ -335,6 +368,7 @@ const ChatBubble = ({
   feedbackSessionMeta,
   feedbackPriorMessages,
   onKurzantwortVorschlagComposer,
+  onResumeEngine3WithCaseGroups,
 }: ChatBubbleProps) => {
   const isUser = message.role === "user";
   const { user: authUser } = useAuth();
@@ -349,6 +383,7 @@ const ChatBubble = ({
   const [feedbackCelebration, setFeedbackCelebration] = useState(false);
   const [inquiryOpen, setInquiryOpen] = useState(false);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
+  const [selectedEngine3CaseId, setSelectedEngine3CaseId] = useState<string | null>(null);
   const { toast } = useToast();
   const { sendFeedback, isExpertMode } = useFeedback();
   const clearFeedbackCelebration = useCallback(() => setFeedbackCelebration(false), []);
@@ -533,11 +568,51 @@ const ChatBubble = ({
     }
   }, [feedbackState, conversationId, message.id, submitFeedback]);
 
+  const engine3BulkCases: BulkReviewCase[] = useMemo(() => {
+    const list = message.engine3Cases;
+    if (!list?.length) return [];
+    return list.map((c) => {
+      let issues = 0;
+      for (const p of c.result.positionen) {
+        if (p.status === "warnung" || p.status === "fehler") issues += 1;
+      }
+      for (const p of c.result.optimierungen ?? []) {
+        if (p.status === "warnung" || p.status === "fehler") issues += 1;
+      }
+      const count =
+        c.result.positionen.length + (c.result.optimierungen?.length ?? 0);
+      return {
+        id: c.caseId,
+        title: c.title,
+        count,
+        issueCount: issues,
+      };
+    });
+  }, [message.engine3Cases]);
+
+  const activeMultiEngine3Case =
+    message.engine3Cases && message.engine3Cases.length > 1
+      ? message.engine3Cases.find((c) => c.caseId === selectedEngine3CaseId) ?? message.engine3Cases[0]!
+      : null;
+
+  useEffect(() => {
+    const list = message.engine3Cases;
+    if (list && list.length > 1) {
+      setSelectedEngine3CaseId((prev) =>
+        prev && list.some((c) => c.caseId === prev) ? prev : list[0].caseId,
+      );
+    } else {
+      setSelectedEngine3CaseId(null);
+    }
+  }, [message.engine3Cases]);
+
   const hasAssistantSubstance =
     Boolean(message.content?.trim()) ||
     message.invoiceResult != null ||
     message.serviceBillingResult != null ||
     message.engine3Result != null ||
+    (message.engine3Cases != null && message.engine3Cases.length > 0) ||
+    message.engine3SegmentationProposal != null ||
     message.frageAnswer != null;
   const showFeedback = !isUser && conversationId && message.id && hasAssistantSubstance;
 
@@ -724,7 +799,91 @@ const ChatBubble = ({
                 }
               />
             )}
-            {message.engine3Result && <Engine3Result data={message.engine3Result} />}
+            {message.engine3SegmentationProposal &&
+              conversationId &&
+              onResumeEngine3WithCaseGroups && (
+                <div className="rounded-lg border border-amber-200/80 bg-amber-50/50 dark:border-amber-900/40 dark:bg-amber-950/20 px-3 py-3 space-y-3 not-prose">
+                  <p className="text-sm font-medium text-foreground">
+                    Mehrere PDFs: bitte Vorgänge bestätigen
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Konfidenz {(message.engine3SegmentationProposal.confidence * 100).toFixed(0)} %. Sie können den
+                    Vorschlag übernehmen oder jede Datei einzeln prüfen lassen.
+                  </p>
+                  <ul className="text-xs space-y-1 list-disc pl-4">
+                    {message.engine3SegmentationProposal.fileNames.map((n, i) => (
+                      <li key={i}>{n}</li>
+                    ))}
+                  </ul>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() =>
+                        onResumeEngine3WithCaseGroups(
+                          conversationId,
+                          message.engine3SegmentationProposal!.cases.map((c) => c.fileIndices),
+                        )
+                      }
+                    >
+                      Vorschlag übernehmen
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        onResumeEngine3WithCaseGroups(
+                          conversationId,
+                          message.engine3SegmentationProposal!.fileNames.map((_, i) => [i]),
+                        )
+                      }
+                    >
+                      Jede Datei einzeln
+                    </Button>
+                  </div>
+                </div>
+              )}
+            {message.engine3Cases && message.engine3Cases.length > 1 && activeMultiEngine3Case && (
+              <div className="space-y-3 not-prose">
+                <BulkReviewQueue
+                  cases={engine3BulkCases}
+                  selectedId={selectedEngine3CaseId}
+                  onSelect={setSelectedEngine3CaseId}
+                />
+                <Engine3Result
+                  key={activeMultiEngine3Case.caseId}
+                  data={activeMultiEngine3Case.result}
+                  messageId={message.id}
+                  updateMessageStructuredContent={updateMessageStructuredContent}
+                  onComposerPrompt={onKurzantwortVorschlagComposer}
+                  initialEngine3Decisions={message.suggestionDecisions?.engine3 ?? null}
+                  initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
+                  decisionKeyPrefix={`${activeMultiEngine3Case.caseId}:`}
+                />
+              </div>
+            )}
+            {message.engine3Cases?.length === 1 && (
+              <Engine3Result
+                data={message.engine3Cases[0].result}
+                messageId={message.id}
+                updateMessageStructuredContent={updateMessageStructuredContent}
+                onComposerPrompt={onKurzantwortVorschlagComposer}
+                initialEngine3Decisions={message.suggestionDecisions?.engine3 ?? null}
+                initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
+                decisionKeyPrefix={`${message.engine3Cases[0].caseId}:`}
+              />
+            )}
+            {message.engine3Result && !message.engine3Cases?.length && (
+              <Engine3Result
+                data={message.engine3Result}
+                messageId={message.id}
+                updateMessageStructuredContent={updateMessageStructuredContent}
+                onComposerPrompt={onKurzantwortVorschlagComposer}
+                initialEngine3Decisions={message.suggestionDecisions?.engine3 ?? null}
+                initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
+              />
+            )}
             {message.frageAnswer && (
               <FrageStructuredReply
                 data={message.frageAnswer}
@@ -734,45 +893,44 @@ const ChatBubble = ({
                 onVorschlagComposer={onKurzantwortVorschlagComposer}
               />
             )}
-            {(message.content ||
-              (message.invoiceResult && !message.content) ||
-              (message.serviceBillingResult && !message.content) ||
-              (message.engine3Result && !message.content)) &&
-              !message.frageAnswer &&
-              (message.invoiceResult && message.content ? (
-                <Collapsible defaultOpen={false} className="group not-prose border-t border-border/30 mt-2 pt-1">
-                  <CollapsibleTrigger className="flex w-full items-center gap-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground py-2 rounded-md -mx-1 px-1">
-                    <ChevronDown className="w-4 h-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-                    Ausführliche Begründung anzeigen (z. B. § 5 GOÄ, Audit-Text)
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="markdown-output prose prose-sm max-w-none pb-2 border-border/20">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                        {message.content}
-                      </ReactMarkdown>
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              ) : (
+            {(() => {
+              if (message.frageAnswer) return null;
+              const proseTrim = message.content?.trim() ?? "";
+              if (!proseTrim) return null;
+
+              const hasStructuredCard = Boolean(
+                message.invoiceResult ||
+                  message.serviceBillingResult ||
+                  message.engine3Result ||
+                  (message.engine3Cases != null && message.engine3Cases.length > 0),
+              );
+
+              if (hasStructuredCard) {
+                return (
+                  <Collapsible defaultOpen={false} className="group not-prose border-t border-border/30 mt-2 pt-1">
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground py-2 rounded-md -mx-1 px-1">
+                      <ChevronDown className="w-4 h-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                      Text zur Antwort anzeigen
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="markdown-output prose prose-sm max-w-none pb-2 border-border/20">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                          {message.content}
+                        </ReactMarkdown>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                );
+              }
+
+              return (
                 <div className="markdown-output prose prose-sm max-w-none pt-1">
-                  {(message.invoiceResult || message.serviceBillingResult || message.engine3Result) &&
-                    message.content && (
-                    <p className="text-xs font-medium text-muted-foreground not-prose mb-2">
-                      Detaillierte Erklärung
-                    </p>
-                  )}
-                  {message.content ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                      {message.content}
-                    </ReactMarkdown>
-                  ) : (
-                    <p className="text-muted-foreground text-sm not-prose">
-                      Die detaillierte Erklärung konnte nicht geladen werden (z. B. Timeout). Die Prüfung
-                      oben ist vollständig – bei Bedarf die Anfrage erneut senden.
-                    </p>
-                  )}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {message.content}
+                  </ReactMarkdown>
                 </div>
-              ))}
+              );
+            })()}
           </div>
         )}
         </div>

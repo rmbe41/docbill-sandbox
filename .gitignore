@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .claude/
+
+# Kopie aus benchmarks/ vor deploy (siehe package.json supabase:deploy)
+supabase/functions/benchmark-run/catalog-v2-exclusions.generated.json

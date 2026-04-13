@@ -3,6 +3,8 @@ import {
   stripDuplicateBegruendungPrefix,
   isFaktorUeberSchwelle,
   formatBegruendungFuerPdf,
+  buildSteigerungsbegruendungVorschlag,
+  buildHoechstfaktorHinweisText,
 } from "@/lib/format-goae-hinweis";
 
 describe("format-goae-hinweis", () => {
@@ -26,5 +28,25 @@ describe("format-goae-hinweis", () => {
     expect(formatBegruendungFuerPdf("1", 2.5, "Begründung: schon da")).toBe(
       "Begründung: schon da",
     );
+  });
+
+  it("buildSteigerungsbegruendungVorschlag bleibt neutral ohne Katalog-Zitat", () => {
+    const t = buildSteigerungsbegruendungVorschlag({
+      ziffer: "6",
+      faktor: 2.4,
+      betragFormatted: "13,99 €",
+    });
+    expect(t).toContain("GOÄ 6");
+    expect(t).toContain("2,4");
+    expect(t).toContain("Regelhöchstsatz");
+    expect(t).toContain("GOÄ-Ziffer 6");
+    expect(t).not.toContain("Organsysteme");
+    expect(t).toContain("Patientenakte");
+  });
+
+  it("buildHoechstfaktorHinweisText verweist auf Honorarvereinbarung", () => {
+    const t = buildHoechstfaktorHinweisText("1", 4);
+    expect(t).toContain("Höchstfaktor");
+    expect(t).toContain("Honorarvereinbarung");
   });
 });

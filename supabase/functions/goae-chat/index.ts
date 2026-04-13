@@ -45,16 +45,13 @@ import {
 const FRAGE_MODUS_CORE = `
 ## Modus: GOÄ-Frage und Einordnung (kein Rechnungsvorschlag)
 
-**Pflicht:** In Aufzählungen **niemals** die Wörter „Korrekt:“ oder „Zusatz:“ (auch nicht fett) als Zeilenanfang – das ist veraltet und unzulässig.
+**Pflicht:** In Aufzählungen **niemals** die Wörter „Korrekt:“ oder „Zusatz:“ (auch nicht fett) als Zeilenanfang.
 
 Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** Rechnung, keinen „Rechnungsvorschlag“ und keine tabellarische Positionsliste wie bei einer Honorarabrechnung.
 
 ### Inhaltliche Logik
-- **Kurzantwort:** **Max. 1–2 sehr kurze Sätze**, eine Kernaussage. **Keine** Aufzählungen oder Nummerierung der gesamten Kompetenzliste hier.
-- **Erläuterung:** **Standard ist eine Markdown-Liste** mit \`- \` (Minuszeichen, Leerzeichen). Pro Punkt optional **inhaltliches** fettes Lead-in (z. B. \`- **GOÄ-Konformität:** …\`). **Nicht** die generischen Typ-Labels **Korrekt:** oder **Zusatz:** vor jedem Bullet. **Pro Bullet vorzugsweise ein Satz**, höchstens zwei kurze Sätze. **Keine** langen Fließabsätze und **keine** „1. … 2. …“ als durchlaufende Prosa. Bei Meta-Fragen („Was kannst du?“, „Welche Workflows?“): **nur Bullets**, **ohne** Einleitung wie „Meine typischen Workflows umfassen dabei“.
-- **Quellen:** **Nur**, wenn du Inhalte aus dem **gelieferten Kontext** für **konkrete** Fakten nutzt – dann **jede** verwendete Fundstelle **explizit** und **konkret** (GOÄ § aus Kontext, GOÄ-Ziffer/Bezeichnung, DocBill-Regelwerk-Abschnitt, Admin-Dateiname). **Mehrere** Bezüge → **alle** nennen. Keine vagen Formulierungen wie nur „nach GOÄ“ ohne §/Ziffer/Datei. **Ohne** solche Bezüge: **keinen** Quellen-Abschnitt (bei JSON: \`quellen: []\`) – **nicht** erwähnen, dass keine Quelle genutzt wurde; **keine** erfundenen Paragraphen.
-- **Grenzfälle:** Unsicherheiten, fehlender Kontext oder wann Fachrat nötig ist – im vorgesehenen Ausgabefeld (siehe Formatregeln unten). Bei mehreren Hinweisen: Listenzeilen mit \`- \` wie bei der Erläuterung; bei einem einzelnen Punkt reicht ein kurzer Satz.
-- **In** \`erlaeuterung\` **und** \`grenzfaelle_hinweise\` **keine eigenen** \`###\` **Überschriften** (Abschnittsüberschriften liefert die Oberfläche).
+- **Eine** kompakte Markdown-Antwort im vorgesehenen Ausgabeformat (siehe unten): Kernaussage zuerst, optional wenige \`- \` Bullets (**höchstens 6**), kein Gruß, keine Meta-Einleitung.
+- **Quellen:** Nur bei **konkreten** Fundstellen im **gelieferten** Kontext (GOÄ, Katalog, Admin-Dateiname): **eine** Zeile \`*Quellen:* …\` am Ende des Textes — sonst weglassen. Keine vagen „nach GOÄ“ ohne Bezug; keine erfundenen Paragraphen; nicht erwähnen, dass keine Quelle genutzt wurde.
 
 ### Sprache und Darstellung
 - Auf **Deutsch**.
@@ -119,9 +116,7 @@ Der Nutzer stellt eine **informativ erklärende** Frage. Du lieferst **keine** R
 
 **Eingeschränkter Kontext:** Es gibt **keinen** eingebetteten GOÄ-Katalog, keine GOÄ-Paragraphen-/Regeltexte aus DocBill und **keinen** KI-Kontext aus Admin-Dateien. Nutze **allgemeines** Wissen **zurückhaltend**; **keine** erfundenen GOÄ-Ziffern, Beträge oder Paragraphen. Unsicherheit und fehlende belastbare Grundlagen klar benennen.
 
-- **Kurzantwort:** Wie im Format unten.
-- **Erläuterung:** Markdown-Liste mit \`- \`.
-- **Quellen:** Nur echte, verifizierbare Hinweise – ohne DocBill-Kontext in der Regel \`quellen: []\` bzw. weglassen.
+- **Antwort:** Wie im Format unten — **eine** knappe Markdown-Einheit, ohne mehrteilige JSON-Felder.
 
 ### Sprache und Darstellung
 - Auf **Deutsch**.
@@ -406,7 +401,7 @@ async function handleChatMode(
       // #region agent log
       {
         const sig = adminSignalsLage648Rule(adminContext);
-        const text = `${structured.kurzantwort}\n${structured.erlaeuterung}`.toLowerCase();
+        const text = structured.kurzantwort.toLowerCase();
         const modelPositivSelbst =
           /\b(selbstständige|selbstständig)\s+leistung\b/.test(text) ||
           /\bkann\s+eine\s+selbstständige\b/.test(text);
@@ -556,6 +551,7 @@ serve(async (req) => {
       guided_phase,
       kurzantworten: kurzantwortenRaw,
       kontext_wissen: kontext_wissen_raw,
+      engine3_case_groups,
     } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
@@ -946,6 +942,22 @@ serve(async (req) => {
 
     const useEngine3 = engine_type === "engine3" || engine_type === "engine3_1";
 
+    const engine3CaseGroupsParsed = (() => {
+      if (!Array.isArray(engine3_case_groups)) return undefined;
+      const out: number[][] = [];
+      for (const g of engine3_case_groups) {
+        if (!Array.isArray(g)) return undefined;
+        const row: number[] = [];
+        for (const x of g) {
+          if (typeof x !== "number" || !Number.isInteger(x)) return undefined;
+          row.push(x);
+        }
+        if (row.length === 0) return undefined;
+        out.push(row);
+      }
+      return out.length > 0 ? out : undefined;
+    })();
+
     if (useEngine3 && intent === "leistungen_abrechnen") {
       response = await runEngine3AsStream(
         {
@@ -973,6 +985,7 @@ serve(async (req) => {
           lastResult,
           lastEngine3Result: last_engine3_result,
           kontextWissenEnabled,
+          ...(engine3CaseGroupsParsed ? { engine3CaseGroups: engine3CaseGroupsParsed } : {}),
         },
         OPENROUTER_API_KEY,
       );

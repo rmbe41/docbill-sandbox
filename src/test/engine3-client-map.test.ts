@@ -83,6 +83,28 @@ describe("toClientEngine3Result", () => {
           status: "vorschlag",
         },
       ],
+      topVorschlaege: [
+        {
+          nr: 2,
+          ziffer: "750",
+          bezeichnung: "Zuschlag",
+          faktor: 1,
+          betrag: 5,
+          status: "vorschlag",
+          rang: 1,
+          empfohlen: true,
+        },
+        {
+          nr: 1,
+          ziffer: "1",
+          bezeichnung: "Beratung",
+          faktor: 2.3,
+          betrag: 12.34,
+          status: "korrekt",
+          quelleText: "Zeile 1 Rechnung",
+          rang: 2,
+        },
+      ],
       zusammenfassung: {
         geschaetzteSumme: 17.34,
         anzahlPositionen: 1,

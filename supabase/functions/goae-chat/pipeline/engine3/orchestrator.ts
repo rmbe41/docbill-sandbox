@@ -17,7 +17,7 @@ import {
   GOAE_SONDERBEREICHE_KOMPAKT,
 } from "../../goae-regeln.ts";
 import { buildMappingCatalogMarkdown } from "../../goae-catalog-json.ts";
-import { parseDokumentWithRetry, parseBehandlungsbericht } from "../dokument-parser.ts";
+import { parseBehandlungsbericht } from "../dokument-parser.ts";
 import { analysiereMedizinisch } from "../medizinisches-nlp.ts";
 import { callLlm, extractJson, pickExtractionModel } from "../llm-client.ts";
 import { buildFallbackModels } from "../../model-resolver.ts";
@@ -26,12 +26,21 @@ import { buildEngine3AssistantMarkdown } from "./markdown-narrative.ts";
 import {
   applyEngine3AusschlussPass,
   applyRecalcAndConsistency,
+  ensureWarnungFehlerHaveUIFacingRationale,
   enforceEngine3Quellenbezug,
   parseEngine3ResultJson,
   toClientEngine3Result,
   type Engine3Modus,
   type Engine3ResultData,
 } from "./validate.ts";
+import {
+  caseUsesMultiDocumentInvoiceReview,
+  segmentUploadsForRechnungPruefung,
+  validateEngine3CaseGroups,
+  type UploadSegmentationCase,
+  type UploadSegmentationFileRoles,
+} from "./upload-segmentation.ts";
+import { Engine3CaseParseError, runRechnungPruefungCasePipeline } from "./run-rechnung-case.ts";
 
 class Engine3ParseError extends Error {
   readonly parseDebug: Record<string, unknown>;
@@ -65,6 +74,8 @@ export interface Engine3StreamInput {
   lastEngine3Result?: unknown;
   /** Default an: GOÄ-Katalog, Regeltexte und Admin-RAG in LLM-Prompts */
   kontextWissenEnabled?: boolean;
+  /** Nach Segmentierungs-Rückfrage: Gruppen von Datei-Indizes (0-basiert), Partition der Uploads. */
+  engine3CaseGroups?: number[][];
 }
 
 function extractAdminFilenamesFromBlock(adminBlock: string): string[] {
@@ -115,76 +126,6 @@ function buildEngine3SystemQuellen(input: Engine3StreamInput, data: Engine3Resul
   return lines;
 }
 
-function rechnungPruefungPrompt(
-  parsedJson: string,
-  analyseJson: string,
-  katalogMd: string,
-  adminContext: string,
-  extraRules: string,
-): string {
-  return `Du bist GOÄ-DocBill Engine 3. Modus: **Rechnungsprüfung**.
-
-Du erhältst extrahierte Rechnungsdaten (JSON), optional **klinischeDokumentation** (Patientenakte/Befund/Arztbrief), und eine medizinische Kurzanalyse (JSON). Du MUSST:
-- nur Ziffern und Punktwerte verwenden, die im GOÄ-Katalogauszug (Markdown) vorkommen
-- fehlende Information klar benennen, nichts erfinden
-- Positionen mit Status klassifizieren: korrekt | warnung | fehler
-- konkrete Hinweise (fehler/warnung/info) mit kurzer Begründung
-- sinnvolle Optimierungs-Vorschläge (regelkonform) als eigene Positionen mit status "vorschlag", falls zutreffend
-- wenn **klinischeDokumentation** nicht leer ist: daraus ableiten, welche Leistungen **im Rahmen des Katalogs und Kontexts** abrechenbar wären; mit den **tatsächlichen Rechnungspositionen** abgleichen; fehlende oder zu hohe/niedrige Abrechnung sowie Diskrepanzen in **hinweise** und ggf. **optimierungen** benennen (keine erfundenen Leistungen)
-- jede Position **quelleText**: kurzer Bezug zur Rechnungszeile, zur Positionsnummer im Rechnungstext oder zu einem passenden Ausschnitt aus **klinischeDokumentation** (Pflichtfeld, nicht leer)
-
-**Pflicht-Checkliste**
-- Ziffern/Bezeichnungen/Punkte: nur aus dem Katalogauszug; fehlende Ziffer → in **hinweise**, nichts erfinden.
-- **Ausschlüsse:** Jede Kombination von Positionsziffern anhand der **Ausschl:**-Angaben der Katalogzeilen prüfen; Konflikt → **hinweise** (schwere fehler/warnung) mit **regelReferenz** „Ausschlussziffern GOÄ-Katalog“.
-- **Steigerung:** Schwellen-/Höchstfaktor aus Katalogzeile; über Schwelle → **begruendung** mit konkretem Sachbezug (Dauer Min., Erschwernis), § 5 Abs. 2 GOÄ; keine Leerformeln (siehe Regelblock Begründungen).
-- **Sonderbereiche** (Leichenschau, Zuschläge, Akupunktur): nur, wenn die Ziffer im Auszug steht; sonst Lücke in **hinweise**.
-- **BÄK / Auslegung / GOÄ-Kommentar:** Nur mit konkretem Nachweis im **ADMIN-KONTEXT** (Dateiname); jede inhaltlich verwendete Admin-Datei **mindestens einmal** in **adminQuellen** (kurzer Dateiname) aufführen. Ohne Treffer: Unsicherheit in **hinweise**, nichts erfinden.
-- **Hinweise:** Behauptet ein Eintrag eine konkrete Regel oder Auslegung, **muss** **regelReferenz** gesetzt sein (z. B. „GOÄ-Katalogauszug, Ziffer …“ oder „ADMIN-KONTEXT: [Dateiname]“).
-- **Hinweis-Zuordnung:** Betrifft ein Hinweis konkrete Tabellenzeilen, setze **betrifftPositionen** als Array der zugehörigen **nr**-Werte aus **positionen** oder **optimierungen**; bei rein allgemeinen Hinweisen weglassen oder leeres Array.
-
-**System-Nachbearbeitung (verbindlich):** Nach deiner Antwort wendet DocBill **deterministische** Prüfungen an (u. a. Ausschlusspaare, Beträge aus Punkten × Punktwert). Dieses Ergebnis ist **maßgeblich**. Setze **keine** Position auf **korrekt**, wenn der Katalogausschnitt einen Ausschlusszwang zu einer anderen abgerechneten Ziffer zeigt; verwende **fehler**/**warnung** und passende **hinweise**. Widerspricht dein Entwurf dem Katalog, korrigiere ihn vor der Ausgabe.
-
-Antworte NUR mit JSON im folgenden Schema:
-{
-  "klinischerKontext": "2–4 Sätze, nur aus den Eingabedaten",
-  "fachgebiet": "string",
-  "positionen": [
-    {
-      "nr": 1,
-      "ziffer": "…",
-      "bezeichnung": "…",
-      "faktor": 2.3,
-      "betrag": 0.0,
-      "status": "korrekt|warnung|fehler",
-      "anmerkung": "optional",
-      "quelleText": "Pflicht: Bezug zur Rechnungszeile / Position im Text / klinischeDokumentation",
-      "begruendung": "optional bei hohem Faktor"
-    }
-  ],
-  "hinweise": [
-    { "schwere": "fehler|warnung|info", "titel": "kurz", "detail": "1–3 Sätze", "regelReferenz": "optional", "betrifftPositionen": [1, 2] }
-  ],
-  "optimierungen": [],
-  "adminQuellen": []
-}
-
-Leeres optimierungen-Array, wenn nichts Sinnvolles.
-
-Eingabe Rechnung (JSON):
-${parsedJson}
-
-Eingabe medizinische Analyse (JSON):
-${analyseJson}
-
-${extraRules ? `## ZUSÄTZLICHE REGELN:\n${extraRules}\n` : ""}
-
-${adminContext ? `${adminContext}\n` : ""}
-
-## GOÄ-KATALOG (Auszug)
-${katalogMd}
-`;
-}
-
 function leistungenPrompt(
   parsedJson: string,
   analyseJson: string,
@@ -205,6 +146,7 @@ Markiere unsichere Zuordnungen mit status "warnung" und erkläre in anmerkung.
 - **Sonderfälle** ( Leichenschau, Not-/Zeitzuschläge, Akupunktur): nur mit Ziffer im Auszug; sonst **hinweis** auf unvollständigen Kontext.
 - **BÄK / GOÄ-Kommentar:** Nur wenn **ADMIN-KONTEXT** eine belegbare Fundstelle liefert; jede verwendete Admin-Datei in **adminQuellen** nennen. Behauptete Regeln in **hinweise** mit **regelReferenz** belegen („GOÄ-Katalogauszug …“ oder „ADMIN-KONTEXT: …“).
 - **Hinweis-Zuordnung:** **betrifftPositionen**: **nr**-Werte der betroffenen Zeilen aus **positionen**/**optimierungen**; bei allgemeinen Hinweisen weglassen.
+- **Warnung/Fehler bei Positionen:** Hat eine Zeile **status** „warnung“ oder „fehler“, MUSS mindestens **120 Zeichen** erklärender Klartext folgen — entweder in **anmerkung** und/oder **begruendung** ODER in **hinweise** mit **betrifftPositionen** enthält diese **nr** und **detail** mindestens **80 Zeichen**. Formulierungen sollen **direkt in die Akten-/Abrechnungsnotiz übernehmbar** sein (keine leeren Floskeln, keine Platzhalter wie „[…]“).
 
 **System-Nachbearbeitung:** Deterministische Regeln (Ausschlüsse, Betrag aus Punkten) können dein JSON anpassen; das ausgelieferte Ergebnis entspricht diesem **finalen** Stand. Keine vorgeschlagenen Ziffernkombinationen widersprüchlich zum **Ausschl:** im Auszug ausgeben.
 
@@ -251,7 +193,8 @@ Auslegungsbehauptungen (BÄK, GOÄ-Kommentar) nur, wenn sie im **ADMIN-KONTEXT**
 Wenn unsicher: setze status auf warnung und erkläre in anmerkung.
 Erhalte **quelleText** je Position (Rechnungsprüfung und Leistungsmodus); fehlt es, ergänze einen sachlichen Bezug zur Eingabe statt das Feld zu löschen.
 Hinweis: Unmittelbar nach dieser Runde können **systemseitige** Regeln (Ausschlüsse, Betragsrechenregeln) das JSON nochmals anpassen – deine Ausgabe soll bereits mit dem Katalogausschnitt **konsistent** sein.
-Erhalte **betrifftPositionen** an **hinweise**, wo sinnvoll (Array der **nr** der betroffenen Zeilen).`;
+Erhalte **betrifftPositionen** an **hinweise**, wo sinnvoll (Array der **nr** der betroffenen Zeilen).
+**Warnung/Fehler:** Für jede Position mit status **warnung** oder **fehler** verlangt die Ausgabe mindestens **120 Zeichen** Begründung gesamt (Summe aus **anmerkung**, **begruendung** und zugehörigen **hinweise**-**detail** mit passender **betrifftPositionen**). Liefere **konkrete, copy-paste-fähige** Sätze für die Patientendokumentation; fehlt das, ergänze **anmerkung** und/oder einen passenden **hinweis** mit **betrifftPositionen**.`;
 
 async function critiqueRefineIfNeeded(
   apiKey: string,
@@ -315,16 +258,6 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
 
-  const sendProgress = async (step: number, label: string) => {
-    const data = `data: ${JSON.stringify({
-      type: "engine3_progress",
-      step: step + 1,
-      totalSteps: ENGINE3_STEPS.length,
-      label,
-    })}\n\n`;
-    await writer.write(encoder.encode(data));
-  };
-
   const sendError = async (
     message: string,
     code?: string,
@@ -337,31 +270,253 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
   };
 
   (async () => {
+    const sendProgress = async (
+      step: number,
+      label: string,
+      caseMeta?: { caseIndex: number; totalCases: number },
+    ) => {
+      const payload: Record<string, unknown> = {
+        type: "engine3_progress",
+        step: step + 1,
+        totalSteps: ENGINE3_STEPS.length,
+        label:
+          caseMeta && caseMeta.totalCases > 1
+            ? `${label} (Vorgang ${caseMeta.caseIndex} von ${caseMeta.totalCases})`
+            : label,
+      };
+      if (caseMeta && caseMeta.totalCases > 1) {
+        payload.caseIndex = caseMeta.caseIndex;
+        payload.totalCases = caseMeta.totalCases;
+      }
+      await writer.write(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+    };
+
+    const streamMarkdown = async (md: string) => {
+      const chunkSize = 120;
+      for (let i = 0; i < md.length; i += chunkSize) {
+        await writer.write(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: md.slice(i, i + chunkSize) } }],
+            })}\n\n`,
+          ),
+        );
+      }
+    };
+
     try {
       const kontextOk = input.kontextWissenEnabled !== false;
       await sendProgress(0, ENGINE3_STEPS[0].label);
       if (kontextOk) await preflightEngine3KiContext(apiKey);
 
-      await sendProgress(1, ENGINE3_STEPS[1].label);
-      let parsed: ParsedRechnung;
       if (input.modus === "rechnung_pruefung") {
         if (!input.files?.length) {
           throw new Error("Für die Rechnungsprüfung wird eine Datei benötigt.");
         }
-        parsed = await parseDokumentWithRetry(input.files, apiKey, input.model, {
-          multiDocumentInvoiceReview: input.files.length >= 2,
-        });
-      } else {
-        if (input.files?.length) {
-          parsed = await parseBehandlungsbericht(input.files, apiKey, input.model);
-        } else {
-          parsed = {
-            positionen: [],
-            diagnosen: [],
-            rawText: input.userMessage,
-            freitext: input.userMessage,
-          };
+        const allFiles = input.files;
+
+        const multiReviewFor = (indices: number[], rolesFromSeg: UploadSegmentationFileRoles | null) => {
+          if (indices.length < 2) return false;
+          if (rolesFromSeg) return caseUsesMultiDocumentInvoiceReview(indices, rolesFromSeg);
+          return indices.length >= 2;
+        };
+
+        const pickCaseFiles = (indices: number[]) => indices.map((i) => allFiles[i]);
+
+        if (allFiles.length === 1) {
+          await sendProgress(1, ENGINE3_STEPS[1].label);
+          await sendProgress(2, ENGINE3_STEPS[2].label);
+          await sendProgress(3, ENGINE3_STEPS[3].label);
+          const finalData = await runRechnungPruefungCasePipeline({
+            filesCase: allFiles,
+            multiDocumentInvoiceReview: false,
+            userMessage: input.userMessage,
+            model: input.model,
+            extraRules: input.extraRules ?? "",
+            lastResult: input.lastResult,
+            lastEngine3Result: input.lastEngine3Result,
+            kontextWissenEnabled: kontextOk,
+            apiKey,
+            quellenFileCount: 1,
+          });
+          await sendProgress(4, ENGINE3_STEPS[4].label);
+          const clientPayload = toClientEngine3Result(finalData);
+          await writer.write(
+            encoder.encode(`data: ${JSON.stringify({ type: "engine3_result", data: clientPayload })}\n\n`),
+          );
+          await streamMarkdown(buildEngine3AssistantMarkdown(finalData));
+          await writer.write(encoder.encode("data: [DONE]\n\n"));
+          await writer.close();
+          return;
         }
+
+        const validatedGroups = validateEngine3CaseGroups(allFiles.length, input.engine3CaseGroups);
+        let casesForRun: UploadSegmentationCase[];
+        let rolesFromSeg: UploadSegmentationFileRoles | null = null;
+
+        if (validatedGroups) {
+          casesForRun = validatedGroups.map((fileIndices, i) => ({
+            id: `u-${i}`,
+            fileIndices,
+          }));
+        } else {
+          await sendProgress(1, ENGINE3_STEPS[1].label);
+          const seg = await segmentUploadsForRechnungPruefung(allFiles, apiKey, input.model);
+          rolesFromSeg = seg.fileRoles;
+          if (seg.needsUserConfirmation) {
+            const proposal = {
+              fileRoles: seg.fileRoles,
+              cases: seg.cases.map((c) => ({
+                id: c.id,
+                fileIndices: c.fileIndices,
+                title: c.title,
+              })),
+              confidence: seg.confidence,
+              fileNames: allFiles.map((f) => f.name),
+            };
+            await writer.write(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "engine3_segmentation_pending",
+                  data: proposal,
+                })}\n\n`,
+              ),
+            );
+            const hint =
+              "## Zuordnung der Dateien\n\nDie automatische Zuordnung ist unsicher. " +
+              "Bitte **Vorgänge** im nächsten Schritt festlegen (welche Dateien gehören zu einer Rechnung) " +
+              "und die Analyse mit derselben Dateiauswahl erneut starten.";
+            await streamMarkdown(hint);
+            await writer.write(encoder.encode("data: [DONE]\n\n"));
+            await writer.close();
+            return;
+          }
+          casesForRun = seg.cases;
+        }
+
+        if (casesForRun.length === 1) {
+          const c0 = casesForRun[0];
+          const filesCase = pickCaseFiles(c0.fileIndices);
+          await sendProgress(1, ENGINE3_STEPS[1].label);
+          await sendProgress(2, ENGINE3_STEPS[2].label);
+          await sendProgress(3, ENGINE3_STEPS[3].label);
+          const finalData = await runRechnungPruefungCasePipeline({
+            filesCase,
+            multiDocumentInvoiceReview: multiReviewFor(c0.fileIndices, rolesFromSeg),
+            userMessage: input.userMessage,
+            model: input.model,
+            extraRules: input.extraRules ?? "",
+            lastResult: input.lastResult,
+            lastEngine3Result: input.lastEngine3Result,
+            kontextWissenEnabled: kontextOk,
+            apiKey,
+            quellenFileCount: filesCase.length,
+          });
+          await sendProgress(4, ENGINE3_STEPS[4].label);
+          const clientPayload = toClientEngine3Result(finalData);
+          await writer.write(
+            encoder.encode(`data: ${JSON.stringify({ type: "engine3_result", data: clientPayload })}\n\n`),
+          );
+          await streamMarkdown(buildEngine3AssistantMarkdown(finalData));
+          await writer.write(encoder.encode("data: [DONE]\n\n"));
+          await writer.close();
+          return;
+        }
+
+        const totalCases = casesForRun.length;
+        const batchCases: {
+          caseId: string;
+          caseIndex: number;
+          totalCases: number;
+          title: string;
+          filenames: string[];
+          data: ReturnType<typeof toClientEngine3Result>;
+        }[] = [];
+        const narrativeParts: string[] = [];
+
+        for (let i = 0; i < totalCases; i++) {
+          const c = casesForRun[i];
+          const filesCase = pickCaseFiles(c.fileIndices);
+          const caseMeta = { caseIndex: i + 1, totalCases };
+          await sendProgress(1, ENGINE3_STEPS[1].label, caseMeta);
+          await sendProgress(2, ENGINE3_STEPS[2].label, caseMeta);
+          await sendProgress(3, ENGINE3_STEPS[3].label, caseMeta);
+
+          const finalData = await runRechnungPruefungCasePipeline({
+            filesCase,
+            multiDocumentInvoiceReview: multiReviewFor(c.fileIndices, rolesFromSeg),
+            userMessage: input.userMessage,
+            model: input.model,
+            extraRules: input.extraRules ?? "",
+            lastResult: input.lastResult,
+            lastEngine3Result: i === 0 ? input.lastEngine3Result : undefined,
+            kontextWissenEnabled: kontextOk,
+            apiKey,
+            quellenFileCount: filesCase.length,
+          });
+
+          await sendProgress(4, ENGINE3_STEPS[4].label, caseMeta);
+          const clientPayload = toClientEngine3Result(finalData);
+          const title =
+            c.title?.trim() || (filesCase.length === 1 ? filesCase[0].name : `Vorgang ${i + 1}`);
+          batchCases.push({
+            caseId: c.id,
+            caseIndex: i + 1,
+            totalCases,
+            title,
+            filenames: filesCase.map((f) => f.name),
+            data: clientPayload,
+          });
+          await writer.write(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: "engine3_case_result",
+                caseId: c.id,
+                caseIndex: i + 1,
+                totalCases,
+                title,
+                filenames: filesCase.map((f) => f.name),
+                data: clientPayload,
+              })}\n\n`,
+            ),
+          );
+          narrativeParts.push(
+            `${i > 0 ? "\n\n---\n\n" : ""}## ${title}\n\n${buildEngine3AssistantMarkdown(finalData)}`,
+          );
+        }
+
+        await writer.write(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              type: "engine3_batch_complete",
+              totalCases,
+              cases: batchCases.map((b) => ({
+                caseId: b.caseId,
+                caseIndex: b.caseIndex,
+                title: b.title,
+                filenames: b.filenames,
+                data: b.data,
+              })),
+            })}\n\n`,
+          ),
+        );
+        await streamMarkdown(narrativeParts.join(""));
+        await writer.write(encoder.encode("data: [DONE]\n\n"));
+        await writer.close();
+        return;
+      }
+
+      await sendProgress(1, ENGINE3_STEPS[1].label);
+      let parsed: ParsedRechnung;
+      if (input.files?.length) {
+        parsed = await parseBehandlungsbericht(input.files, apiKey, input.model);
+      } else {
+        parsed = {
+          positionen: [],
+          diagnosen: [],
+          rawText: input.userMessage,
+          freitext: input.userMessage,
+        };
       }
 
       const med = await analysiereMedizinisch(parsed, apiKey, input.model, undefined, kontextOk);
@@ -420,22 +575,13 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
       });
       const analyseCompact = JSON.stringify(med);
 
-      const userPrompt =
-        input.modus === "rechnung_pruefung"
-          ? rechnungPruefungPrompt(
-              parsedCompact,
-              analyseCompact,
-              katalogBundle,
-              adminBlock,
-              input.extraRules ?? "",
-            )
-          : leistungenPrompt(
-              parsedCompact,
-              analyseCompact,
-              katalogBundle,
-              adminBlock,
-              input.extraRules ?? "",
-            );
+      const userPrompt = leistungenPrompt(
+        parsedCompact,
+        analyseCompact,
+        katalogBundle,
+        adminBlock,
+        input.extraRules ?? "",
+      );
 
       const systemStatic = kontextOk
         ? `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
@@ -533,6 +679,7 @@ ${
       finalData = applyRecalcAndConsistency(finalData);
       finalData = applyEngine3AusschlussPass(finalData);
       finalData = enforceEngine3Quellenbezug(finalData);
+      finalData = ensureWarnungFehlerHaveUIFacingRationale(finalData);
 
       finalData.goaeStandHinweis = finalData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
       if (adminQuellenHint.length > 0) {
@@ -549,16 +696,7 @@ ${
       await writer.write(encoder.encode(resultEvent));
 
       const narrativeMd = buildEngine3AssistantMarkdown(finalData);
-      const chunkSize = 120;
-      for (let i = 0; i < narrativeMd.length; i += chunkSize) {
-        await writer.write(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              choices: [{ delta: { content: narrativeMd.slice(i, i + chunkSize) } }],
-            })}\n\n`,
-          ),
-        );
-      }
+      await streamMarkdown(narrativeMd);
 
       await writer.write(encoder.encode("data: [DONE]\n\n"));
       await writer.close();
@@ -570,7 +708,11 @@ ${
           : "Engine-3-Pipeline fehlgeschlagen";
       const isKi = /KI-Kontext nicht verfügbar|Embedding/i.test(msg);
       const parseDbg =
-        error instanceof Engine3ParseError ? error.parseDebug : undefined;
+        error instanceof Engine3ParseError
+          ? error.parseDebug
+          : error instanceof Engine3CaseParseError
+            ? error.parseDebug
+            : undefined;
       await sendError(msg, isKi ? "ENGINE3_KI_CONTEXT" : undefined, parseDbg);
       await writer.close();
     }

@@ -39,12 +39,10 @@ Antworte **auf Deutsch**, sofern der Nutzer nicht ausdrücklich eine andere Spra
 /** Wenn JSON-Kurzantwort fehlschlägt: strukturiertes Markdown-Streaming mit Zusammenfassung zuerst. */
 const DIRECT_SHORT_MARKDOWN_STREAM_APPENDIX = `
 
-## Kurzantworten (verbindlich, Markdown)
+## Kurzantworten (Markdown, verbindlich)
 
-- **Zuerst** genau die Überschrift \`### Zusammenfassung\` (kein Text davor): darunter **1–2 Sätze** Kernaussage.
-- **Danach** \`### Erläuterung\` mit **höchstens 5** Bullets (\`- …\`), kurz und sachlich.
-- **Optional** \`### Zum Vertiefen\` mit **2–3** Bullets – jeweils eine **konkrete** Folgefrage als nächste Nutzernachricht formuliert.
-- Keine langen Fließtexte, keine Wiederholung der Zusammenfassung in den Bullets.`;
+- **Eine** Überschrift \`### Antwort\`, darunter **1–2** kurze Absätze und optional **höchstens 5** Bullets (\`- \`).
+- Kein Gruß, keine Meta-Einleitung. Keine weiteren \`###\`.`;
 
 function buildDirectSystemPrompt(extraRules?: string): string {
   let s = DIRECT_SYSTEM_CORE;

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { normalizeFrageAnswerParsed, stripFrageListKorrektZusatzLabels } from "@/lib/frageAnswerStructured";
+import {
+  frageAnswerSuggestsExportFinalize,
+  normalizeFrageAnswerParsed,
+  stripFrageListKorrektZusatzLabels,
+} from "@/lib/frageAnswerStructured";
 
 describe("stripFrageListKorrektZusatzLabels", () => {
   it("removes Korrekt:/Zusatz: with various markdown forms", () => {
@@ -30,8 +34,25 @@ describe("stripFrageListKorrektZusatzLabels", () => {
   });
 });
 
+describe("frageAnswerSuggestsExportFinalize", () => {
+  it("is true when GOÄ or Ziffer context appears", () => {
+    expect(
+      frageAnswerSuggestsExportFinalize({
+        kurzantwort: "GOÄ 1\n\n- Text",
+      }),
+    ).toBe(true);
+  });
+  it("is false for generic text", () => {
+    expect(
+      frageAnswerSuggestsExportFinalize({
+        kurzantwort: "Hallo\n\nNur allgemeine Infos.",
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("normalizeFrageAnswerParsed", () => {
-  it("sanitizes erlaeuterung and grenzfaelle", () => {
+  it("merges legacy fields into kurzantwort and sanitizes", () => {
     const a = normalizeFrageAnswerParsed({
       kurzantwort: "Kurz.",
       erlaeuterung: "Zusatz: Hinweis.",
@@ -39,7 +60,15 @@ describe("normalizeFrageAnswerParsed", () => {
       quellen: [],
     });
     expect(a).not.toBeNull();
-    expect(a!.erlaeuterung).toBe("- Hinweis.");
-    expect(a!.grenzfaelle_hinweise).toBe("- Nur allgemein.");
+    expect(a!.kurzantwort).toContain("Kurz.");
+    expect(a!.kurzantwort).toContain("- Hinweis.");
+    expect(a!.kurzantwort).toContain("- Nur allgemein.");
+  });
+
+  it("accepts minimal JSON with only kurzantwort", () => {
+    const a = normalizeFrageAnswerParsed({
+      kurzantwort: "- Eins.\n- Zwei.",
+    });
+    expect(a).toEqual({ kurzantwort: "- Eins.\n- Zwei." });
   });
 });

@@ -98,6 +98,32 @@ function calcTotalMetric(ruleF1: number, engine: EngineName): number {
   return pct(total);
 }
 
+const DEFAULT_STALE_RUNNING_MS = 2 * 60 * 1000;
+
+/** Marks `running` runs older than threshold as failed (worker timeout / uncaught abort). */
+async function healStaleRunningRuns(supabaseAdmin: ReturnType<typeof createClient>) {
+  const raw = Deno.env.get("BENCHMARK_STALE_RUNNING_MS");
+  const parsed = raw ? Number(raw) : DEFAULT_STALE_RUNNING_MS;
+  const staleMs = Number.isFinite(parsed) && parsed > 30_000 ? parsed : DEFAULT_STALE_RUNNING_MS;
+  const bound = new Date(Date.now() - staleMs).toISOString();
+  const { data: stale, error } = await supabaseAdmin
+    .from("benchmark_runs")
+    .select("id")
+    .eq("status", "running")
+    .lt("started_at", bound);
+  if (error || !stale?.length) return;
+  const errMsg = "Run did not finish (Edge timeout or worker shutdown). Marked stale by benchmark-run.";
+  const ids = stale.map((r) => r.id);
+  await supabaseAdmin
+    .from("benchmark_runs")
+    .update({
+      status: "failed",
+      finished_at: new Date().toISOString(),
+      error: errMsg,
+    })
+    .in("id", ids);
+}
+
 async function ensureAdmin(sbUrl: string, sbKey: string, token: string): Promise<{ userId: string }> {
   const parts = token.split(".");
   if (parts.length !== 3) throw new Error("Invalid token");
@@ -113,89 +139,163 @@ async function ensureAdmin(sbUrl: string, sbKey: string, token: string): Promise
   return { userId };
 }
 
+const RESULT_INSERT_BATCH = 200;
+const DEFAULT_BENCHMARK_SAMPLE_SIZE = 250;
+
+function parseBenchmarkSampleSize(): number {
+  const raw = Deno.env.get("BENCHMARK_SAMPLE_SIZE");
+  if (raw === undefined || raw === "") return DEFAULT_BENCHMARK_SAMPLE_SIZE;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_BENCHMARK_SAMPLE_SIZE;
+  return Math.min(Math.floor(n), 50_000);
+}
+
+/** Fisher–Yates shuffle on a copy, then first `min(n, pool.length)` elements (uniform sample without replacement). */
+function sampleRandomCases(cases: BenchmarkCase[], n: number): BenchmarkCase[] {
+  if (cases.length === 0) return [];
+  const take = Math.min(n, cases.length);
+  const copy = [...cases];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j]!, copy[i]!];
+  }
+  return copy.slice(0, take);
+}
+
 async function runBenchmark(supabaseAdmin: ReturnType<typeof createClient>, userId: string) {
+  const sampleSize = parseBenchmarkSampleSize();
+  const runCases = sampleRandomCases(BENCHMARK_CASES, sampleSize);
+
   const runInsert = await supabaseAdmin
     .from("benchmark_runs")
-    .insert({ started_by: userId, status: "running", case_count: BENCHMARK_CASES.length })
+    .insert({ started_by: userId, status: "running", case_count: runCases.length })
     .select("id")
     .single();
   if (runInsert.error || !runInsert.data?.id) throw new Error(`Run insert failed: ${runInsert.error?.message ?? "unknown"}`);
   const runId = runInsert.data.id;
 
-  const summaryByEngine = new Map<EngineName, { totalScore: number; ruleF1: number; cases: number; weighted: number; l1: number[]; l2: number[]; l3: number[]; l4: number[] }>();
-  for (const engine of ENGINES) {
-    summaryByEngine.set(engine, { totalScore: 0, ruleF1: 0, cases: 0, weighted: 0, l1: [], l2: [], l3: [], l4: [] });
-  }
-
-  for (const testCase of BENCHMARK_CASES) {
-    // Benchmark-Runner nutzt bewusst ein isoliertes, bundling-sicheres Profiling:
-    // Gold-Findings sind die Referenz; Engine-Profile simulieren unterschiedliche
-    // Abdeckung/Qualität ohne Abhängigkeit auf lokale JSON-Katalogimporte.
-    const baseFindings = testCase.gold.expectedFindings.map((f) => ({
-      category: f.category,
-      severity: f.severity,
-      codeRefs: f.codeRefs,
-    }));
-
+  try {
+    const summaryByEngine = new Map<EngineName, { totalScore: number; ruleF1: number; cases: number; weighted: number; l1: number[]; l2: number[]; l3: number[]; l4: number[] }>();
     for (const engine of ENGINES) {
-      const profiled = applyEngineProfile(engine, baseFindings);
-      const caseScore = scoreCase(testCase, profiled);
-      const totalScore = calcTotalMetric(caseScore.ruleF1, engine);
-      const row = summaryByEngine.get(engine)!;
-      row.cases += 1;
-      row.ruleF1 += caseScore.ruleF1;
-      row.totalScore += totalScore;
-      row.weighted += totalScore * difficultyWeight(testCase.difficulty);
-      if (testCase.difficulty === "L1") row.l1.push(totalScore);
-      if (testCase.difficulty === "L2") row.l2.push(totalScore);
-      if (testCase.difficulty === "L3") row.l3.push(totalScore);
-      if (testCase.difficulty === "L4") row.l4.push(totalScore);
+      summaryByEngine.set(engine, { totalScore: 0, ruleF1: 0, cases: 0, weighted: 0, l1: [], l2: [], l3: [], l4: [] });
+    }
 
-      await supabaseAdmin.from("benchmark_run_results").insert({
+    const pendingResults: Array<{
+      run_id: string;
+      engine: EngineName;
+      case_id: string;
+      difficulty: BenchmarkCase["difficulty"];
+      tags: string[];
+      metrics_json: {
+        rulePrecision: number;
+        ruleRecall: number;
+        ruleF1: number;
+        totalScore: number;
+        falsePositiveErrors: number;
+      };
+      raw_json: { findings: ReturnType<typeof applyEngineProfile>; gold: BenchmarkCase["gold"]["expectedFindings"] };
+    }> = [];
+
+    const flushResultBatch = async () => {
+      while (pendingResults.length >= RESULT_INSERT_BATCH) {
+        const batch = pendingResults.splice(0, RESULT_INSERT_BATCH);
+        const { error } = await supabaseAdmin.from("benchmark_run_results").insert(batch);
+        if (error) throw new Error(error.message);
+      }
+    };
+
+    for (const testCase of runCases) {
+      // Benchmark-Runner nutzt bewusst ein isoliertes, bundling-sicheres Profiling:
+      // Gold-Findings sind die Referenz; Engine-Profile simulieren unterschiedliche
+      // Abdeckung/Qualität ohne Abhängigkeit auf lokale JSON-Katalogimporte.
+      const baseFindings = testCase.gold.expectedFindings.map((f) => ({
+        category: f.category,
+        severity: f.severity,
+        codeRefs: f.codeRefs,
+      }));
+
+      for (const engine of ENGINES) {
+        const profiled = applyEngineProfile(engine, baseFindings);
+        const caseScore = scoreCase(testCase, profiled);
+        const totalScore = calcTotalMetric(caseScore.ruleF1, engine);
+        const row = summaryByEngine.get(engine)!;
+        row.cases += 1;
+        row.ruleF1 += caseScore.ruleF1;
+        row.totalScore += totalScore;
+        row.weighted += totalScore * difficultyWeight(testCase.difficulty);
+        if (testCase.difficulty === "L1") row.l1.push(totalScore);
+        if (testCase.difficulty === "L2") row.l2.push(totalScore);
+        if (testCase.difficulty === "L3") row.l3.push(totalScore);
+        if (testCase.difficulty === "L4") row.l4.push(totalScore);
+
+        pendingResults.push({
+          run_id: runId,
+          engine,
+          case_id: testCase.id,
+          difficulty: testCase.difficulty,
+          tags: testCase.tags,
+          metrics_json: {
+            rulePrecision: caseScore.rulePrecision,
+            ruleRecall: caseScore.ruleRecall,
+            ruleF1: caseScore.ruleF1,
+            totalScore,
+            falsePositiveErrors: caseScore.falsePositiveErrors,
+          },
+          raw_json: { findings: profiled, gold: testCase.gold.expectedFindings },
+        });
+        await flushResultBatch();
+      }
+    }
+
+    while (pendingResults.length > 0) {
+      const batch = pendingResults.splice(0, RESULT_INSERT_BATCH);
+      const { error } = await supabaseAdmin.from("benchmark_run_results").insert(batch);
+      if (error) throw new Error(error.message);
+    }
+
+    const summaryRows = [];
+    for (const engine of ENGINES) {
+      const row = summaryByEngine.get(engine)!;
+      const avg = (vals: number[]) => (vals.length ? pct(vals.reduce((a, b) => a + b, 0) / vals.length) : 0);
+      const totalScore = row.cases ? pct(row.totalScore / row.cases) : 0;
+      const ruleF1 = row.cases ? pct(row.ruleF1 / row.cases) : 0;
+      summaryRows.push({
         run_id: runId,
         engine,
-        case_id: testCase.id,
-        difficulty: testCase.difficulty,
-        tags: testCase.tags,
-        metrics_json: {
-          rulePrecision: caseScore.rulePrecision,
-          ruleRecall: caseScore.ruleRecall,
-          ruleF1: caseScore.ruleF1,
-          totalScore,
-          falsePositiveErrors: caseScore.falsePositiveErrors,
-        },
-        raw_json: { findings: profiled, gold: testCase.gold.expectedFindings },
+        total_score: totalScore,
+        rule_f1: ruleF1,
+        correction_score: engine === "engine3_1" ? 88 : engine === "engine3" ? 82 : engine === "complex" ? 74 : 63,
+        amount_score: engine === "engine3_1" ? 92 : engine === "engine3" ? 88 : engine === "complex" ? 80 : 68,
+        evidence_score: engine === "engine3_1" ? 90 : engine === "engine3" ? 84 : engine === "complex" ? 73 : 60,
+        ops_score: engine === "simple" ? 94 : engine === "complex" ? 79 : engine === "engine3" ? 76 : 72,
+        l1_score: avg(row.l1),
+        l2_score: avg(row.l2),
+        l3_score: avg(row.l3),
+        l4_score: avg(row.l4),
       });
     }
+    const sumIns = await supabaseAdmin.from("benchmark_run_summaries").insert(summaryRows);
+    if (sumIns.error) throw new Error(sumIns.error.message);
+
+    await supabaseAdmin
+      .from("benchmark_runs")
+      .update({ status: "done", finished_at: new Date().toISOString() })
+      .eq("id", runId);
+
+    return runId;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const clipped = msg.length > 2000 ? msg.slice(0, 2000) : msg;
+    await supabaseAdmin
+      .from("benchmark_runs")
+      .update({
+        status: "failed",
+        finished_at: new Date().toISOString(),
+        error: clipped,
+      })
+      .eq("id", runId);
+    throw e;
   }
-
-  for (const engine of ENGINES) {
-    const row = summaryByEngine.get(engine)!;
-    const avg = (vals: number[]) => (vals.length ? pct(vals.reduce((a, b) => a + b, 0) / vals.length) : 0);
-    const totalScore = row.cases ? pct(row.totalScore / row.cases) : 0;
-    const ruleF1 = row.cases ? pct(row.ruleF1 / row.cases) : 0;
-    await supabaseAdmin.from("benchmark_run_summaries").insert({
-      run_id: runId,
-      engine,
-      total_score: totalScore,
-      rule_f1: ruleF1,
-      correction_score: engine === "engine3_1" ? 88 : engine === "engine3" ? 82 : engine === "complex" ? 74 : 63,
-      amount_score: engine === "engine3_1" ? 92 : engine === "engine3" ? 88 : engine === "complex" ? 80 : 68,
-      evidence_score: engine === "engine3_1" ? 90 : engine === "engine3" ? 84 : engine === "complex" ? 73 : 60,
-      ops_score: engine === "simple" ? 94 : engine === "complex" ? 79 : engine === "engine3" ? 76 : 72,
-      l1_score: avg(row.l1),
-      l2_score: avg(row.l2),
-      l3_score: avg(row.l3),
-      l4_score: avg(row.l4),
-    });
-  }
-
-  await supabaseAdmin
-    .from("benchmark_runs")
-    .update({ status: "done", finished_at: new Date().toISOString() })
-    .eq("id", runId);
-
-  return runId;
 }
 
 async function loadLatest(supabaseAdmin: ReturnType<typeof createClient>) {
@@ -263,6 +363,7 @@ serve(async (req) => {
     const { userId } = await ensureAdmin(sbUrl, sbKey, token);
     const body = (await req.json()) as { action?: "start" | "latest" };
     const supabaseAdmin = createClient(sbUrl, sbKey);
+    await healStaleRunningRuns(supabaseAdmin);
 
     if (body.action === "start") {
       const runId = await runBenchmark(supabaseAdmin, userId);

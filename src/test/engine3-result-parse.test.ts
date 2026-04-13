@@ -212,4 +212,47 @@ describe("parseEngine3ResultData", () => {
     expect(p).not.toBeNull();
     expect(p?.quellen).toBeUndefined();
   });
+
+  it("accepts topVorschlaege with recommended marker", () => {
+    const raw = {
+      modus: "leistungen_abrechnen" as const,
+      klinischerKontext: "k",
+      fachgebiet: "f",
+      positionen: [
+        { nr: 1, ziffer: "1", bezeichnung: "B", faktor: 1, betrag: 1, status: "korrekt" as const },
+      ],
+      hinweise: [],
+      topVorschlaege: [
+        {
+          nr: 1,
+          ziffer: "1",
+          bezeichnung: "B",
+          faktor: 1,
+          betrag: 1,
+          status: "korrekt" as const,
+          rang: 1,
+          empfohlen: true,
+        },
+        {
+          nr: 2,
+          ziffer: "5",
+          bezeichnung: "C",
+          faktor: 2.3,
+          betrag: 10.5,
+          status: "vorschlag" as const,
+          rang: 2,
+        },
+      ],
+      zusammenfassung: {
+        geschaetzteSumme: 1,
+        anzahlPositionen: 1,
+        fehler: 0,
+        warnungen: 0,
+      },
+    };
+    const p = parseEngine3ResultData(raw);
+    expect(p?.topVorschlaege?.[0]?.rang).toBe(1);
+    expect(p?.topVorschlaege?.[0]?.empfohlen).toBe(true);
+    expect(p?.topVorschlaege?.[1]?.rang).toBe(2);
+  });
 });

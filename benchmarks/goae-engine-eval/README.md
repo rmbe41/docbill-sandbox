@@ -13,6 +13,7 @@ Dieses Verzeichnis enthaelt ein reproduzierbares Benchmark-Setup fuer den Vergle
 - `schema/result.schema.json`: Struktur normalisierter Engine-Resultate.
 - `config/weights.json`: Gewichte fuer Scoring und Release-Gates.
 - `cases/starter-cases.json`: Starter-Set mit mehreren Faellen verschiedener Schwierigkeit.
+- `cases/catalog-v2-exclusions.generated.json`: aus `goae-catalog-v2.json` generierte Ausschluss-Paare (`npm run generate:benchmark-cases:v2`); vor `supabase:deploy` wird die Datei nach `supabase/functions/benchmark-run/` kopiert.
 
 ## Ziel
 

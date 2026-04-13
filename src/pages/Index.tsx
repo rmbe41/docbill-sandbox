@@ -60,7 +60,12 @@ function findInvoiceReviewSourcePdfForMessage(
   index: number,
 ): { previewUrl: string; name: string } | null {
   const msg = messages[index];
-  if (msg.role !== "assistant" || (!msg.invoiceResult && !msg.engine3Result)) return null;
+  if (
+    msg.role !== "assistant" ||
+    (!msg.invoiceResult && !msg.engine3Result && !(msg.engine3Cases != null && msg.engine3Cases.length > 0))
+  ) {
+    return null;
+  }
   for (let i = index - 1; i >= 0; i--) {
     if (messages[i].role === "assistant") break;
     if (messages[i].role !== "user") continue;
@@ -103,7 +108,7 @@ const Index = () => {
     kurzantworten: false,
     kontext_wissen: true,
   });
-  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "simple" });
+  const [globalSettings, setGlobalSettings] = useState<{ default_model: string; default_rules: string; default_engine: string }>({ default_model: "openrouter/free", default_rules: "", default_engine: "engine3_1" });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"user" | "display" | "global" | undefined>(undefined);
   const [settingsOpenSeq, setSettingsOpenSeq] = useState(0);
   const settingsPanelHydration = useMemo(
@@ -142,7 +147,7 @@ const Index = () => {
     if (gData) setGlobalSettings({
       default_model: gData.default_model,
       default_rules: gData.default_rules,
-      default_engine: (gData as { default_engine?: string }).default_engine ?? "simple",
+      default_engine: (gData as { default_engine?: string }).default_engine ?? "engine3_1",
     });
     const { data: uData } = await supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle();
     if (uData) {
@@ -197,6 +202,7 @@ const Index = () => {
     stopBackgroundForActiveConversation,
     cancelQueuedJob,
     mergeMessagesWithLiveStream,
+    resumeEngine3WithCaseGroups,
   } = useBackgroundJobQueue({
     user,
     toast,
@@ -547,6 +553,7 @@ const Index = () => {
                       onKurzantwortVorschlagComposer={(text) =>
                         chatInputRef.current?.setComposerText(text)
                       }
+                      onResumeEngine3WithCaseGroups={resumeEngine3WithCaseGroups}
                     />
                   ))}
                   {isChatBusy && analysisStartTime != null && (

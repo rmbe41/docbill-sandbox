@@ -2,12 +2,12 @@ import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
 
 export type KurzantwortVorschlag = { id: string; text: string };
 
-/** Strukturierte KI-Antwort im GOÄ-Fragemodus (persistiert in structured_content). */
+/**
+ * Strukturierte KI-Antwort (Frage-/Kurzantworten-JSON): ein Textblock.
+ * Persistiert in structured_content; optional interaktive Folge-Prompts.
+ */
 export type FrageAnswerStructured = {
   kurzantwort: string;
-  erlaeuterung: string;
-  quellen: string[];
-  grenzfaelle_hinweise: string;
   vorschlaege?: KurzantwortVorschlag[];
 };
 
@@ -66,39 +66,58 @@ function normalizeVorschlaegeParsed(raw: unknown): KurzantwortVorschlag[] {
 }
 
 export function normalizeFrageAnswerParsed(raw: Record<string, unknown>): FrageAnswerStructured | null {
-  const kurz = raw.kurzantwort;
-  const erl = raw.erlaeuterung;
+  const kurzRaw = raw.kurzantwort;
+  const kurzStr = typeof kurzRaw === "string" ? kurzRaw.trim() : "";
+
+  const erlRaw = raw.erlaeuterung;
+  const erlStr =
+    typeof erlRaw === "string" ? stripFrageListKorrektZusatzLabels(erlRaw.trim()) : "";
+
+  const grenzRaw = raw.grenzfaelle_hinweise;
+  const grenzStr =
+    typeof grenzRaw === "string" ? stripFrageListKorrektZusatzLabels(grenzRaw.trim()) : "";
+
   let quellen = raw.quellen;
   if (typeof quellen === "string") quellen = [quellen];
   if (!Array.isArray(quellen)) quellen = [];
   const quellenStr = filterExplicitQuellenEntries(
     quellen.filter((x): x is string => typeof x === "string"),
   );
-  if (typeof kurz !== "string" || typeof erl !== "string") return null;
-  if (!kurz.trim() && !erl.trim()) return null;
-  const grenzRaw = raw.grenzfaelle_hinweise;
-  const grenz = typeof grenzRaw === "string" ? grenzRaw : "";
+
   const vorschlaege = normalizeVorschlaegeParsed(raw.vorschlaege);
-  const base: FrageAnswerStructured = {
-    kurzantwort: kurz.trim(),
-    erlaeuterung: stripFrageListKorrektZusatzLabels(erl.trim()),
-    quellen: quellenStr,
-    grenzfaelle_hinweise: stripFrageListKorrektZusatzLabels(grenz.trim()),
-  };
+
+  const blocks: string[] = [];
+  if (kurzStr) blocks.push(kurzStr);
+  if (erlStr) blocks.push(erlStr);
+  if (grenzStr) blocks.push(grenzStr);
+  let merged = blocks.join("\n\n");
+  if (quellenStr.length > 0) {
+    merged += `${merged ? "\n\n" : ""}*Quellen:* ${quellenStr.join(" · ")}`;
+  }
+  merged = stripFrageListKorrektZusatzLabels(merged.trim());
+
+  if (!merged.trim()) return null;
+
+  const base: FrageAnswerStructured = { kurzantwort: merged };
   if (vorschlaege.length > 0) base.vorschlaege = vorschlaege;
   return base;
 }
 
+/** Heuristik: Antwort nennt konkrete Abrechnungsinhalte → Export-Follow-ups anbieten. */
+export function frageAnswerSuggestsExportFinalize(a: FrageAnswerStructured): boolean {
+  const blob = a.kurzantwort ?? "";
+  return (
+    /GOÄ|GOAe|GOAE/i.test(blob) ||
+    /\b(Ziffer|Abrechnung|Position|Honorar|Steigerung|Analog)\b/i.test(blob) ||
+    /\b\d{3,5}[a-z]?\b/i.test(blob)
+  );
+}
+
 export function frageAnswerToMarkdown(a: FrageAnswerStructured): string {
-  const grenz = (a.grenzfaelle_hinweise ?? "").trim();
-  let out = `### Zusammenfassung\n\n${a.kurzantwort}\n\n### Erläuterung\n\n${a.erlaeuterung}\n\n`;
-  if (grenz) out += `### Grenzfälle und Hinweise\n\n${grenz}\n\n`;
-  const quellenOut = filterExplicitQuellenEntries(a.quellen);
-  if (quellenOut.length > 0) out += `*Quellen:* ${quellenOut.join(" · ")}\n`;
+  let out = a.kurzantwort.trim();
   if (a.vorschlaege?.length) {
-    out += `\n### Vorschläge zur Vertiefung\n\n`;
+    out += `\n\n### Vorschläge zur Vertiefung\n\n`;
     out += a.vorschlaege.map((v) => `- ${v.text}`).join("\n");
-    out += "\n";
   }
   return out;
 }

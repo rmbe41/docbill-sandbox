@@ -60,10 +60,6 @@ export type KurzantwortVorschlag = { id: string; text: string };
 
 export type FrageAnswerStructured = {
   kurzantwort: string;
-  erlaeuterung: string;
-  quellen: string[];
-  grenzfaelle_hinweise: string;
-  /** Optional: interaktive Folge-Prompts (Direktmodus Kurzantworten). */
   vorschlaege?: KurzantwortVorschlag[];
 };
 
@@ -119,104 +115,90 @@ function normalizeVorschlaegeParsed(raw: unknown): KurzantwortVorschlag[] {
 }
 
 export function normalizeFrageAnswerParsed(raw: Record<string, unknown>): FrageAnswerStructured | null {
-  const kurz = raw.kurzantwort;
-  const erl = raw.erlaeuterung;
+  const kurzRaw = raw.kurzantwort;
+  const kurzStr = typeof kurzRaw === "string" ? kurzRaw.trim() : "";
+
+  const erlRaw = raw.erlaeuterung;
+  const erlStr =
+    typeof erlRaw === "string" ? stripFrageListKorrektZusatzLabels(erlRaw.trim()) : "";
+
+  const grenzRaw = raw.grenzfaelle_hinweise;
+  const grenzStr =
+    typeof grenzRaw === "string" ? stripFrageListKorrektZusatzLabels(grenzRaw.trim()) : "";
+
   let quellen = raw.quellen;
   if (typeof quellen === "string") quellen = [quellen];
   if (!Array.isArray(quellen)) quellen = [];
   const quellenStr = filterExplicitQuellenEntries(
     quellen.filter((x): x is string => typeof x === "string"),
   );
-  if (typeof kurz !== "string" || typeof erl !== "string") return null;
-  if (!kurz.trim() && !erl.trim()) return null;
-  const grenzRaw = raw.grenzfaelle_hinweise;
-  const grenz = typeof grenzRaw === "string" ? grenzRaw : "";
+
   const vorschlaege = normalizeVorschlaegeParsed(raw.vorschlaege);
-  const base: FrageAnswerStructured = {
-    kurzantwort: kurz.trim(),
-    erlaeuterung: stripFrageListKorrektZusatzLabels(erl.trim()),
-    quellen: quellenStr,
-    grenzfaelle_hinweise: stripFrageListKorrektZusatzLabels(grenz.trim()),
-  };
+
+  const blocks: string[] = [];
+  if (kurzStr) blocks.push(kurzStr);
+  if (erlStr) blocks.push(erlStr);
+  if (grenzStr) blocks.push(grenzStr);
+  let merged = blocks.join("\n\n");
+  if (quellenStr.length > 0) {
+    merged += `${merged ? "\n\n" : ""}*Quellen:* ${quellenStr.join(" · ")}`;
+  }
+  merged = stripFrageListKorrektZusatzLabels(merged.trim());
+
+  if (!merged.trim()) return null;
+
+  const base: FrageAnswerStructured = { kurzantwort: merged };
   if (vorschlaege.length > 0) base.vorschlaege = vorschlaege;
   return base;
 }
 
 export function frageAnswerToMarkdown(a: FrageAnswerStructured): string {
-  const grenz = (a.grenzfaelle_hinweise ?? "").trim();
-  let out = `### Zusammenfassung\n\n${a.kurzantwort}\n\n### Erläuterung\n\n${a.erlaeuterung}\n\n`;
-  if (grenz) out += `### Grenzfälle und Hinweise\n\n${grenz}\n\n`;
-  const quellenOut = filterExplicitQuellenEntries(a.quellen);
-  if (quellenOut.length > 0) out += `*Quellen:* ${quellenOut.join(" · ")}\n`;
+  let out = a.kurzantwort.trim();
   if (a.vorschlaege?.length) {
-    out += `\n### Vorschläge zur Vertiefung\n\n`;
+    out += `\n\n### Vorschläge zur Vertiefung\n\n`;
     out += a.vorschlaege.map((v) => `- ${v.text}`).join("\n");
-    out += "\n";
   }
   return out;
 }
 
-/** JSON-Schema-Hinweise für Direktmodus mit Kurzantworten (ein Objekt, Felder wie Fragemodus + vorschlaege). */
+/** JSON für Direktmodus mit Kurzantworten. */
 export const DIRECT_SHORT_JSON_OUTPUT_RULES = `
 ## Ausgabeformat Direktmodus – Kurzantworten (verbindlich)
 
-**Kontext:** Direktmodell (mit oder ohne lokales GOÄ/Admin-Kontext). Du lieferst **keine** Rechnungstabelle und keine Honoraraufstellung.
+**Kontext:** Direktmodell. Du lieferst **keine** Rechnungstabelle und keine Honoraraufstellung.
 
-**STRENG VERBOTEN** in \`erlaeuterung\` und \`grenzfaelle_hinweise\`: \`Korrekt:\`, \`Zusatz:\`, \`**Korrekt:**\`, \`**Zusatz:**\` am Zeilenanfang.
+**STRENG VERBOTEN:** Zeilenanfang mit \`Korrekt:\`, \`Zusatz:\`, \`**Korrekt:**\`, \`**Zusatz:**\` (auch nach \`- \`).
 
-Deine **gesamte** Antwort besteht aus **einem einzigen gültigen JSON-Objekt** (UTF-8). **Kein** Text vor oder nach dem JSON, **keine** Markdown-Codefences, **keine** Erklärung.
+Deine **gesamte** Antwort = **ein** gültiges JSON-Objekt (UTF-8). **Kein** Text außerhalb, **keine** Codefences.
 
-**Reihenfolge der inhaltlichen Logik:** Zuerste die Kernaussage in \`kurzantwort\` – **kein** Gruß, keine Meta-Einleitung („Gerne helfe ich…“) in einem separaten Satz davor; der **erste** inhaltliche Satz der Antwort steht in \`kurzantwort\`.
-
-Erlaubtes Schema (alle Schlüssel **müssen** vorkommen):
-- \`kurzantwort\` (string): **Max. 1–2 sehr kurze Sätze**, direkte Antwort. Keine Aufzählung.
-- \`erlaeuterung\` (string): **Markdown-Liste** mit \`- …\`, **höchstens 5** Bullets, je Bullet höchstens zwei kurze Sätze. Keine langen Fließtexte, keine \`###\` in diesem String.
-- \`quellen\` (array von strings): Wie im Fragemodus – nur bei **konkreten** Fundstellen im **mitgelieferten** Kontext (GOÄ, Katalog, Admin-Dateiname). Sonst \`[]\`. Keine Platzhalter-„keine Quelle“-Einträge.
-- \`grenzfaelle_hinweise\` (string): Kurz; \`""\` wenn nichts Nötiges. Sonst \`- \` Listen wie \`erlaeuterung\`.
-- \`vorschlaege\` (array): **0 bis 3** Objekte \`{ "id": string, "text": string }\`. Jeder \`text\`: **eine** kurze, konkrete Folgefrage oder nächster Schritt, den der Nutzer **als nächste Chat-Nachricht** schreiben könnte (keine Werbung, keine Duplikate der Zusammenfassung). **Stabile** \`id\` z. B. \`s0\`, \`s1\`, \`s2\`. Wenn keine passenden Vorschläge: \`[]\`.
+**Schema (Pflichtschlüssel nur \`kurzantwort\`):**
+- \`kurzantwort\` (string): **Alles** inhaltlich Relevante hier: knappe Markdown-Antwort (Absätze, optional \`- \` Bullets, höchstens **6** Bullets). Kein Gruß, keine Meta-Einleitung. Konkrete Fundstellen aus dem **mitgelieferten** Kontext optional **zuletzt** in **einer** Zeile \`*Quellen:* A · B\` (sonst weglassen).
+- \`vorschlaege\` (array, optional): **0–3** Objekte \`{ "id": string, "text": string }\` — jeweils **eine** kurze Folgefrage als nächste Nutzernachricht. Stabile \`id\` (\`s0\` …). Sonst weglassen oder \`[]\`.
 `;
 
-/** Fallback wenn kein Modell zuverlässig JSON liefert: klassisches Markdown mit festen Überschriften. */
+/** Fallback: Markdown-Stream ohne JSON. */
 export const FRAGE_MARKDOWN_STREAM_RULES = `
 ## Ausgabeformat (Markdown, verbindlich)
 
-**STRENG VERBOTEN:** Zeilen, die mit \`Korrekt:\`, \`Zusatz:\`, \`**Korrekt:**\`, \`**Zusatz:**\` beginnen (auch nach \`- \` oder Einrückung). Stattdessen nur sachliche Bullets \`- …\` oder \`- **Fehler:** …\` bei echtem Regelverstoß.
+**STRENG VERBOTEN:** \`Korrekt:\` / \`Zusatz:\` als Zeilenanfang.
 
-Gib **ausschließlich Markdown** aus. **Kein** Einleitungstext vor der ersten Überschrift.
+Gib **nur Markdown** aus. **Kein** Gruß vor dem ersten sachlichen Satz.
 
-Verwende **genau** diese **###**-Überschriften für Kurzantwort, Erläuterung und ggf. Grenzfälle. **Quellen** nur **wenn** du den **gelieferten Kontext** für **konkrete** Fakten tatsächlich genutzt hast: **zuletzt**, **ohne** eigene \`###\`-Überschrift, eine **einzige** Zeile \`*Quellen:* …\` mit allen Fundstellen **in einer Zeile**, durch **„ · “** (Mittelpunkt mit Leerzeichen) getrennt – **horizontal** lesbar, **keine** vertikale Bullet-Liste. **Ohne** solche Bezüge: **keinen** \`*Quellen:*\`-Abschnitt – auch **keine** Formulierungen wie „es wurde keine Quelle genutzt“ oder „keine Fundstelle“.
-
-Reihenfolge:
-
-### Kurzantwort
-**Max. 1–2 sehr kurze Sätze**, eine Kernaussage. Keine Aufzählungen hier.
-
-### Erläuterung
-**Pflicht:** Markdown-Liste mit \`- \`, pro Zeile genau ein Bullet. **Nicht** die Labels **Korrekt:** oder **Zusatz:** verwenden. Sachliche Bullets \`- …\` (ein bis zwei kurze Sätze). Nur bei **klarem Regelverstoß** optional \`- **Fehler:** …\` (Ausschluss, Verstoß, unzulässige Abrechnung).
-
-Optional ein inhaltliches Fettdruck-Lead-in im Bullet, z. B. \`- **Schwelle:** …\` – aber **nicht** als „Zusatz:“- oder „Korrekt:“-Typ-Label. Keine langen Fließabsätze, keine „1. … 2. …“ als durchlaufende Prosa. Meta-Fragen („Was kannst du?“): **nur** solche Bullets, ohne erzählerische Einleitung. **Unter dieser Überschrift keine weiteren** \`###\` **und keine Unterüberschriften.**
-
-### Grenzfälle und Hinweise
-Nur wenn sinnvoll; sonst exakt die Zeile: *Kein spezieller Hinweis.* Wenn Inhalt nötig: \`- \` **Listen** wie unter Erläuterung (**keine** Korrekt:/Zusatz:-Labels); **keine** eigenen \`###\`.
-
-Wenn du den Kontext für **konkrete** Fakten genutzt hast: **abschließend** (kein \`###\` davor) **eine** Zeile \`*Quellen:* …\` – **jede** Fundstelle in derselben Zeile mit „ · “ trennen, z. B. \`*Quellen:* GOÄ § … · GOÄ-Ziffer … · DocBill: …\`. **Keine** vagen Angaben ohne §/Ziffer/Datei. **Ohne** solche Bezüge: den \`*Quellen:*\`-Abschnitt **weglassen** – **keine** erfundenen Paragraphen, **kein** Hinweis auf fehlende Quellen.
+- **Struktur:** **höchstens eine** \`###\`-Überschrift (z. B. \`### Antwort\`), darunter kompakte Absätze und optional \`- \` Bullets (**höchstens 6**). Keine weiteren \`###\`.
+- **Quellen:** Nur wenn du den **gelieferten** Kontext für **konkrete** Fakten nutzt: **eine** abschließende Zeile \`*Quellen:* …\` mit \` · \` getrennt. Ohne Bezug: Zeile weglassen (kein „keine Quelle“).
 `;
 
-/** Anweisung für genau ein JSON-Objekt als Modellausgabe (kein Markdown außerhalb). */
+/** JSON-Fragemodus (ein Objekt). */
 export const FRAGE_JSON_OUTPUT_RULES = `
 ## Ausgabeformat (verbindlich)
 
-**STRENG VERBOTEN** in \`erlaeuterung\` und \`grenzfaelle_hinweise\`: \`Korrekt:\`, \`Zusatz:\`, \`**Korrekt:**\`, \`**Zusatz:**\` am Zeilenanfang (auch mit \`- \`). Nur normale Bullets oder \`- **Fehler:** …\` bei Verstößen.
+**STRENG VERBOTEN:** \`Korrekt:\` / \`Zusatz:\` als Zeilenanfang (auch mit \`- \`).
 
-Deine **gesamte** Antwort für den Nutzer besteht aus **einem einzigen gültigen JSON-Objekt** (UTF-8). **Kein** Text vor oder nach dem JSON, **keine** Markdown-Codefences, **keine** Erklärung.
+Deine **gesamte** Antwort = **ein** gültiges JSON-Objekt (UTF-8). **Kein** Text außerhalb, **keine** Codefences.
 
-Erlaubtes Schema (alle Schlüssel **müssen** vorkommen):
-- \`kurzantwort\` (string): **Max. 1–2 sehr kurze Sätze**, keine Aufzählung.
-- \`erlaeuterung\` (string): **Markdown-Liste** mit Zeilen \`- …\`. **Keine** Präfixe **Korrekt:** oder **Zusatz:**. Zeilen entweder als sachlicher Bullet \`- Text\` oder – nur bei klarem Verstoß – \`- **Fehler:** …\`. Pro Bullet ein bis zwei kurze Sätze; **keine** langen Fließtexte. Meta-Fragen: nur solche Bullets. **Keine** \`###\`-Überschriften in diesem String.
-- \`quellen\` (array von strings): **Nur nicht-leer**, wenn du Inhalte aus dem **gelieferten Kontext** für **konkrete** Fakten belegst (GOÄ-Paragraf, Ziffer/Katalog, DocBill-Regelwerk-Abschnitt, Admin-Dateiname). **Jede** verwendete Fundstelle **ein** Listeneintrag, z. B. \`"GOÄ § …"\`, \`"GOÄ-Ziffer …"\`, \`"DocBill: …"\`, \`"Admin-Kontext [Dateiname]"\`. **Keine** vagen Formulierungen wie nur „nach GOÄ“ ohne §/Ziffer/Datei. **Mehrere** Bezüge → **mehrere** Einträge. **Ohne** solche konkreten Bezüge: **leeres Array** \`[]\` – **keine** Platzhalter-Einträge und **keine** Texte wie „keine Quelle“ oder „keine Fundstelle“; **keine** erfundenen Paragraphen. **Streng verboten** in \`quellen\`: jede Formulierung wie „**keine passende Fundstelle im gelieferten Kontext**“ (oder sinngleich) – **niemals**; stattdessen \`[]\`.
-- \`grenzfaelle_hinweise\` (string): optional; leer \`""\` wenn nichts Passtes. Wenn Text: \`- \` **Listen** wie \`erlaeuterung\` (ohne Korrekt:/Zusatz:); keine \`###\`. Sonst \`*Kein spezieller Hinweis.*\` ohne Bullets.
+**Schema (Pflichtschlüssel nur \`kurzantwort\`):**
+- \`kurzantwort\` (string): **Alles** inhaltlich Relevante: Markdown mit kurzen Absätzen und optional \`- \` Bullets (**höchstens 6**). Keine \`###\` in diesem String nötig. Kein Gruß. Fundstellen aus dem **mitgelieferten** Kontext optional **zuletzt** als eine Zeile \`*Quellen:* …\` mit \` · \` — sonst weglassen. Keine Platzhalter-„keine Quelle“-Sätze.
 
-Beispiele:
-{"kurzantwort":"Bei Faktor > 2,3 ist eine Begründung erforderlich.","erlaeuterung":"- Regelfall bis 2,3×.\\n- Darüber nur bei besonderem Aufwand/Schwierigkeit (§ 5 GOÄ im Kontext).\\n- Begründung konkret und dokumentationsstützbar formulieren.","quellen":["GOÄ § 5 Abs. 2","GOÄ-Ziffer 1 aus dem Katalog"],"grenzfaelle_hinweise":"- Ohne Behandlungskontext nur allgemeine Einordnung."}
-{"kurzantwort":"Ich erkläre GOÄ und DocBill-Kontext; ich erstelle keine Rechnungen.","erlaeuterung":"- Ich erkläre GOÄ-Ziffern, Paragraphen, Steigerungsfaktoren, Ausschlüsse und Analogabrechnungen basierend auf dem aktuellen GOÄ-Katalog und den DocBill-Regelwerken.\\n- Ich helfe bei der Optimierung der Begründungsqualität und der korrekten Ziffernwahl, um die Abrechnung rechtssicher zu gestalten.\\n- Bei Unklarheiten oder unvollständiger Dokumentation weise ich auf fehlende Informationen hin und bewerte mögliche Risiken für die Erstattungsfähigkeit.\\n- Ich kann auch Informationen aus den bereitgestellten Admin-Wissensdateien nutzen, sofern diese relevant für die Nutzerfrage sind.","quellen":[],"grenzfaelle_hinweise":"- Ich erstelle keine medizinischen Diagnosen oder Befunde und gebe keine medizinischen Empfehlungen.\\n- Rechtsberatung kann und darf ich nicht leisten; meine Aussagen dienen der Orientierung im Rahmen der GOÄ-Vorschriften."}
+Beispiel:
+{"kurzantwort":"Bei Faktor über der Katalogschwelle ist eine dokumentationsgestützte Begründung nötig.\\n- Prüfe Schwellen- und Höchstfaktor der Ziffer im Katalog.\\n- Formuliere den medizinischen Mehraufwand konkret.\\n\\n*Quellen:* GOÄ § 5 Abs. 2 · GOÄ-Ziffer aus Katalogauszug"}
 `;

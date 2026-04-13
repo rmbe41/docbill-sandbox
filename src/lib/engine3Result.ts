@@ -20,6 +20,11 @@ export interface Engine3Position {
   begruendung?: string;
 }
 
+export interface Engine3TopVorschlag extends Engine3Position {
+  rang: 1 | 2 | 3;
+  empfohlen?: boolean;
+}
+
 export interface Engine3Hinweis {
   schwere: "fehler" | "warnung" | "info";
   titel: string;
@@ -43,6 +48,7 @@ export interface Engine3ResultData {
   positionen: Engine3Position[];
   hinweise: Engine3Hinweis[];
   optimierungen?: Engine3Position[];
+  topVorschlaege?: Engine3TopVorschlag[];
   zusammenfassung: Engine3Summary;
   /** Nur in älteren gespeicherten Antworten */
   goaeStandHinweis?: string;
@@ -275,6 +281,50 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
     }
   }
 
+  let topVorschlaege: Engine3TopVorschlag[] | undefined;
+  if (o.topVorschlaege != null) {
+    const topRaw = o.topVorschlaege;
+    if (!Array.isArray(topRaw)) return null;
+    topVorschlaege = [];
+    for (const p of topRaw) {
+      if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+      const r = p as Record<string, unknown>;
+      const nr = coerceDeNumber(r.nr);
+      const ziffer = coerceZiffer(r.ziffer);
+      const bezeichnung =
+        typeof r.bezeichnung === "string"
+          ? r.bezeichnung
+          : typeof r.bezeichnung === "number" && Number.isFinite(r.bezeichnung)
+            ? String(r.bezeichnung)
+            : "";
+      const faktor = coerceDeNumber(r.faktor);
+      const betrag = coerceDeNumber(r.betrag);
+      const st = normalizeStatus(r.status);
+      const rang = coerceDeNumber(r.rang);
+      if (
+        !Number.isFinite(nr) || !ziffer || !Number.isFinite(faktor) || !Number.isFinite(betrag) || !st ||
+        !Number.isFinite(rang)
+      ) {
+        return null;
+      }
+      const rInt = Math.round(rang);
+      if (rInt < 1 || rInt > 3) return null;
+      topVorschlaege.push({
+        nr: Math.round(nr),
+        ziffer,
+        bezeichnung,
+        faktor,
+        betrag,
+        status: st,
+        rang: rInt as 1 | 2 | 3,
+        ...(typeof r.empfohlen === "boolean" && r.empfohlen ? { empfohlen: true } : {}),
+        ...(typeof r.anmerkung === "string" ? { anmerkung: r.anmerkung } : {}),
+        ...(typeof r.quelleText === "string" ? { quelleText: r.quelleText } : {}),
+        ...(typeof r.begruendung === "string" ? { begruendung: r.begruendung } : {}),
+      });
+    }
+  }
+
   const summ = o.zusammenfassung;
   let zusammenfassung: Engine3Summary;
   if (summ && typeof summ === "object" && !Array.isArray(summ)) {
@@ -309,6 +359,7 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
     positionen,
     hinweise,
     ...(optimierungen?.length ? { optimierungen } : {}),
+    ...(topVorschlaege?.length ? { topVorschlaege } : {}),
     zusammenfassung,
     ...(typeof o.goaeStandHinweis === "string" ? { goaeStandHinweis: o.goaeStandHinweis } : {}),
     ...(Array.isArray(o.adminQuellen) &&

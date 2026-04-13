@@ -34,6 +34,8 @@ export type ExecuteGoaeChatParams = {
   onFreeModelsExhausted?: (details: string | null) => void;
   guidedWorkflow?: GuidedWorkflowKind;
   guidedPhase?: "collect";
+  /** Partition der Datei-Indizes für Engine-3-Rechnungsprüfung (mehrere PDFs). */
+  engine3CaseGroups?: number[][];
 };
 
 export type ExecuteGoaeChatHttpError = {
@@ -91,6 +93,7 @@ export async function executeGoaeChatRequest(
         ...(params.guidedWorkflow && params.guidedPhase
           ? { guided_workflow: params.guidedWorkflow, guided_phase: params.guidedPhase }
           : {}),
+        ...(params.engine3CaseGroups?.length ? { engine3_case_groups: params.engine3CaseGroups } : {}),
       }),
       signal: params.signal,
     });
