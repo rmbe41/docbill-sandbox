@@ -944,7 +944,7 @@ serve(async (req) => {
 
     let response: Response;
 
-    const useEngine3 = engine_type === "engine3";
+    const useEngine3 = engine_type === "engine3" || engine_type === "engine3_1";
 
     if (useEngine3 && intent === "leistungen_abrechnen") {
       response = await runEngine3AsStream(
@@ -1060,7 +1060,7 @@ serve(async (req) => {
         adminContext,
         OPENROUTER_API_KEY,
         undefined,
-        engine_type === "engine3" ? 200 : 100,
+        useEngine3 ? 200 : 100,
         kontextWissenEnabled,
       );
     }

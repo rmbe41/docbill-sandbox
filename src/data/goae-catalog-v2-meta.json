@@ -1,0 +1,17 @@
+{
+  "source": "goae-v2-builder",
+  "builtAt": "2026-04-13T11:52:12.958Z",
+  "inputs": {
+    "legacyCatalog": "/Users/robinbetz/docbill/src/data/goae-catalog-full.json",
+    "goaePdfProvided": true,
+    "pkvPdfProvided": true
+  },
+  "recordCounts": {
+    "sections": 16,
+    "codes": 2442,
+    "rules": 5619,
+    "analogMappings": 462,
+    "termIndex": 1000,
+    "searchIndex": 8523
+  }
+}

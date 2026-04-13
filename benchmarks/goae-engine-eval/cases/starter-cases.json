@@ -1,0 +1,313 @@
+[
+  {
+    "id": "L1_single_standard_001",
+    "difficulty": "L1",
+    "tags": ["baseline"],
+    "inputDraft": {
+      "positions": [{ "id": "p1", "code": "5", "factor": 2.3, "count": 1 }],
+      "context": { "setting": "ambulant", "specialty": "allgemein" }
+    },
+    "gold": {
+      "expectedFindings": [],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "5", "factor": 2.3, "count": 1 }], "context": { "setting": "ambulant", "specialty": "allgemein" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 10.72 }], "totalAmount": 10.72 },
+      "requiredEvidence": { "mustHaveSourceRef": false, "mustIncludeLegalRefs": [] }
+    }
+  },
+  {
+    "id": "L1_high_factor_warn_002",
+    "difficulty": "L1",
+    "tags": ["faktor"],
+    "inputDraft": {
+      "positions": [{ "id": "p1", "code": "5", "factor": 2.8, "count": 1 }],
+      "context": { "setting": "ambulant", "specialty": "allgemein" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "faktor", "severity": "warning", "codeRefs": ["5"] }],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "5", "factor": 2.8, "count": 1 }], "context": { "setting": "ambulant", "specialty": "allgemein" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 13.05 }], "totalAmount": 13.05 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["GOÄ §5"] }
+    }
+  },
+  {
+    "id": "L1_over_max_error_003",
+    "difficulty": "L1",
+    "tags": ["faktor", "hard-error"],
+    "inputDraft": {
+      "positions": [{ "id": "p1", "code": "1", "factor": 4.0, "count": 1 }],
+      "context": { "setting": "ambulant", "specialty": "allgemein" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "faktor", "severity": "error", "codeRefs": ["1"] }],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "1", "factor": 3.5, "count": 1 }], "context": { "setting": "ambulant", "specialty": "allgemein" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 9.79 }], "totalAmount": 9.79 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["GOÄ §5"] }
+    }
+  },
+  {
+    "id": "L1_time_min_34_fail_004",
+    "difficulty": "L1",
+    "tags": ["zeit"],
+    "inputDraft": {
+      "positions": [{ "id": "p1", "code": "34", "factor": 2.3, "durationMin": 10 }],
+      "context": { "setting": "ambulant", "specialty": "psycho" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "zeit", "severity": "error", "codeRefs": ["34"] }],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "34", "factor": 2.3, "durationMin": 10 }], "context": { "setting": "ambulant", "specialty": "psycho" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 40.23 }], "totalAmount": 40.23 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["Leistungslegende GOÄ-Ziffer"] }
+    }
+  },
+  {
+    "id": "L2_exclusion_1_3_001",
+    "difficulty": "L2",
+    "tags": ["ausschluss"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "1", "factor": 2.3 },
+        { "id": "p2", "code": "3", "factor": 2.3 }
+      ],
+      "context": { "setting": "ambulant", "specialty": "allgemein" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "ausschluss", "severity": "error", "codeRefs": ["1", "3"] }],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p2", "code": "3", "factor": 2.3 }], "context": { "setting": "ambulant", "specialty": "allgemein" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p2", "amount": 20.11 }], "totalAmount": 20.11 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["Ausschlussziffern GOÄ-Katalog"] }
+    }
+  },
+  {
+    "id": "L2_exclusion_1201_1202_002",
+    "difficulty": "L2",
+    "tags": ["ausschluss", "augenheilkunde"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "1201", "factor": 2.3 },
+        { "id": "p2", "code": "1202", "factor": 2.3 }
+      ],
+      "context": { "setting": "ambulant", "specialty": "augenheilkunde" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "ausschluss", "severity": "error", "codeRefs": ["1201", "1202"] }],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "1201", "factor": 2.3 }], "context": { "setting": "ambulant", "specialty": "augenheilkunde" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 13.15 }], "totalAmount": 13.15 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["Ausschlussziffern GOÄ-Katalog"] }
+    }
+  },
+  {
+    "id": "L2_amount_mismatch_multi_003",
+    "difficulty": "L2",
+    "tags": ["rechenfehler"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "5", "factor": 2.3, "amountClaimed": 99.99 },
+        { "id": "p2", "code": "1", "factor": 2.3, "amountClaimed": 12.22 }
+      ],
+      "context": { "setting": "ambulant", "specialty": "allgemein" }
+    },
+    "gold": {
+      "expectedFindings": [
+        { "category": "rechenfehler", "severity": "warning", "codeRefs": ["5"] },
+        { "category": "rechenfehler", "severity": "warning", "codeRefs": ["1"] }
+      ],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "5", "factor": 2.3 }, { "id": "p2", "code": "1", "factor": 2.3 }], "context": { "setting": "ambulant", "specialty": "allgemein" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 10.72 }, { "id": "p2", "amount": 6.43 }], "totalAmount": 17.15 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": [] }
+    }
+  },
+  {
+    "id": "L2_time_bundle_unrealistic_004",
+    "difficulty": "L2",
+    "tags": ["zeit", "plausibilitaet"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "30", "factor": 2.3, "durationMin": 300 },
+        { "id": "p2", "code": "31", "factor": 2.3, "durationMin": 240 },
+        { "id": "p3", "code": "34", "factor": 2.3, "durationMin": 220 }
+      ],
+      "context": { "setting": "ambulant", "specialty": "psycho" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "zeit", "severity": "warning", "codeRefs": ["30", "31", "34"] }],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "30", "factor": 2.3, "durationMin": 300 }, { "id": "p2", "code": "31", "factor": 2.3, "durationMin": 240 }, { "id": "p3", "code": "34", "factor": 2.3, "durationMin": 220 }], "context": { "setting": "ambulant", "specialty": "psycho" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 120.34 }, { "id": "p2", "amount": 61.22 }, { "id": "p3", "amount": 40.23 }], "totalAmount": 221.79 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": [] }
+    }
+  },
+  {
+    "id": "L3_zielleistung_bloodstopping_001",
+    "difficulty": "L3",
+    "tags": ["zielleistung", "op"],
+    "inputDraft": {
+      "positions": [{ "id": "p1", "code": "253", "factor": 2.3, "notes": "Blutstillung als Teilschritt der OP" }],
+      "context": { "setting": "op", "specialty": "chirurgie" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "zielleistung", "severity": "error", "codeRefs": ["253"] }],
+      "expectedCorrectedDraft": { "positions": [], "context": { "setting": "op", "specialty": "chirurgie" } },
+      "expectedAmounts": { "positionAmounts": [], "totalAmount": 0 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["GOÄ §4 Abs.2a", "GOÄ §6 Abs.2"] }
+    }
+  },
+  {
+    "id": "L3_conflict_chain_002",
+    "difficulty": "L3",
+    "tags": ["ausschluss", "multi"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "1", "factor": 2.3 },
+        { "id": "p2", "code": "3", "factor": 2.3 },
+        { "id": "p3", "code": "1201", "factor": 2.3 },
+        { "id": "p4", "code": "1202", "factor": 2.3 }
+      ],
+      "context": { "setting": "ambulant", "specialty": "augenheilkunde" }
+    },
+    "gold": {
+      "expectedFindings": [
+        { "category": "ausschluss", "severity": "error", "codeRefs": ["1", "3"] },
+        { "category": "ausschluss", "severity": "error", "codeRefs": ["1201", "1202"] }
+      ],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p2", "code": "3", "factor": 2.3 }, { "id": "p3", "code": "1201", "factor": 2.3 }], "context": { "setting": "ambulant", "specialty": "augenheilkunde" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p2", "amount": 20.11 }, { "id": "p3", "amount": 13.15 }], "totalAmount": 33.26 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["Ausschlussziffern GOÄ-Katalog"] }
+    }
+  },
+  {
+    "id": "L3_factor_time_combo_003",
+    "difficulty": "L3",
+    "tags": ["faktor", "zeit", "mixed"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "34", "factor": 2.8, "durationMin": 12 },
+        { "id": "p2", "code": "1", "factor": 4.0, "durationMin": 5 }
+      ],
+      "context": { "setting": "ambulant", "specialty": "psycho" }
+    },
+    "gold": {
+      "expectedFindings": [
+        { "category": "zeit", "severity": "error", "codeRefs": ["34"] },
+        { "category": "faktor", "severity": "warning", "codeRefs": ["34"] },
+        { "category": "faktor", "severity": "error", "codeRefs": ["1"] }
+      ],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "34", "factor": 2.8, "durationMin": 12 }, { "id": "p2", "code": "1", "factor": 3.5, "durationMin": 5 }], "context": { "setting": "ambulant", "specialty": "psycho" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 48.97 }, { "id": "p2", "amount": 9.79 }], "totalAmount": 58.76 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["GOÄ §5", "Leistungslegende GOÄ-Ziffer"] }
+    }
+  },
+  {
+    "id": "L3_stationary_time_overload_004",
+    "difficulty": "L3",
+    "tags": ["zeit", "stationaer"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "30", "factor": 2.3, "durationMin": 520 },
+        { "id": "p2", "code": "31", "factor": 2.3, "durationMin": 470 }
+      ],
+      "context": { "setting": "stationaer", "specialty": "psychiatrie" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "zeit", "severity": "warning", "codeRefs": ["30", "31"] }],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "30", "factor": 2.3, "durationMin": 520 }, { "id": "p2", "code": "31", "factor": 2.3, "durationMin": 470 }], "context": { "setting": "stationaer", "specialty": "psychiatrie" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 120.34 }, { "id": "p2", "amount": 61.22 }], "totalAmount": 181.56 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": [] }
+    }
+  },
+  {
+    "id": "L4_ambiguous_analog_001",
+    "difficulty": "L4",
+    "tags": ["analog", "manual-review"],
+    "inputDraft": {
+      "positions": [{ "id": "p1", "code": "78", "factor": 2.3, "notes": "individueller Therapieplan ausserhalb Onkologie" }],
+      "context": { "setting": "stationaer", "specialty": "innere" }
+    },
+    "gold": {
+      "expectedFindings": [{ "category": "analog", "severity": "warning", "codeRefs": ["78"] }],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "78", "factor": 2.3, "notes": "individueller Therapieplan ausserhalb Onkologie" }], "context": { "setting": "stationaer", "specialty": "innere" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 20.34 }], "totalAmount": 20.34 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["GOÄ §6 Abs.2"] }
+    }
+  },
+  {
+    "id": "L4_multiconflict_priority_002",
+    "difficulty": "L4",
+    "tags": ["priority", "ausschluss", "faktor", "zeit"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "1", "factor": 4.2 },
+        { "id": "p2", "code": "3", "factor": 2.3 },
+        { "id": "p3", "code": "34", "factor": 2.6, "durationMin": 10 }
+      ],
+      "context": { "setting": "ambulant", "specialty": "allgemein" }
+    },
+    "gold": {
+      "expectedFindings": [
+        { "category": "ausschluss", "severity": "error", "codeRefs": ["1", "3"] },
+        { "category": "faktor", "severity": "error", "codeRefs": ["1"] },
+        { "category": "zeit", "severity": "error", "codeRefs": ["34"] },
+        { "category": "faktor", "severity": "warning", "codeRefs": ["34"] }
+      ],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p2", "code": "3", "factor": 2.3 }, { "id": "p3", "code": "34", "factor": 2.6, "durationMin": 10 }], "context": { "setting": "ambulant", "specialty": "allgemein" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p2", "amount": 20.11 }, { "id": "p3", "amount": 45.48 }], "totalAmount": 65.59 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["GOÄ §5", "Ausschlussziffern GOÄ-Katalog"] }
+    }
+  },
+  {
+    "id": "L4_sparse_docs_high_factor_003",
+    "difficulty": "L4",
+    "tags": ["evidence", "faktor"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "5", "factor": 2.9, "notes": "" },
+        { "id": "p2", "code": "34", "factor": 2.7, "durationMin": 22, "notes": "" }
+      ],
+      "context": { "setting": "unknown", "specialty": "unknown" }
+    },
+    "gold": {
+      "expectedFindings": [
+        { "category": "faktor", "severity": "warning", "codeRefs": ["5"] },
+        { "category": "faktor", "severity": "warning", "codeRefs": ["34"] },
+        { "category": "kontext", "severity": "warning", "codeRefs": ["5", "34"] }
+      ],
+      "expectedCorrectedDraft": { "positions": [{ "id": "p1", "code": "5", "factor": 2.9 }, { "id": "p2", "code": "34", "factor": 2.7, "durationMin": 22 }], "context": { "setting": "unknown", "specialty": "unknown" } },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p1", "amount": 13.51 }, { "id": "p2", "amount": 47.23 }], "totalAmount": 60.74 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["GOÄ §5"] }
+    }
+  },
+  {
+    "id": "L4_full_stress_004",
+    "difficulty": "L4",
+    "tags": ["stress", "mixed"],
+    "inputDraft": {
+      "positions": [
+        { "id": "p1", "code": "1", "factor": 2.3 },
+        { "id": "p2", "code": "3", "factor": 2.3 },
+        { "id": "p3", "code": "1201", "factor": 2.3 },
+        { "id": "p4", "code": "1202", "factor": 2.3 },
+        { "id": "p5", "code": "34", "factor": 2.8, "durationMin": 12 },
+        { "id": "p6", "code": "253", "factor": 2.3, "notes": "Blutstillung als Teilschritt der OP" }
+      ],
+      "context": { "setting": "op", "specialty": "augenheilkunde" }
+    },
+    "gold": {
+      "expectedFindings": [
+        { "category": "ausschluss", "severity": "error", "codeRefs": ["1", "3"] },
+        { "category": "ausschluss", "severity": "error", "codeRefs": ["1201", "1202"] },
+        { "category": "zeit", "severity": "error", "codeRefs": ["34"] },
+        { "category": "faktor", "severity": "warning", "codeRefs": ["34"] },
+        { "category": "zielleistung", "severity": "error", "codeRefs": ["253"] }
+      ],
+      "expectedCorrectedDraft": {
+        "positions": [
+          { "id": "p2", "code": "3", "factor": 2.3 },
+          { "id": "p3", "code": "1201", "factor": 2.3 },
+          { "id": "p5", "code": "34", "factor": 2.8, "durationMin": 12 }
+        ],
+        "context": { "setting": "op", "specialty": "augenheilkunde" }
+      },
+      "expectedAmounts": { "positionAmounts": [{ "id": "p2", "amount": 20.11 }, { "id": "p3", "amount": 13.15 }, { "id": "p5", "amount": 48.97 }], "totalAmount": 82.23 },
+      "requiredEvidence": { "mustHaveSourceRef": true, "mustIncludeLegalRefs": ["GOÄ §4 Abs.2a", "GOÄ §5", "Ausschlussziffern GOÄ-Katalog"] }
+    }
+  }
+]
+

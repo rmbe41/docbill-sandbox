@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docbill.local/schemas/goae-benchmark-result.schema.json",
+  "title": "GOAE Benchmark Result",
+  "type": "object",
+  "required": ["caseId", "engine", "runId", "metrics", "raw"],
+  "properties": {
+    "caseId": { "type": "string" },
+    "engine": { "type": "string", "enum": ["simple", "complex", "engine3", "engine3_1"] },
+    "runId": { "type": "string" },
+    "metrics": {
+      "type": "object",
+      "required": ["rulePrecision", "ruleRecall", "ruleF1", "correctionScore", "amountScore", "evidenceScore", "opsScore", "totalScore"],
+      "properties": {
+        "rulePrecision": { "type": "number", "minimum": 0, "maximum": 100 },
+        "ruleRecall": { "type": "number", "minimum": 0, "maximum": 100 },
+        "ruleF1": { "type": "number", "minimum": 0, "maximum": 100 },
+        "correctionScore": { "type": "number", "minimum": 0, "maximum": 100 },
+        "amountScore": { "type": "number", "minimum": 0, "maximum": 100 },
+        "evidenceScore": { "type": "number", "minimum": 0, "maximum": 100 },
+        "opsScore": { "type": "number", "minimum": 0, "maximum": 100 },
+        "totalScore": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "raw": {
+      "type": "object",
+      "required": ["findings", "correctedDraft", "amounts"],
+      "properties": {
+        "findings": { "type": "array", "items": { "type": "object" } },
+        "correctedDraft": { "type": "object" },
+        "amounts": {
+          "type": "object",
+          "required": ["positionAmounts", "totalAmount"],
+          "properties": {
+            "positionAmounts": { "type": "array", "items": { "type": "object" } },
+            "totalAmount": { "type": "number" }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}
+

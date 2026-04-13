@@ -66,6 +66,41 @@ type ContextFile = {
   storage_path?: string | null;
 };
 
+type BenchmarkSummaryRow = {
+  engine: "simple" | "complex" | "engine3" | "engine3_1";
+  total_score: number;
+  rule_f1: number;
+  correction_score: number;
+  amount_score: number;
+  evidence_score: number;
+  ops_score: number;
+  l1_score: number;
+  l2_score: number;
+  l3_score: number;
+  l4_score: number;
+};
+
+type BenchmarkLatestPayload = {
+  latestRun: {
+    id: string;
+    status: "running" | "done" | "failed";
+    started_at: string;
+    finished_at?: string | null;
+    case_count: number;
+    error?: string | null;
+  } | null;
+  summaries: BenchmarkSummaryRow[];
+  historyRuns?: {
+    id: string;
+    started_at: string;
+    finished_at?: string | null;
+    status: "running" | "done" | "failed";
+    case_count: number;
+    error?: string | null;
+    summaries: BenchmarkSummaryRow[];
+  }[];
+};
+
 const serializeGlobalRuleFields = (fields: string[]): string =>
   fields.map((f) => f.trim()).filter(Boolean).join(GLOBAL_RULE_SEPARATOR);
 
@@ -129,15 +164,15 @@ const parseGlobalRuleFields = (value: string): string[] => {
   return [value];
 };
 
-type ChatEngineChoice = "simple" | "complex" | "engine3" | "direct" | "direct_local";
+type ChatEngineChoice = "simple" | "complex" | "engine3" | "engine3_1" | "direct" | "direct_local";
 
 function engineFromDbGlobal(v: string | undefined): ChatEngineChoice {
-  if (v === "simple" || v === "engine3" || v === "direct" || v === "direct_local") return v;
+  if (v === "simple" || v === "engine3" || v === "engine3_1" || v === "direct" || v === "direct_local") return v;
   return "complex";
 }
 
 function engineFromDbUser(v: string | null | undefined): ChatEngineChoice | null {
-  if (v === "simple" || v === "complex" || v === "engine3" || v === "direct" || v === "direct_local") return v;
+  if (v === "simple" || v === "complex" || v === "engine3" || v === "engine3_1" || v === "direct" || v === "direct_local") return v;
   return null;
 }
 
@@ -275,6 +310,9 @@ const SettingsContent = ({
   const modelRef = useRef("");
 
   const [credits, setCredits] = useState<{ total_credits: number | null; total_usage: number | null; remaining: number | null; error?: string } | null>(null);
+  const [benchmarkData, setBenchmarkData] = useState<BenchmarkLatestPayload | null>(null);
+  const [benchmarkLoading, setBenchmarkLoading] = useState(false);
+  const [benchmarkRunning, setBenchmarkRunning] = useState(false);
 
   type PraxisStammdaten = {
     praxis?: { name?: string; adresse?: string; telefon?: string; email?: string; steuernummer?: string };
@@ -362,6 +400,68 @@ const SettingsContent = ({
     };
     fetchCredits();
   }, [activeTab]);
+
+  const loadBenchmarkStatus = useCallback(async () => {
+    if (!isAdmin || !user) return;
+    setBenchmarkLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("benchmark-run", {
+        body: { action: "latest" },
+      });
+      if (error) throw new Error(error.message);
+      const payload = data as BenchmarkLatestPayload;
+      setBenchmarkData(payload);
+      const isRunning = payload?.latestRun?.status === "running";
+      setBenchmarkRunning(isRunning);
+    } catch (err) {
+      setBenchmarkData(null);
+      setBenchmarkRunning(false);
+      toast({
+        title: "Benchmark",
+        description: err instanceof Error ? err.message : "Benchmark-Status konnte nicht geladen werden.",
+        variant: "destructive",
+      });
+    } finally {
+      setBenchmarkLoading(false);
+    }
+  }, [isAdmin, user, toast]);
+
+  useEffect(() => {
+    if (activeTab !== "global" || !isAdmin || !user) return;
+    void loadBenchmarkStatus();
+  }, [activeTab, isAdmin, user, loadBenchmarkStatus]);
+
+  const startBenchmarkRun = useCallback(async () => {
+    if (!isAdmin || !user) return;
+    setBenchmarkRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("benchmark-run", {
+        body: { action: "start" },
+      });
+      if (error) throw new Error(error.message);
+      const payload = data as BenchmarkLatestPayload & { runId?: string };
+      setBenchmarkData({
+        latestRun: payload.latestRun,
+        summaries: payload.summaries,
+        historyRuns: payload.historyRuns ?? [],
+      });
+      toast({
+        title: "Benchmark gestartet",
+        description: payload.runId ? `Run-ID: ${payload.runId}` : "Benchmark-Lauf wurde ausgeführt.",
+      });
+    } catch (err) {
+      setBenchmarkRunning(false);
+      toast({
+        title: "Benchmark-Fehler",
+        description: err instanceof Error ? err.message : "Benchmark konnte nicht gestartet werden.",
+        variant: "destructive",
+      });
+      return;
+    }
+    window.setTimeout(() => {
+      void loadBenchmarkStatus();
+    }, 1200);
+  }, [isAdmin, user, toast, loadBenchmarkStatus]);
 
   useEffect(() => {
     if (activeTab !== "global" || !isAdmin || !user) return;
@@ -967,6 +1067,8 @@ const SettingsContent = ({
         ? "simple"
         : value === "engine3"
           ? "engine3"
+          : value === "engine3_1"
+            ? "engine3_1"
           : value === "direct"
             ? "direct"
             : value === "direct_local"
@@ -1257,6 +1359,92 @@ const SettingsContent = ({
                 )}
               </div>
             </div>
+            {activeTab === "global" && isAdmin && (
+              <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Engine Benchmark</p>
+                    <p className="text-sm font-medium text-foreground mt-0.5">
+                      {benchmarkData?.latestRun
+                        ? `Letzter Lauf: ${new Date(benchmarkData.latestRun.started_at).toLocaleString("de-DE")}`
+                        : "Noch kein Benchmark-Lauf gespeichert"}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      Vergleicht alle Engines auf mehreren Testfällen mit Goldstandard. Bewertet werden RuleF1, Korrekturqualität, Betragsgenauigkeit,
+                      Evidenzqualität und Betriebsmesswerte. Der Verlauf zeigt, ob sich eine Engine über die Zeit verbessert oder verschlechtert.
+                    </p>
+                    {benchmarkData?.latestRun ? (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Status: {benchmarkData.latestRun.status} · Fälle: {benchmarkData.latestRun.case_count}
+                      </p>
+                    ) : null}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={startBenchmarkRun}
+                    disabled={benchmarkLoading || benchmarkRunning}
+                    className="gap-2 shrink-0"
+                  >
+                    {(benchmarkLoading || benchmarkRunning) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                    {benchmarkRunning ? "Benchmark läuft..." : "Benchmark starten"}
+                  </Button>
+                </div>
+                {benchmarkData?.summaries?.length ? (
+                  <div className="space-y-2">
+                    {benchmarkData.summaries
+                      .slice()
+                      .sort((a, b) => b.total_score - a.total_score)
+                      .map((row) => {
+                        const engine3 = benchmarkData.summaries.find((s) => s.engine === "engine3");
+                        const delta = engine3 && row.engine === "engine3_1" ? row.total_score - engine3.total_score : null;
+                        return (
+                          <div key={row.engine} className="rounded-lg border border-border bg-background/70 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-foreground">{row.engine}</p>
+                              <div className="text-right">
+                                <p className="text-sm font-semibold text-foreground">{row.total_score.toFixed(1)} / 100</p>
+                                {delta !== null ? (
+                                  <p className={`text-xs ${delta >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                                    Delta vs engine3: {delta >= 0 ? "+" : ""}{delta.toFixed(1)}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              RuleF1 {row.rule_f1.toFixed(1)} · Correction {row.correction_score.toFixed(1)} · Amount {row.amount_score.toFixed(1)} · Evidence {row.evidence_score.toFixed(1)} · Ops {row.ops_score.toFixed(1)}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              L1 {row.l1_score.toFixed(1)} · L2 {row.l2_score.toFixed(1)} · L3 {row.l3_score.toFixed(1)} · L4 {row.l4_score.toFixed(1)}
+                            </p>
+                          </div>
+                        );
+                      })}
+                  </div>
+                ) : null}
+                {benchmarkData?.historyRuns?.length ? (
+                  <div className="rounded-lg border border-border bg-background/60 p-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Verlauf (letzte Runs)</p>
+                    <div className="space-y-1 max-h-40 overflow-auto">
+                      {benchmarkData.historyRuns.slice(0, 8).map((run) => {
+                        const s31 = run.summaries.find((s) => s.engine === "engine3_1");
+                        const s3 = run.summaries.find((s) => s.engine === "engine3");
+                        const delta = s31 && s3 ? s31.total_score - s3.total_score : null;
+                        return (
+                          <div key={run.id} className="text-xs text-muted-foreground flex items-center justify-between gap-2">
+                            <span>{new Date(run.started_at).toLocaleString("de-DE")} · {run.status}</span>
+                            <span>
+                              {s31 ? `E3.1 ${s31.total_score.toFixed(1)}` : "E3.1 -"} · {s3 ? `E3 ${s3.total_score.toFixed(1)}` : "E3 -"}
+                              {delta !== null ? ` · Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}` : ""}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
             <div className="space-y-3">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">KI-Modell wählen</p>
               <p className="text-xs text-muted-foreground -mt-1">
@@ -1368,6 +1556,9 @@ const SettingsContent = ({
                   </SelectItem>
                   <SelectItem value="engine3">
                     <span className="font-medium">Engine 3 (neu)</span>
+                  </SelectItem>
+                  <SelectItem value="engine3_1">
+                    <span className="font-medium">Engine 3.1 (GOAE v2)</span>
                   </SelectItem>
                   <SelectItem value="direct">
                     <span className="font-medium">Direktmodell</span>

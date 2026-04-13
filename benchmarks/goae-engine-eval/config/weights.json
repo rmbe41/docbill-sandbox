@@ -1,0 +1,22 @@
+{
+  "metricWeights": {
+    "ruleF1": 0.4,
+    "correctionScore": 0.25,
+    "amountScore": 0.15,
+    "evidenceScore": 0.1,
+    "opsScore": 0.1
+  },
+  "difficultyWeights": {
+    "L1": 0.15,
+    "L2": 0.25,
+    "L3": 0.4,
+    "L4": 0.2
+  },
+  "releaseGates": {
+    "minDeltaL3L4VsEngine3": 8.0,
+    "maxErrorFalsePositiveDeltaPct": 2.0,
+    "minAmountScoreDelta": -1.0,
+    "maxLatencyDeltaPct": 30.0
+  }
+}
+

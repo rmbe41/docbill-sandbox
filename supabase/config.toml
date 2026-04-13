@@ -14,3 +14,6 @@ verify_jwt = true
 
 [functions.feedback]
 verify_jwt = false
+
+[functions.benchmark-run]
+verify_jwt = false

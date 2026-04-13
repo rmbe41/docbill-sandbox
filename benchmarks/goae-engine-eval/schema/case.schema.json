@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docbill.local/schemas/goae-benchmark-case.schema.json",
+  "title": "GOAE Benchmark Case List",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "required": ["id", "difficulty", "tags", "inputDraft", "gold"],
+    "properties": {
+      "id": { "type": "string", "minLength": 3 },
+      "difficulty": { "type": "string", "enum": ["L1", "L2", "L3", "L4"] },
+      "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+      "notes": { "type": "string" },
+      "inputDraft": {
+        "type": "object",
+        "required": ["positions", "context"],
+        "properties": {
+          "positions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id", "code", "factor"],
+              "properties": {
+                "id": { "type": "string" },
+                "code": { "type": "string" },
+                "factor": { "type": "number" },
+                "count": { "type": "integer", "minimum": 1 },
+                "durationMin": { "type": "number", "minimum": 0 },
+                "amountClaimed": { "type": "number", "minimum": 0 },
+                "notes": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "context": {
+            "type": "object",
+            "properties": {
+              "setting": { "type": "string", "enum": ["ambulant", "stationaer", "op", "unknown"] },
+              "specialty": { "type": "string" },
+              "patientAge": { "type": "number", "minimum": 0, "maximum": 130 },
+              "treatmentDate": { "type": "string" },
+              "caseId": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "gold": {
+        "type": "object",
+        "required": ["expectedFindings", "expectedCorrectedDraft", "expectedAmounts", "requiredEvidence"],
+        "properties": {
+          "expectedFindings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["category", "severity", "codeRefs"],
+              "properties": {
+                "category": {
+                  "type": "string",
+                  "enum": ["zielleistung", "ausschluss", "zeit", "faktor", "frequenz", "kontext", "zuschlag", "analog", "rechenfehler"]
+                },
+                "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+                "codeRefs": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "expectedCorrectedDraft": {
+            "type": "object",
+            "required": ["positions", "context"],
+            "properties": {
+              "positions": { "type": "array", "items": { "type": "object" } },
+              "context": { "type": "object" }
+            }
+          },
+          "expectedAmounts": {
+            "type": "object",
+            "required": ["positionAmounts", "totalAmount"],
+            "properties": {
+              "positionAmounts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["id", "amount"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "amount": { "type": "number", "minimum": 0 }
+                  }
+                }
+              },
+              "totalAmount": { "type": "number", "minimum": 0 }
+            }
+          },
+          "requiredEvidence": {
+            "type": "object",
+            "required": ["mustHaveSourceRef", "mustIncludeLegalRefs"],
+            "properties": {
+              "mustHaveSourceRef": { "type": "boolean" },
+              "mustIncludeLegalRefs": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  }
+}
+
