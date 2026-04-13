@@ -26,8 +26,10 @@ import { buildEngine3AssistantMarkdown } from "./markdown-narrative.ts";
 import {
   applyEngine3AusschlussPass,
   applyRecalcAndConsistency,
+  enrichEngine3BegruendungBeispiele,
   ensureWarnungFehlerHaveUIFacingRationale,
   enforceEngine3Quellenbezug,
+  filterEngine3AdminQuellenToEvidence,
   parseEngine3ResultJson,
   toClientEngine3Result,
   type Engine3Modus,
@@ -76,17 +78,6 @@ export interface Engine3StreamInput {
   kontextWissenEnabled?: boolean;
   /** Nach Segmentierungs-Rückfrage: Gruppen von Datei-Indizes (0-basiert), Partition der Uploads. */
   engine3CaseGroups?: number[][];
-}
-
-function extractAdminFilenamesFromBlock(adminBlock: string): string[] {
-  const names: string[] = [];
-  const re = /^###\s+([^\n(]+)/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(adminBlock)) !== null) {
-    const n = m[1]?.trim();
-    if (n && !names.includes(n)) names.push(n);
-  }
-  return names.slice(0, 12);
 }
 
 /** Einheitliche, systemseitige Quellenliste für UI und Nachvollziehbarkeit (nicht modell-halluziniert). */
@@ -142,7 +133,7 @@ Markiere unsichere Zuordnungen mit status "warnung" und erkläre in anmerkung.
 **Pflicht-Checkliste**
 - Nur Ziffern aus dem Katalogauszug; keine halluzinierten Nummern.
 - **Ausschlüsse:** alle vorgeschlagenen Ziffern paarweise gegen die Ausschl-Angaben im Auszug prüfen; Konflikte → **hinweise** + ggf. Position „warnung“/„fehler“.
-- **Steigerung:** Faktor innerhalb Katalograhmen; über Schwellenwert → ausführliche **begruendung** (§ 5 Abs. 2 GOÄ), konkret und prüfernah.
+- **Steigerung:** Faktor innerhalb Katalograhmen; über Schwellenwert → ausführliche **begruendung** (§ 5 Abs. 2 GOÄ), konkret und prüfernah. Optional **begruendungBeispiele** (Array mit 3–5 vollständigen, direkt übernehmbaren Absätzen) nur wenn sinnvoll; DocBill ergänzt ggf. kanonische Vorlagen.
 - **Sonderfälle** ( Leichenschau, Not-/Zeitzuschläge, Akupunktur): nur mit Ziffer im Auszug; sonst **hinweis** auf unvollständigen Kontext.
 - **BÄK / GOÄ-Kommentar:** Nur wenn **ADMIN-KONTEXT** eine belegbare Fundstelle liefert; jede verwendete Admin-Datei in **adminQuellen** nennen. Behauptete Regeln in **hinweise** mit **regelReferenz** belegen („GOÄ-Katalogauszug …“ oder „ADMIN-KONTEXT: …“).
 - **Hinweis-Zuordnung:** **betrifftPositionen**: **nr**-Werte der betroffenen Zeilen aus **positionen**/**optimierungen**; bei allgemeinen Hinweisen weglassen.
@@ -164,7 +155,8 @@ Antworte NUR mit JSON:
       "status": "korrekt|warnung|vorschlag",
       "anmerkung": "optional",
       "quelleText": "Pflicht: Bezug zum Leistungstext",
-      "begruendung": "optional"
+      "begruendung": "optional",
+      "begruendungBeispiele": ["optional: 3–5 fertige Absätze"]
     }
   ],
   "hinweise": [ { "schwere": "info|warnung|fehler", "titel": "…", "detail": "…", "regelReferenz": "optional", "betrifftPositionen": [1] } ],
@@ -534,8 +526,6 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
             vectorQuery: enrichRagQueryForAuslegung(input.userMessage.trim() || mergeQuery),
           })
         : "";
-      const adminQuellenHint = extractAdminFilenamesFromBlock(adminBlock);
-
       const leistungTexts = leistungstexteFromParsed(parsed, input.userMessage);
       const katalogMd = kontextOk
         ? buildMappingCatalogMarkdown({
@@ -667,10 +657,6 @@ ${
       }
 
       resultData.goaeStandHinweis = resultData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
-      if (adminQuellenHint.length > 0) {
-        const merged = new Set([...(resultData.adminQuellen ?? []), ...adminQuellenHint]);
-        resultData.adminQuellen = [...merged].slice(0, 12);
-      }
 
       await sendProgress(4, ENGINE3_STEPS[4].label);
       let finalData = applyRecalcAndConsistency(resultData);
@@ -680,12 +666,10 @@ ${
       finalData = applyEngine3AusschlussPass(finalData);
       finalData = enforceEngine3Quellenbezug(finalData);
       finalData = ensureWarnungFehlerHaveUIFacingRationale(finalData);
+      finalData = enrichEngine3BegruendungBeispiele(finalData);
 
       finalData.goaeStandHinweis = finalData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
-      if (adminQuellenHint.length > 0) {
-        const merged = new Set([...(finalData.adminQuellen ?? []), ...adminQuellenHint]);
-        finalData.adminQuellen = [...merged].slice(0, 12);
-      }
+      finalData = filterEngine3AdminQuellenToEvidence(finalData);
       finalData.quellen = buildEngine3SystemQuellen(input, finalData);
 
       const clientPayload = toClientEngine3Result(finalData);

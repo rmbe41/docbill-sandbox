@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
-import { FileText, ThumbsUp, ThumbsDown, ChevronDown } from "lucide-react";
+import { FileText, ThumbsUp, ThumbsDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
 import { useAuth } from "@/hooks/useAuth";
@@ -24,11 +24,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import type {
   Engine3CaseStored,
   Engine3SegmentationProposalStored,
@@ -56,6 +51,8 @@ export type ChatMessage = {
   };
   kurzantwortenVorschlagStatus?: Record<string, "accepted" | "rejected">;
   engine3FaktorOverrides?: Record<string, number>;
+  engine3BegruendungText?: Record<string, string>;
+  serviceBegruendungText?: Record<string, string>;
 };
 
 type ChatBubbleProps = {
@@ -797,6 +794,8 @@ const ChatBubble = ({
                 onPersistServiceDecisions={
                   updateMessageStructuredContent ? handlePersistService : undefined
                 }
+                updateMessageStructuredContent={updateMessageStructuredContent}
+                initialServiceBegruendungText={message.serviceBegruendungText ?? null}
               />
             )}
             {message.engine3SegmentationProposal &&
@@ -859,6 +858,7 @@ const ChatBubble = ({
                   onComposerPrompt={onKurzantwortVorschlagComposer}
                   initialEngine3Decisions={message.suggestionDecisions?.engine3 ?? null}
                   initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
+                  initialEngine3BegruendungText={message.engine3BegruendungText ?? null}
                   decisionKeyPrefix={`${activeMultiEngine3Case.caseId}:`}
                 />
               </div>
@@ -871,6 +871,7 @@ const ChatBubble = ({
                 onComposerPrompt={onKurzantwortVorschlagComposer}
                 initialEngine3Decisions={message.suggestionDecisions?.engine3 ?? null}
                 initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
+                initialEngine3BegruendungText={message.engine3BegruendungText ?? null}
                 decisionKeyPrefix={`${message.engine3Cases[0].caseId}:`}
               />
             )}
@@ -882,6 +883,7 @@ const ChatBubble = ({
                 onComposerPrompt={onKurzantwortVorschlagComposer}
                 initialEngine3Decisions={message.suggestionDecisions?.engine3 ?? null}
                 initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
+                initialEngine3BegruendungText={message.engine3BegruendungText ?? null}
               />
             )}
             {message.frageAnswer && (
@@ -906,21 +908,7 @@ const ChatBubble = ({
               );
 
               if (hasStructuredCard) {
-                return (
-                  <Collapsible defaultOpen={false} className="group not-prose border-t border-border/30 mt-2 pt-1">
-                    <CollapsibleTrigger className="flex w-full items-center gap-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground py-2 rounded-md -mx-1 px-1">
-                      <ChevronDown className="w-4 h-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-                      Text zur Antwort anzeigen
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <div className="markdown-output prose prose-sm max-w-none pb-2 border-border/20">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {message.content}
-                        </ReactMarkdown>
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                );
+                return null;
               }
 
               return (

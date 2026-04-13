@@ -450,6 +450,11 @@ function begruendungNurText(
     text =
       `Erhöhter diagnostischer Aufwand durch ${diagnose} (erschwerte Darstellung/Beurteilung). Faktor ${faktor}× gerechtfertigt.`;
   }
+  // GOÄ 1207: Mehrstärken/Prismen — konkreter Leistungsinhalt (nicht nur „Refraktion“)
+  else if (ziffer === "1207") {
+    text =
+      `Prüfung der Mehrstärken- bzw. Prismenbrille mit Fern-/Nahpunktbestimmung bei subjektiver Unverträglichkeit; erhöhter Aufwand durch iterative Abgleichs- und Zentrierungsmessungen bei ${diagnose}. Faktor ${faktor}× ${goaeSteiger}.`;
+  }
   // Refraktion (1200–1218)
   else if (num >= 1200 && num <= 1218) {
     text =

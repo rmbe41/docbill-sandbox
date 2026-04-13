@@ -47,11 +47,20 @@ export type MessageStructuredContentV1 = {
    * Engine-3: manuell angepasste Faktoren (Schlüssel wie bei suggestionDecisions.engine3, ggf. Case-Präfix).
    */
   engine3FaktorOverrides?: Record<string, number>;
+  /**
+   * Engine-3: bearbeitete Begründungstexte (Schlüssel wie pos:1:1207 / Case-Präfix + pos:…).
+   */
+  engine3BegruendungText?: Record<string, string>;
+  /** Service-Billing: bearbeitete Begründung pro Zeile (Schlüssel wie getKey). */
+  serviceBegruendungText?: Record<string, string>;
   attachments?: FilePayloadStored[];
 };
 
 /** Patch: `null` entfernt einen gespeicherten Override (Merge in mergeStructuredContent). */
 export type Engine3FaktorOverridesPatch = Record<string, number | null>;
+
+export type Engine3BegruendungTextPatch = Record<string, string | null>;
+export type ServiceBegruendungTextPatch = Record<string, string | null>;
 
 function mergeEngine3FaktorMaps(
   base: Record<string, number> | undefined,
@@ -63,6 +72,19 @@ function mergeEngine3FaktorMaps(
     else out[k] = v;
   }
   return out;
+}
+
+function mergeTextOverrideMaps(
+  base: Record<string, string> | undefined,
+  patch: Record<string, string | null> | undefined,
+): Record<string, string> | undefined {
+  if (patch === undefined) return base;
+  const out = { ...(base ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k];
+    else out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function parseMessageStructured(
@@ -158,21 +180,42 @@ export function mergeStructuredContent(
     pE3Faktor !== undefined
       ? mergeEngine3FaktorMaps(base.engine3FaktorOverrides, pE3Faktor)
       : base.engine3FaktorOverrides;
-  const { suggestionDecisions: _sd, kurzantwortenVorschlagStatus: _kv, engine3FaktorOverrides: _e3f, ...patchRest } =
-    patch;
+  const pE3Begr = patch.engine3BegruendungText as Engine3BegruendungTextPatch | undefined;
+  const mergedE3Begr =
+    pE3Begr !== undefined ? mergeTextOverrideMaps(base.engine3BegruendungText, pE3Begr) : base.engine3BegruendungText;
+  const pSvcBegr = patch.serviceBegruendungText as ServiceBegruendungTextPatch | undefined;
+  const mergedSvcBegr =
+    pSvcBegr !== undefined
+      ? mergeTextOverrideMaps(base.serviceBegruendungText, pSvcBegr)
+      : base.serviceBegruendungText;
+  const {
+    suggestionDecisions: _sd,
+    kurzantwortenVorschlagStatus: _kv,
+    engine3FaktorOverrides: _e3f,
+    engine3BegruendungText: _e3b,
+    serviceBegruendungText: _svb,
+    ...patchRest
+  } = patch;
   const mergedEngine3Cases =
     patch.engine3Cases !== undefined ? patch.engine3Cases : base.engine3Cases;
   const mergedSeg =
     patch.engine3SegmentationProposal !== undefined
       ? patch.engine3SegmentationProposal
       : base.engine3SegmentationProposal;
+  const {
+    engine3BegruendungText: _baseE3b,
+    serviceBegruendungText: _baseSvc,
+    ...baseRest
+  } = base;
   return {
-    ...base,
+    ...baseRest,
     ...patchRest,
     v: MESSAGE_STRUCTURED_VERSION,
     suggestionDecisions: mergedDecisions,
     kurzantwortenVorschlagStatus: mergedKurz,
     engine3FaktorOverrides: mergedE3Faktor,
+    ...(mergedE3Begr !== undefined ? { engine3BegruendungText: mergedE3Begr } : {}),
+    ...(mergedSvcBegr !== undefined ? { serviceBegruendungText: mergedSvcBegr } : {}),
     engine3Cases: mergedEngine3Cases,
     engine3SegmentationProposal: mergedSeg,
   };

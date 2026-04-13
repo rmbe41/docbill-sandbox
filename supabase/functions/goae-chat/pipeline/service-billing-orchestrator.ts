@@ -14,6 +14,7 @@ import {
   pruefeServiceBillingVorschlaege,
   erstelleBegruendungVorschlag,
 } from "./regelengine.ts";
+import { getBegruendungBeispiele } from "./engine3/begruendung-beispiele.ts";
 import {
   enrichSteigerungsBegruendungenBatch,
   type SteigerungBegruendungItem,
@@ -315,6 +316,7 @@ export async function runServiceBillingPipeline(
       }
 
       const quelleBeschreibung = quelleBeschreibungFuerLeistungstext(z.leistung, leistungen);
+      const begruendungBeispiele = getBegruendungBeispiele(z.ziffer, faktor);
       return {
         ziffer: z.ziffer,
         bezeichnung: z.bezeichnung,
@@ -324,6 +326,7 @@ export async function runServiceBillingPipeline(
         leistung: z.leistung,
         konfidenz: z.konfidenz,
         ...(quelleBeschreibung ? { quelleBeschreibung } : {}),
+        ...(begruendungBeispiele.length ? { begruendungBeispiele } : {}),
       };
     });
 
@@ -356,6 +359,7 @@ export async function runServiceBillingPipeline(
       }
 
       const altQuelle = quelleBeschreibungFuerLeistungstext(z.leistung, leistungen);
+      const beispOpt = getBegruendungBeispiele(altZiffer, faktor);
       optimierungen.push({
         ziffer: altZiffer,
         bezeichnung: eintrag.bezeichnung,
@@ -365,6 +369,7 @@ export async function runServiceBillingPipeline(
         leistung: `Alternative zu ${z.leistung}`,
         konfidenz: "mittel",
         ...(altQuelle ? { quelleBeschreibung: altQuelle } : {}),
+        ...(beispOpt.length ? { begruendungBeispiele: beispOpt } : {}),
       });
     }
   }

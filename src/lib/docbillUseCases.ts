@@ -20,7 +20,7 @@ export const DOC_BILL_USE_CASES: Record<
     title: "Akte oder Leistungsliste zu Rechnung",
     summary:
       "Vorschläge müssen angenommen oder abgelehnt werden (auch per Bulk). Ablehnung mit Grund und Chat-Prompt.",
-    structuredPayload: ["serviceBillingResult", "suggestionDecisions.service"],
+    structuredPayload: ["serviceBillingResult", "suggestionDecisions.service", "serviceBegruendungText"],
   },
   review_invoice: {
     title: "Rechnung prüfen",
@@ -38,6 +38,7 @@ export const DOC_BILL_USE_CASES: Record<
       "engine3SegmentationProposal",
       "suggestionDecisions.engine3",
       "engine3FaktorOverrides",
+      "engine3BegruendungText",
       "BulkReviewQueue",
     ],
   },

@@ -28,6 +28,8 @@ export function dbRowToChatMessage(m: {
       suggestionDecisions: s.suggestionDecisions,
       kurzantwortenVorschlagStatus: s.kurzantwortenVorschlagStatus,
       engine3FaktorOverrides: s.engine3FaktorOverrides,
+      engine3BegruendungText: s.engine3BegruendungText,
+      serviceBegruendungText: s.serviceBegruendungText,
     };
   }
   return base;

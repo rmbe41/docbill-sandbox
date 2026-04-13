@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, type ReactElement } from "react";
+import { Fragment, useState, useCallback, useEffect, useMemo, type ReactElement } from "react";
 import { Download, CheckIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,9 @@ import {
   stripDuplicateBegruendungPrefix,
   formatBegruendungFuerPdf,
 } from "@/lib/format-goae-hinweis";
+import { getBegruendungBeispiele } from "@/lib/goae-begruendung-beispiele";
+import { BegruendungBeispielePicker } from "@/components/BegruendungBeispielePicker";
+import type { MessageStructuredContentV1, ServiceBegruendungTextPatch } from "@/lib/messageStructuredContent";
 
 export interface ServiceBillingPosition {
   ziffer: string;
@@ -32,6 +35,8 @@ export interface ServiceBillingPosition {
   konfidenz: "hoch" | "mittel" | "niedrig";
   /** Auszug aus dem dokumentierten/behandelten Leistungstext (Herkunft der Zuordnung) */
   quelleBeschreibung?: string;
+  /** Vollständige, wählbare Begründungsvarianten */
+  begruendungBeispiele?: string[];
 }
 
 export interface ServiceBillingSummary {
@@ -65,6 +70,11 @@ type ServiceBillingResultProps = {
   initialServiceDecisions?: Record<string, string> | null;
   onDecisionsChange?: (decisions: Record<string, string>) => void;
   onPersistServiceDecisions?: (decisions: Record<string, Decision>) => void;
+  updateMessageStructuredContent?: (
+    messageId: string,
+    patch: Partial<MessageStructuredContentV1>,
+  ) => Promise<boolean>;
+  initialServiceBegruendungText?: Record<string, string> | null;
 };
 
 type Decision = "pending" | "accepted" | "rejected";
@@ -95,6 +105,16 @@ function formatFaktorDisplay(f: number): string {
 }
 
 const QUELLE_MAX_LEN = 220;
+
+function begruendungBeispieleFuerPosition(v: ServiceBillingPosition): string[] {
+  if (v.begruendungBeispiele?.length) return v.begruendungBeispiele;
+  const canon = getBegruendungBeispiele(v.ziffer, v.faktor);
+  if (canon.length) return canon;
+  if (isFaktorUeberSchwelle(v.ziffer, v.faktor) && v.begruendung?.trim()) {
+    return [v.begruendung.trim()];
+  }
+  return [];
+}
 
 function truncateQuelle(s: string): string {
   const t = s.trim();
@@ -161,11 +181,19 @@ function ServiceBillingPositionsTable({
   isOpt,
   decisions,
   setDecision,
+  messageId,
+  begrOverrides,
+  setBegrOverride,
+  initialServiceBegruendungText,
 }: {
   positions: ServiceBillingPosition[];
   isOpt: boolean;
   decisions: Record<string, Decision>;
   setDecision: (key: string, decision: Decision) => void;
+  messageId?: string | null;
+  begrOverrides: Record<string, string>;
+  setBegrOverride: (key: string, text: string) => void;
+  initialServiceBegruendungText?: Record<string, string> | null;
 }) {
   if (positions.length === 0) return null;
   return (
@@ -188,9 +216,10 @@ function ServiceBillingPositionsTable({
             const isAccepted = decision === "accepted";
             const isPending = decision === "pending";
             const unterzeile = leistungUnterzeile(v);
+            const beispiele = begruendungBeispieleFuerPosition(v);
             return (
+              <Fragment key={key}>
               <tr
-                key={key}
                 className={cn(
                   "transition-colors",
                   isAccepted && "bg-emerald-50/40 dark:bg-emerald-950/15",
@@ -256,6 +285,24 @@ function ServiceBillingPositionsTable({
                   </div>
                 </td>
               </tr>
+              {beispiele.length > 0 ? (
+                <tr className={cn(isAccepted && "bg-emerald-50/25 dark:bg-emerald-950/10")}>
+                  <td colSpan={6} className="invoice-td pt-0 pb-3 border-t-0">
+                    <div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5">
+                      <p className="text-[10px] font-medium text-muted-foreground mb-2">
+                        Begründung für die Akte (Variante wählen oder anpassen)
+                      </p>
+                      <BegruendungBeispielePicker
+                        key={`${messageId ?? "noid"}-${key}`}
+                        beispiele={beispiele}
+                        persistedText={begrOverrides[key] ?? initialServiceBegruendungText?.[key]}
+                        onTextChange={(t) => setBegrOverride(key, t)}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+              </Fragment>
             );
           })}
         </tbody>
@@ -270,7 +317,51 @@ const ServiceBillingResult = ({
   initialServiceDecisions = null,
   onDecisionsChange,
   onPersistServiceDecisions,
+  updateMessageStructuredContent,
+  initialServiceBegruendungText = null,
 }: ServiceBillingResultProps) => {
+  const [begrOverrides, setBegrOverrides] = useState<Record<string, string>>(() => ({
+    ...(initialServiceBegruendungText ?? {}),
+  }));
+
+  useEffect(() => {
+    setBegrOverrides({ ...(initialServiceBegruendungText ?? {}) });
+  }, [data, messageId, initialServiceBegruendungText]);
+
+  const setBegrOverride = useCallback((key: string, text: string) => {
+    setBegrOverrides((prev) => ({ ...prev, [key]: text }));
+  }, []);
+
+  const knownServiceKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const v of data.vorschlaege) keys.push(getKey(v, false));
+    for (const v of data.optimierungen ?? []) keys.push(getKey(v, true));
+    return keys;
+  }, [data.vorschlaege, data.optimierungen]);
+
+  useEffect(() => {
+    if (!messageId || !updateMessageStructuredContent) return;
+    const t = window.setTimeout(() => {
+      const base = initialServiceBegruendungText ?? {};
+      const patch: ServiceBegruendungTextPatch = {};
+      for (const k of knownServiceKeys) {
+        const inLocal = Object.hasOwn(begrOverrides, k);
+        const inBase = Object.hasOwn(base, k);
+        const localVal = begrOverrides[k];
+        const baseVal = base[k];
+        if (inLocal) {
+          if (!inBase || localVal !== baseVal) patch[k] = localVal;
+        } else if (inBase) {
+          patch[k] = null;
+        }
+      }
+      if (Object.keys(patch).length) {
+        void updateMessageStructuredContent(messageId, { serviceBegruendungText: patch });
+      }
+    }, 450);
+    return () => window.clearTimeout(t);
+  }, [begrOverrides, knownServiceKeys, messageId, updateMessageStructuredContent, initialServiceBegruendungText]);
+
   const allItems = [
     ...data.vorschlaege.map((v) => ({ ...v, isOpt: false })),
     ...(data.optimierungen ?? []).map((v) => ({ ...v, isOpt: true })),
@@ -340,14 +431,19 @@ const ServiceBillingResult = ({
       rechnungsnummer: rechnungsnummer || undefined,
       rechnungsdatum: rechnungsdatum || undefined,
     };
-    const goaePositions = acceptedPositions.map(({ isOpt, ...p }) => ({
-      nr: 0,
-      ziffer: p.ziffer,
-      bezeichnung: p.bezeichnung,
-      faktor: p.faktor,
-      betrag: p.betrag,
-      begruendung: formatBegruendungFuerPdf(p.ziffer, p.faktor, p.begruendung),
-    }));
+    const goaePositions = acceptedPositions.map((item) => {
+      const k = getKey(item, item.isOpt);
+      const override = begrOverrides[k] ?? initialServiceBegruendungText?.[k];
+      const begrRaw = override?.trim() || item.begruendung;
+      return {
+        nr: 0,
+        ziffer: item.ziffer,
+        bezeichnung: item.bezeichnung,
+        faktor: item.faktor,
+        betrag: item.betrag,
+        begruendung: formatBegruendungFuerPdf(item.ziffer, item.faktor, begrRaw),
+      };
+    });
     const sachkostenPositions = (data.sachkosten ?? []).map((s) => ({
       nr: 0,
       ziffer: "Sachk.",
@@ -372,6 +468,8 @@ const ServiceBillingResult = ({
     acceptedPositions,
     data.sachkosten,
     totalBetrag,
+    begrOverrides,
+    initialServiceBegruendungText,
   ]);
 
   if (data.vorschlaege.length === 0 && (data.sachkosten?.length ?? 0) === 0) {
@@ -457,6 +555,10 @@ const ServiceBillingResult = ({
           isOpt={false}
           decisions={decisions}
           setDecision={setDecision}
+          messageId={messageId}
+          begrOverrides={begrOverrides}
+          setBegrOverride={setBegrOverride}
+          initialServiceBegruendungText={initialServiceBegruendungText}
         />
 
         {/* Sachkosten */}
@@ -491,6 +593,10 @@ const ServiceBillingResult = ({
               isOpt
               decisions={decisions}
               setDecision={setDecision}
+              messageId={messageId}
+              begrOverrides={begrOverrides}
+              setBegrOverride={setBegrOverride}
+              initialServiceBegruendungText={initialServiceBegruendungText}
             />
           </>
         )}

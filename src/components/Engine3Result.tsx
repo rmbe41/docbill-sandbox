@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, ChevronDown, ChevronUp, Copy, Download, X } from "lucide-react";
+import { CheckIcon, ChevronDown, ChevronUp, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -20,14 +20,16 @@ import type { Engine3ResultData, Engine3Position, Engine3Hinweis } from "@/lib/e
 import { usePraxisStammdaten } from "@/hooks/usePraxisStammdaten";
 import { engine3ReviewRowId } from "@/lib/docbillUseCases";
 import { billingRowsToTsv, downloadTextFile, type BillingExportRow } from "@/lib/export";
-import type { Engine3FaktorOverridesPatch, MessageStructuredContentV1 } from "@/lib/messageStructuredContent";
+import type {
+  Engine3BegruendungTextPatch,
+  Engine3FaktorOverridesPatch,
+  MessageStructuredContentV1,
+} from "@/lib/messageStructuredContent";
+import { BegruendungBeispielePicker } from "@/components/BegruendungBeispielePicker";
 import { goaeByZiffer } from "@/data/goae-catalog";
 import { calculateAmountOrScaled, goaeFaktorLimits } from "@/lib/goae-validator";
-import {
-  buildHoechstfaktorHinweisText,
-  buildSteigerungsbegruendungVorschlag,
-  isFaktorUeberSchwelle,
-} from "@/lib/format-goae-hinweis";
+import { buildHoechstfaktorHinweisText, isFaktorUeberSchwelle } from "@/lib/format-goae-hinweis";
+import { getSteigerungFallbackBeispiel } from "@/lib/goae-begruendung-beispiele";
 
 export type { Engine3ResultData } from "@/lib/engine3Result";
 
@@ -173,14 +175,6 @@ function Engine3FaktorControl({
   );
 }
 
-async function copyTextToClipboard(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    /* ignore */
-  }
-}
-
 /** Abwechselnder Hintergrund pro Positionsblock (Datenzeile + ggf. Hinweiszeile). */
 function positionGroupStripeClass(index: number): string {
   return index % 2 === 0 ? "bg-muted/[0.07]" : "bg-muted/[0.16]";
@@ -307,8 +301,22 @@ function fallbackAktennotizVorschlag(p: Engine3Position): string {
   const f = String(p.faktor).replace(".", ",");
   const euro = formatEuro(p.betrag);
   const bez = (p.bezeichnung ?? "").trim();
+  const kopf = `Leistung GOÄ ${p.ziffer} (${bez}) mit Faktor ${f} (Betrag ${euro}).`;
+
+  if (p.ziffer === "1207") {
+    const schwellen =
+      typeof p.faktor === "number" && Math.abs(p.faktor - 2.3) < 0.001
+        ? " Regelhöchstsatz (Schwellenwert 2,3): keine gesonderte Steigerungsbegründung erforderlich."
+        : "";
+    return (
+      `${kopf}${schwellen} ` +
+      "Subjektive Brillenunverträglichkeit der Mehrstärken- bzw. Prismenkorrektur: Prüfung der Brille mit Bestimmung von Fern- und Nahpunkt, Abgleich Zentrierung/Progression bzw. Prismengrundlage mit den Beschwerden; mehrfache subjektive Mess- und Vergleichsschritte bis zur stabilen Sehschärfe bzw. beschwerdearmen Einstellung. " +
+      "In der Akte konkret festhalten: Art der Beschwerden (z. B. Kopfschmerzen beim Lesen, Einschränkung Nahsicht, Doppelbilder/Seitenbildverlagerung), Ergebnisse Fern/Nah (Sehschärfe, ggf. Zylinder/Achse), durchgeführte Anpassungen."
+    );
+  }
+
   return (
-    `Leistung GOÄ ${p.ziffer} (${bez}) mit Faktor ${f} (Betrag ${euro}). ` +
+    `${kopf} ` +
     `Die erbrachte Leistung ist unter der dokumentierten Indikation medizinisch begründet; Umfang und zeitlicher Ablauf sind der Akte zu entnehmen. ` +
     `Bei Rückfragen des Kostenträgers Verweis auf die vorliegende Befund- und Verlaufsdokumentation.`
   );
@@ -333,6 +341,20 @@ function hinweisCardClass(h: Engine3Hinweis): string {
 function isQuelleRelevant(q: string): boolean {
   const t = q.toLowerCase();
   return t.includes("interner kontext") || t.includes("rag") || t.includes("admin") || t.includes("goä");
+}
+
+function dedupeQuellenDisplayLines(lines: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of lines) {
+    const s = raw.trim();
+    if (!s) continue;
+    const key = s.normalize("NFKC").replace(/\s+/g, " ").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
 }
 
 function dedupeHinweise(hinweise: Engine3Hinweis[]): Engine3Hinweis[] {
@@ -370,27 +392,54 @@ function initialDecisionsMap(
   return init;
 }
 
-function positionsToPdf(rows: Engine3Position[]): PdfPosition[] {
-  return rows.map((p, i) => ({
-    nr: i + 1,
-    ziffer: p.ziffer,
-    bezeichnung: p.bezeichnung,
-    faktor: p.faktor,
-    betrag: p.betrag,
-    begruendung: [p.begruendung, p.anmerkung].filter(Boolean).join(" · ") || undefined,
-  }));
+function effectiveEngine3BegruendungText(
+  p: Engine3Position,
+  rk: string,
+  overrides: Record<string, string>,
+  initial: Record<string, string> | null | undefined,
+): string | undefined {
+  const o = overrides[rk] ?? initial?.[rk];
+  if (o?.trim()) return o.trim();
+  return [p.begruendung, p.anmerkung].filter(Boolean).join(" · ") || undefined;
 }
 
-function toBillingRows(rows: Engine3Position[]): BillingExportRow[] {
-  return rows.map((p, i) => ({
-    nr: i + 1,
-    ziffer: p.ziffer,
-    bezeichnung: p.bezeichnung,
-    faktor: p.faktor,
-    betrag: p.betrag,
-    quelleText: p.quelleText,
-    begruendung: [p.begruendung, p.anmerkung].filter(Boolean).join(" · ") || undefined,
-  }));
+function positionsToPdf(
+  accepted: { p: Engine3Position; isOpt: boolean }[],
+  rowKeyFn: (isOpt: boolean, p: Engine3Position) => string,
+  begrOverrides: Record<string, string>,
+  initialBegr: Record<string, string> | null | undefined,
+): PdfPosition[] {
+  return accepted.map(({ p, isOpt }, i) => {
+    const rk = rowKeyFn(isOpt, p);
+    return {
+      nr: i + 1,
+      ziffer: p.ziffer,
+      bezeichnung: p.bezeichnung,
+      faktor: p.faktor,
+      betrag: p.betrag,
+      begruendung: effectiveEngine3BegruendungText(p, rk, begrOverrides, initialBegr),
+    };
+  });
+}
+
+function toBillingRows(
+  accepted: { p: Engine3Position; isOpt: boolean }[],
+  rowKeyFn: (isOpt: boolean, p: Engine3Position) => string,
+  begrOverrides: Record<string, string>,
+  initialBegr: Record<string, string> | null | undefined,
+): BillingExportRow[] {
+  return accepted.map(({ p, isOpt }, i) => {
+    const rk = rowKeyFn(isOpt, p);
+    return {
+      nr: i + 1,
+      ziffer: p.ziffer,
+      bezeichnung: p.bezeichnung,
+      faktor: p.faktor,
+      betrag: p.betrag,
+      quelleText: p.quelleText,
+      begruendung: effectiveEngine3BegruendungText(p, rk, begrOverrides, initialBegr),
+    };
+  });
 }
 
 function collectKnownPositionNrs(data: Engine3ResultData): Set<number> {
@@ -419,6 +468,8 @@ type Engine3ResultProps = {
   onComposerPrompt?: (text: string) => void;
   initialEngine3Decisions?: Record<string, string> | null;
   initialEngine3FaktorOverrides?: Record<string, number> | null;
+  /** Bearbeitete Begründungstexte (Schlüssel wie `pos:1:1207`, ggf. Case-Präfix). */
+  initialEngine3BegruendungText?: Record<string, string> | null;
   /** Präfix für suggestionDecisions.engine3 bei mehreren Vorgängen (z. B. `case-a:`). */
   decisionKeyPrefix?: string;
 };
@@ -430,6 +481,7 @@ export default function Engine3Result({
   onComposerPrompt,
   initialEngine3Decisions = null,
   initialEngine3FaktorOverrides = null,
+  initialEngine3BegruendungText = null,
   decisionKeyPrefix,
 }: Engine3ResultProps) {
   const rowKey = useCallback(
@@ -464,6 +516,31 @@ export default function Engine3Result({
     }
     setFaktorOverrides(next);
   }, [data, messageId, decisionKeyPrefix, initialEngine3FaktorOverrides]);
+
+  const [begruendungOverrides, setBegruendungOverrides] = useState<Record<string, string>>(() => {
+    const next: Record<string, string> = {};
+    for (const [k, v] of Object.entries(initialEngine3BegruendungText ?? {})) {
+      if (typeof v !== "string") continue;
+      if (decisionKeyPrefix) {
+        if (k.startsWith(decisionKeyPrefix)) next[k] = v;
+      } else if (/^(pos|opt):\d+:/.test(k)) {
+        next[k] = v;
+      }
+    }
+    return next;
+  });
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    for (const [k, v] of Object.entries(initialEngine3BegruendungText ?? {})) {
+      if (typeof v !== "string") continue;
+      if (decisionKeyPrefix) {
+        if (k.startsWith(decisionKeyPrefix)) next[k] = v;
+      } else if (/^(pos|opt):\d+:/.test(k)) {
+        next[k] = v;
+      }
+    }
+    setBegruendungOverrides(next);
+  }, [data, messageId, decisionKeyPrefix, initialEngine3BegruendungText]);
 
   const allRows: RowWithOpt[] = useMemo(() => {
     const apply = (pBase: Engine3Position, isOpt: boolean) => {
@@ -505,7 +582,11 @@ export default function Engine3Result({
   );
 
   const persistEngine3UiState = useCallback(
-    (d: Record<string, Decision>, localFaktoren: Record<string, number>) => {
+    (
+      d: Record<string, Decision>,
+      localFaktoren: Record<string, number>,
+      localBegr: Record<string, string>,
+    ) => {
       if (!messageId || !updateMessageStructuredContent) return;
       const base = initialEngine3FaktorOverrides ?? {};
       const faktorPatch: Engine3FaktorOverridesPatch = {};
@@ -520,21 +601,45 @@ export default function Engine3Result({
           faktorPatch[rk] = null;
         }
       }
+      const baseBegr = initialEngine3BegruendungText ?? {};
+      const begrPatch: Engine3BegruendungTextPatch = {};
+      for (const rk of knownRowKeys) {
+        const inLocal = Object.hasOwn(localBegr, rk);
+        const inBase = Object.hasOwn(baseBegr, rk);
+        const localVal = localBegr[rk];
+        const baseVal = baseBegr[rk];
+        if (inLocal) {
+          if (!inBase || localVal !== baseVal) begrPatch[rk] = localVal;
+        } else if (inBase) {
+          begrPatch[rk] = null;
+        }
+      }
       void updateMessageStructuredContent(messageId, {
         suggestionDecisions: {
           engine3: Object.fromEntries(Object.entries(d).map(([k, v]) => [k, v])),
         },
         ...(Object.keys(faktorPatch).length ? { engine3FaktorOverrides: faktorPatch } : {}),
+        ...(Object.keys(begrPatch).length ? { engine3BegruendungText: begrPatch } : {}),
       });
     },
-    [messageId, updateMessageStructuredContent, knownRowKeys, initialEngine3FaktorOverrides],
+    [messageId, updateMessageStructuredContent, knownRowKeys, initialEngine3FaktorOverrides, initialEngine3BegruendungText],
   );
 
   useEffect(() => {
     if (!messageId || !updateMessageStructuredContent) return;
-    const t = window.setTimeout(() => persistEngine3UiState(decisions, faktorOverrides), 450);
+    const t = window.setTimeout(
+      () => persistEngine3UiState(decisions, faktorOverrides, begruendungOverrides),
+      450,
+    );
     return () => clearTimeout(t);
-  }, [decisions, faktorOverrides, messageId, persistEngine3UiState, updateMessageStructuredContent]);
+  }, [
+    decisions,
+    faktorOverrides,
+    begruendungOverrides,
+    messageId,
+    persistEngine3UiState,
+    updateMessageStructuredContent,
+  ]);
 
   const setFaktorForRow = useCallback((rk: string, pBase: Engine3Position, nextRaw: number) => {
     const next = clampEngine3Faktor(pBase.ziffer, nextRaw);
@@ -590,12 +695,17 @@ export default function Engine3Result({
       rechnungsnummer: rechnungsnummer || undefined,
       rechnungsdatum: rechnungsdatum || undefined,
     };
-    await generateInvoicePdf(positionsToPdf(acceptedRows.map((r) => r.p)), acceptedSum, stammdaten, {
+    await generateInvoicePdf(
+      positionsToPdf(acceptedRows, rowKey, begruendungOverrides, initialEngine3BegruendungText ?? null),
+      acceptedSum,
+      stammdaten,
+      {
       protocolLines: data.hinweise.slice(0, 24).map((h) => {
         const pre = h.betrifftPositionen?.length ? `Nr. ${h.betrifftPositionen.join(", ")}: ` : "";
         return `${pre}${h.schwere.toUpperCase()}: ${h.titel} — ${h.detail}`;
       }),
-    });
+      },
+    );
     setExportModalOpen(false);
   }, [
     acceptedRows,
@@ -607,14 +717,17 @@ export default function Engine3Result({
     rechnungsnummer,
     rechnungsdatum,
     praxisStammdaten,
+    rowKey,
+    begruendungOverrides,
+    initialEngine3BegruendungText,
   ]);
 
   const handleTxtExport = useCallback(() => {
-    const rows = toBillingRows(acceptedRows.map((r) => r.p));
+    const rows = toBillingRows(acceptedRows, rowKey, begruendungOverrides, initialEngine3BegruendungText ?? null);
     const body = billingRowsToTsv(rows);
     const d = rechnungsdatum || new Date().toISOString().slice(0, 10);
     downloadTextFile(`docbill-positions-${d}.tsv`, body, "text/tab-separated-values;charset=utf-8");
-  }, [acceptedRows, rechnungsdatum]);
+  }, [acceptedRows, rechnungsdatum, rowKey, begruendungOverrides, initialEngine3BegruendungText]);
 
   const openReject = (keys: string[]) => {
     setRejectKeys(keys);
@@ -655,7 +768,9 @@ export default function Engine3Result({
 
   const globalShown = globalHinweise.slice(0, HINWEISE_MAX);
   const globalRest = globalHinweise.length - globalShown.length;
-  const quellen = filterExplicitQuellenEntries(data.quellen?.filter(Boolean) ?? []).filter(isQuelleRelevant);
+  const quellen = dedupeQuellenDisplayLines(
+    filterExplicitQuellenEntries(data.quellen?.filter(Boolean) ?? []).filter(isQuelleRelevant),
+  );
   const showQuellen = quellen.length > 0;
   const primaryTopVorschlag = useMemo(() => {
     const tops = [...(data.topVorschlaege ?? [])].sort((a, b) => a.rang - b.rang);
@@ -706,11 +821,6 @@ export default function Engine3Result({
     const hoechstFaktor = cat?.hoechstfaktor ?? 3.5;
     const ueberHoechst = p.faktor > hoechstFaktor + 1e-9;
     const showFaktorMeta = isFaktorUeberSchwelle(p.ziffer, p.faktor) || ueberHoechst;
-    const steigerungText = buildSteigerungsbegruendungVorschlag({
-      ziffer: p.ziffer,
-      faktor: p.faktor,
-      betragFormatted: formatEuro(p.betrag),
-    });
     const rowHints = dedupeHinweise(
       data.hinweise
         .map((h, i) => ({ h, i }))
@@ -821,28 +931,40 @@ export default function Engine3Result({
                   </p>
                 ) : null}
                 {isFaktorUeberSchwelle(p.ziffer, p.faktor) ? (
-                  <>
-                    <p className={cn("text-xs font-medium leading-snug", engine3MessageBodyClass("warnung"))}>
-                      Faktor über dem Regelhöchstsatz — für die Abrechnung ist eine nachvollziehbare ärztliche Begründung
-                      erforderlich.
-                    </p>
-                    <p className={engine3MessageSubLabelClass("warnung")}>Begründung für die Akte (copy-paste)</p>
-                    <p className={engine3CopyPasteInnerClass(ueberHoechst ? "fehler" : "warnung")}>{steigerungText}</p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="h-7 text-[11px] gap-1"
-                      onClick={() => void copyTextToClipboard(steigerungText)}
-                    >
-                      <Copy className="w-3 h-3" />
-                      Kopieren
-                    </Button>
-                    <p className={cn("text-[10px] leading-snug max-w-prose opacity-90", engine3MessageBodyClass("warnung"))}>
-                      Konkrete Umstände (Zeitaufwand, besondere Schwierigkeit) bei Bedarf in der Akte ausformulieren; der
-                      Vorschlag ist nur Rahmenformulierung.
-                    </p>
-                  </>
+                  p.begruendungBeispiele && p.begruendungBeispiele.length > 0 ? (
+                    <>
+                      <p className={cn("text-xs font-medium leading-snug", engine3MessageBodyClass("warnung"))}>
+                        Faktor über dem Regelhöchstsatz — für die Abrechnung ist eine nachvollziehbare ärztliche
+                        Begründung erforderlich.
+                      </p>
+                      <p className={engine3MessageSubLabelClass("warnung")}>
+                        Begründung für die Akte (Variante wählen oder anpassen)
+                      </p>
+                      <BegruendungBeispielePicker
+                        key={`${messageId ?? "noid"}-${rk}-stg`}
+                        beispiele={p.begruendungBeispiele}
+                        persistedText={begruendungOverrides[rk]}
+                        onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
+                        surface="warnung"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <p className={cn("text-xs font-medium leading-snug", engine3MessageBodyClass("warnung"))}>
+                        Faktor über dem Regelhöchstsatz — für die Abrechnung ist eine nachvollziehbare ärztliche
+                        Begründung erforderlich.
+                      </p>
+                      <p className={engine3MessageSubLabelClass("warnung")}>Beispieltext für die Akte</p>
+                      <p className={engine3CopyPasteInnerClass(ueberHoechst ? "fehler" : "warnung")}>
+                        {getSteigerungFallbackBeispiel({
+                          ziffer: p.ziffer,
+                          bezeichnung: p.bezeichnung,
+                          faktor: p.faktor,
+                          betragFormatted: formatEuro(p.betrag),
+                        })}
+                      </p>
+                    </>
+                  )
                 ) : null}
               </div>
             </td>
@@ -890,14 +1012,46 @@ export default function Engine3Result({
                   )}
                 >
                   <p className={engine3MessageSeverityTitleClass("warnung")}>Warnung</p>
-                  <p className={engine3MessageBodyClass("warnung")}>
-                    Es liegen keine gesonderten Begründungstexte von der KI vor. Sie können den folgenden Entwurf prüfen
-                    und bei Bedarf in die Patientenakte übernehmen.
-                  </p>
-                  <p className={cn(engine3MessageSubLabelClass("warnung"), "pt-0.5")}>
-                    Formulierungsvorschlag (copy-paste)
-                  </p>
-                  <p className={engine3CopyPasteInnerClass("warnung")}>{fallbackAktennotizVorschlag(p)}</p>
+                  {p.begruendungBeispiele && p.begruendungBeispiele.length > 0 ? (
+                    <>
+                      <p className={engine3MessageBodyClass("warnung")}>
+                        Wählen Sie eine Formulierung oder passen Sie den Text für die Patientenakte an.
+                      </p>
+                      <p className={cn(engine3MessageSubLabelClass("warnung"), "pt-0.5")}>
+                        Formulierungsvorschläge
+                      </p>
+                      <BegruendungBeispielePicker
+                        key={`${messageId ?? "noid"}-${rk}-fb`}
+                        beispiele={p.begruendungBeispiele}
+                        persistedText={begruendungOverrides[rk]}
+                        onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
+                        surface="warnung"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <p className={engine3MessageBodyClass("warnung")}>
+                        Es liegen keine gesonderten Begründungstexte von der KI vor. Sie können den folgenden Entwurf
+                        prüfen und bei Bedarf in die Patientenakte übernehmen.
+                      </p>
+                      <p className={cn(engine3MessageSubLabelClass("warnung"), "pt-0.5")}>
+                        Beispieltext für die Akte
+                      </p>
+                      <p className={engine3CopyPasteInnerClass("warnung")}>{fallbackAktennotizVorschlag(p)}</p>
+                    </>
+                  )}
+                </div>
+              ) : null}
+              {hasRowHints && p.begruendungBeispiele && p.begruendungBeispiele.length > 0 ? (
+                <div className="mt-2 space-y-1.5">
+                  <p className={engine3MessageSubLabelClass("warnung")}>Zusätzliche Formulierungsvorschläge</p>
+                  <BegruendungBeispielePicker
+                    key={`${messageId ?? "noid"}-${rk}-hint`}
+                    beispiele={p.begruendungBeispiele}
+                    persistedText={begruendungOverrides[rk]}
+                    onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
+                    surface="warnung"
+                  />
                 </div>
               ) : null}
             </td>

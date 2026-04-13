@@ -24,8 +24,10 @@ import type { FilePayload, ParsedRechnung } from "../types.ts";
 import {
   applyEngine3AusschlussPass,
   applyRecalcAndConsistency,
+  enrichEngine3BegruendungBeispiele,
   ensureWarnungFehlerHaveUIFacingRationale,
   enforceEngine3Quellenbezug,
+  filterEngine3AdminQuellenToEvidence,
   parseEngine3ResultJson,
   type Engine3Modus,
   type Engine3ResultData,
@@ -33,17 +35,6 @@ import {
 
 const GOAE_STAND_HINWEIS =
   "GOÄ-Ziffern und Punktwerte nach DocBill-Katalog (JSON); Punktwert 0,0582873 EUR.";
-
-function extractAdminFilenamesFromBlock(adminBlock: string): string[] {
-  const names: string[] = [];
-  const re = /^###\s+([^\n(]+)/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(adminBlock)) !== null) {
-    const n = m[1]?.trim();
-    if (n && !names.includes(n)) names.push(n);
-  }
-  return names.slice(0, 12);
-}
 
 function leistungstexteFromParsed(parsed: ParsedRechnung, userMessage: string): string[] {
   const texts: string[] = [userMessage, parsed.rawText ?? "", parsed.freitext ?? ""];
@@ -80,7 +71,7 @@ Du erhältst extrahierte Rechnungsdaten (JSON), optional **klinischeDokumentatio
 **Pflicht-Checkliste**
 - Ziffern/Bezeichnungen/Punkte: nur aus dem Katalogauszug; fehlende Ziffer → in **hinweise**, nichts erfinden.
 - **Ausschlüsse:** Jede Kombination von Positionsziffern anhand der **Ausschl:**-Angaben der Katalogzeilen prüfen; Konflikt → **hinweise** (schwere fehler/warnung) mit **regelReferenz** „Ausschlussziffern GOÄ-Katalog“.
-- **Steigerung:** Schwellen-/Höchstfaktor aus Katalogzeile; über Schwelle → **begruendung** mit konkretem Sachbezug (Dauer Min., Erschwernis), § 5 Abs. 2 GOÄ; keine Leerformeln (siehe Regelblock Begründungen).
+- **Steigerung:** Schwellen-/Höchstfaktor aus Katalogzeile; über Schwelle → **begruendung** mit konkretem Sachbezug (Dauer Min., Erschwernis), § 5 Abs. 2 GOÄ; keine Leerformeln (siehe Regelblock Begründungen). Optional **begruendungBeispiele** (3–5 vollständige Absätze) nur wenn sinnvoll; DocBill ergänzt ggf. kanonische Vorlagen.
 - **Sonderbereiche** (Leichenschau, Zuschläge, Akupunktur): nur, wenn die Ziffer im Auszug steht; sonst Lücke in **hinweise**.
 - **BÄK / Auslegung / GOÄ-Kommentar:** Nur mit konkretem Nachweis im **ADMIN-KONTEXT** (Dateiname); jede inhaltlich verwendete Admin-Datei **mindestens einmal** in **adminQuellen** (kurzer Dateiname) aufführen. Ohne Treffer: Unsicherheit in **hinweise**, nichts erfinden.
 - **Hinweise:** Behauptet ein Eintrag eine konkrete Regel oder Auslegung, **muss** **regelReferenz** gesetzt sein (z. B. „GOÄ-Katalogauszug, Ziffer …“ oder „ADMIN-KONTEXT: [Dateiname]“).
@@ -103,7 +94,8 @@ Antworte NUR mit JSON im folgenden Schema:
       "status": "korrekt|warnung|fehler",
       "anmerkung": "optional",
       "quelleText": "Pflicht: Bezug zur Rechnungszeile / Position im Text / klinischeDokumentation",
-      "begruendung": "optional bei hohem Faktor"
+      "begruendung": "optional bei hohem Faktor",
+      "begruendungBeispiele": ["optional: 3–5 fertige Absätze"]
     }
   ],
   "hinweise": [
@@ -224,8 +216,6 @@ export async function runRechnungPruefungCasePipeline(p: RunRechnungCaseParams):
         vectorQuery: enrichRagQueryForAuslegung(p.userMessage.trim() || mergeQuery),
       })
     : "";
-  const adminQuellenHint = extractAdminFilenamesFromBlock(adminBlock);
-
   const leistungTexts = leistungstexteFromParsed(parsed, p.userMessage);
   const katalogMd = p.kontextWissenEnabled
     ? buildMappingCatalogMarkdown({
@@ -321,10 +311,6 @@ ${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. F
   }
 
   resultData.goaeStandHinweis = resultData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
-  if (adminQuellenHint.length > 0) {
-    const merged = new Set([...(resultData.adminQuellen ?? []), ...adminQuellenHint]);
-    resultData.adminQuellen = [...merged].slice(0, 12);
-  }
 
   let finalData = applyRecalcAndConsistency(resultData);
   finalData = applyEngine3AusschlussPass(finalData);
@@ -333,12 +319,10 @@ ${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. F
   finalData = applyEngine3AusschlussPass(finalData);
   finalData = enforceEngine3Quellenbezug(finalData);
   finalData = ensureWarnungFehlerHaveUIFacingRationale(finalData);
+  finalData = enrichEngine3BegruendungBeispiele(finalData);
 
   finalData.goaeStandHinweis = finalData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
-  if (adminQuellenHint.length > 0) {
-    const merged = new Set([...(finalData.adminQuellen ?? []), ...adminQuellenHint]);
-    finalData.adminQuellen = [...merged].slice(0, 12);
-  }
+  finalData = filterEngine3AdminQuellenToEvidence(finalData);
 
   const quellenLines: string[] = p.kontextWissenEnabled
     ? [

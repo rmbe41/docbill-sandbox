@@ -3,6 +3,8 @@
  * Ältere gespeicherte Nachrichten können Zusatzfelder enthalten (Parser tolerant).
  */
 
+import { getBegruendungBeispiele } from "@/lib/goae-begruendung-beispiele";
+
 export type Engine3Modus = "rechnung_pruefung" | "leistungen_abrechnen";
 
 export type Engine3PositionStatus = "korrekt" | "warnung" | "fehler" | "vorschlag";
@@ -18,6 +20,8 @@ export interface Engine3Position {
   anmerkung?: string;
   quelleText?: string;
   begruendung?: string;
+  /** Vollständige, wählbare Begründungsvarianten (Server/Client). */
+  begruendungBeispiele?: string[];
 }
 
 export interface Engine3TopVorschlag extends Engine3Position {
@@ -137,6 +141,21 @@ function coerceCtxStr(v: unknown): string {
   return "";
 }
 
+function normalizeBegruendungBeispieleArr(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .filter((x): x is string => typeof x === "string")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return out.length ? out : undefined;
+}
+
+function enrichPositionBegruendungBeispieleClient(p: Engine3Position): Engine3Position {
+  const canonical = getBegruendungBeispiele(p.ziffer, p.faktor);
+  if (canonical.length > 0) return { ...p, begruendungBeispiele: canonical };
+  return p;
+}
+
 function unwrapEngine3Payload(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const root = raw as Record<string, unknown>;
@@ -212,6 +231,7 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
     if (!Number.isFinite(nr) || !ziffer || !Number.isFinite(faktor) || !Number.isFinite(betrag) || !st) {
       return null;
     }
+    const beisp = normalizeBegruendungBeispieleArr(r.begruendungBeispiele);
     positionen.push({
       nr: Math.round(nr),
       ziffer,
@@ -222,6 +242,7 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
       ...(typeof r.anmerkung === "string" ? { anmerkung: r.anmerkung } : {}),
       ...(typeof r.quelleText === "string" ? { quelleText: r.quelleText } : {}),
       ...(typeof r.begruendung === "string" ? { begruendung: r.begruendung } : {}),
+      ...(beisp ? { begruendungBeispiele: beisp } : {}),
     });
   }
   const hinweiseRaw = Array.isArray(o.hinweise) ? o.hinweise : [];
@@ -267,6 +288,7 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
       if (!Number.isFinite(nr) || !ziffer || !Number.isFinite(faktor) || !Number.isFinite(betrag) || !st) {
         return null;
       }
+      const beispOpt = normalizeBegruendungBeispieleArr(r.begruendungBeispiele);
       optimierungen.push({
         nr: Math.round(nr),
         ziffer,
@@ -277,6 +299,7 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
         ...(typeof r.anmerkung === "string" ? { anmerkung: r.anmerkung } : {}),
         ...(typeof r.quelleText === "string" ? { quelleText: r.quelleText } : {}),
         ...(typeof r.begruendung === "string" ? { begruendung: r.begruendung } : {}),
+        ...(beispOpt ? { begruendungBeispiele: beispOpt } : {}),
       });
     }
   }
@@ -309,6 +332,7 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
       }
       const rInt = Math.round(rang);
       if (rInt < 1 || rInt > 3) return null;
+      const beispTop = normalizeBegruendungBeispieleArr(r.begruendungBeispiele);
       topVorschlaege.push({
         nr: Math.round(nr),
         ziffer,
@@ -321,6 +345,7 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
         ...(typeof r.anmerkung === "string" ? { anmerkung: r.anmerkung } : {}),
         ...(typeof r.quelleText === "string" ? { quelleText: r.quelleText } : {}),
         ...(typeof r.begruendung === "string" ? { begruendung: r.begruendung } : {}),
+        ...(beispTop ? { begruendungBeispiele: beispTop } : {}),
       });
     }
   }
@@ -352,14 +377,18 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
     zusammenfassung = summarizeFromPositions(positionen, optimierungen, hinweise);
   }
 
+  const posEnriched = positionen.map(enrichPositionBegruendungBeispieleClient);
+  const optEnriched = optimierungen?.map(enrichPositionBegruendungBeispieleClient);
+  const topEnriched = topVorschlaege?.map((t) => enrichPositionBegruendungBeispieleClient(t));
+
   return {
     modus,
     klinischerKontext,
     fachgebiet,
-    positionen,
+    positionen: posEnriched,
     hinweise,
-    ...(optimierungen?.length ? { optimierungen } : {}),
-    ...(topVorschlaege?.length ? { topVorschlaege } : {}),
+    ...(optEnriched?.length ? { optimierungen: optEnriched } : {}),
+    ...(topEnriched?.length ? { topVorschlaege: topEnriched } : {}),
     zusammenfassung,
     ...(typeof o.goaeStandHinweis === "string" ? { goaeStandHinweis: o.goaeStandHinweis } : {}),
     ...(Array.isArray(o.adminQuellen) &&

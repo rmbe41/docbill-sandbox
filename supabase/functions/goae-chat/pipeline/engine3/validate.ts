@@ -8,6 +8,7 @@ import {
   regelZiffernKollidieren,
   type RegelKatalogEintrag,
 } from "../../goae-catalog-json.ts";
+import { getBegruendungBeispiele } from "./begruendung-beispiele.ts";
 
 let _regelKatalog: Map<string, RegelKatalogEintrag> | null = null;
 function getRegelKatalog(): Map<string, RegelKatalogEintrag> {
@@ -16,6 +17,15 @@ function getRegelKatalog(): Map<string, RegelKatalogEintrag> {
 }
 
 const PUNKTWERT = 0.0582873;
+
+function coerceBegruendungBeispiele(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .filter((x): x is string => typeof x === "string")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return out.length ? out : undefined;
+}
 
 export type Engine3Modus = "rechnung_pruefung" | "leistungen_abrechnen";
 
@@ -31,6 +41,8 @@ export interface Engine3Position {
   anmerkung?: string;
   quelleText?: string;
   begruendung?: string;
+  /** Vollständige, wählbare Begründungsvarianten (optional LLM + deterministische Vorlagen). */
+  begruendungBeispiele?: string[];
 }
 
 export interface Engine3Hinweis {
@@ -448,6 +460,7 @@ export function parseEngine3ResultJson(raw: unknown, modus: Engine3Modus): Engin
     if (!Number.isFinite(nr) || !Number.isFinite(faktor) || !Number.isFinite(betrag)) {
       return null;
     }
+    const beisp = coerceBegruendungBeispiele(r.begruendungBeispiele);
     return {
       nr: Math.round(nr),
       ziffer,
@@ -458,6 +471,7 @@ export function parseEngine3ResultJson(raw: unknown, modus: Engine3Modus): Engin
       ...(typeof r.anmerkung === "string" ? { anmerkung: r.anmerkung } : {}),
       ...(typeof r.quelleText === "string" ? { quelleText: r.quelleText } : {}),
       ...(typeof r.begruendung === "string" ? { begruendung: r.begruendung } : {}),
+      ...(beisp ? { begruendungBeispiele: beisp } : {}),
     };
   };
 
@@ -552,6 +566,23 @@ export function applyRecalcAndConsistency(data: Engine3ResultData): Engine3Resul
   };
   next.zusammenfassung = summarize(next);
   return next;
+}
+
+function enrichPositionBegruendungBeispiele(p: Engine3Position): Engine3Position {
+  const canonical = getBegruendungBeispiele(p.ziffer, p.faktor);
+  if (canonical.length > 0) return { ...p, begruendungBeispiele: canonical };
+  return p;
+}
+
+/** Deterministische Vorlagen für bekannte Ziffern; sonst unverändert (ggf. LLM-Array aus dem Parse). */
+export function enrichEngine3BegruendungBeispiele(data: Engine3ResultData): Engine3ResultData {
+  return {
+    ...data,
+    positionen: data.positionen.map(enrichPositionBegruendungBeispiele),
+    ...(data.optimierungen?.length
+      ? { optimierungen: data.optimierungen.map(enrichPositionBegruendungBeispiele) }
+      : {}),
+  };
 }
 
 /**
@@ -710,6 +741,47 @@ export function enforceEngine3Quellenbezug(data: Engine3ResultData): Engine3Resu
   };
   next.zusammenfassung = summarize(next);
   return next;
+}
+
+function buildEngine3EvidenceCorpus(data: Engine3ResultData): string {
+  const parts: string[] = [
+    data.klinischerKontext,
+    data.fachgebiet,
+    ...data.positionen.flatMap((p) => [p.bezeichnung, p.anmerkung, p.begruendung, p.quelleText]),
+    ...(data.optimierungen ?? []).flatMap((p) => [p.bezeichnung, p.anmerkung, p.begruendung, p.quelleText]),
+    ...data.hinweise.flatMap((h) => [h.titel, h.detail, h.regelReferenz ?? ""]),
+  ];
+  return parts
+    .filter((x): x is string => typeof x === "string" && x.length > 0)
+    .join("\n")
+    .toLowerCase();
+}
+
+function adminQuelleStemInCorpus(name: string, corpus: string): boolean {
+  const low = name.trim().toLowerCase();
+  if (!low) return false;
+  if (corpus.includes(low)) return true;
+  const stem = low.replace(/\.[a-z]{2,5}$/i, "").trim();
+  if (stem.length < 6) return false;
+  if (corpus.includes(stem)) return true;
+  if (stem.length > 12) {
+    const probe = stem.slice(0, 48);
+    if (probe.length >= 12 && corpus.includes(probe)) return true;
+  }
+  return false;
+}
+
+/**
+ * Entfernt Einträge aus `adminQuellen`, die im erzeugten JSON nicht vorkommen
+ * (nur im Prompt gelieferte RAG-Dateien sollen nicht als „Quelle“ erscheinen).
+ */
+export function filterEngine3AdminQuellenToEvidence(data: Engine3ResultData): Engine3ResultData {
+  const raw = data.adminQuellen;
+  if (!raw?.length) return data;
+  const corpus = buildEngine3EvidenceCorpus(data);
+  const kept = raw.filter((a) => adminQuelleStemInCorpus(String(a), corpus));
+  if (kept.length === raw.length) return data;
+  return { ...data, adminQuellen: kept.length ? kept : undefined };
 }
 
 const SYNTH_RATIONALE_REF = "DocBill:SyntheticRationaleTemplate";
