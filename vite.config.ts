@@ -7,25 +7,31 @@ export default defineConfig(({ mode }) => {
   const supabaseUrl = env.VITE_SUPABASE_URL || "https://qxaijnupaxxxsqaivbtj.supabase.co";
 
   return {
-  server: {
-    host: "::",
-    port: 8080,
-    hmr: {
-      overlay: false,
-    },
-    proxy: {
-      "/api/supabase": {
-        target: supabaseUrl,
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/supabase/, ""),
+    server: {
+      host: "::",
+      port: 8080,
+      hmr: {
+        overlay: false,
+      },
+      proxy: {
+        "/api/supabase": {
+          target: supabaseUrl,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/supabase/, ""),
+        },
+        /** Spec GET /api/health — mappt auf Supabase Edge Function `health` */
+        "/api/health": {
+          target: supabaseUrl,
+          changeOrigin: true,
+          rewrite: () => "/functions/v1/health",
+        },
       },
     },
-  },
-  plugins: [react()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+    plugins: [react()],
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
+      },
     },
-  },
-};
+  };
 });

@@ -1,0 +1,11 @@
+fixture_id: "E2E_GATE_001"
+name: "Runner-Report enthält fixture_id, status, duration_ms pro Fixture"
+input:
+  type: "runner_meta"
+expected:
+  output:
+    report_fields:
+      - "fixture_id"
+      - "status"
+      - "duration_ms"
+    diff_optional: true

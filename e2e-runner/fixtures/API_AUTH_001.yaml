@@ -1,0 +1,11 @@
+fixture_id: "API_AUTH_001"
+name: "Geschützte Edge Function ohne Credentials -> 401"
+input:
+  type: "http_post"
+  path: "/functions/v1/delete-account"
+  headers:
+    Content-Type: "application/json"
+  body: "{}"
+expected:
+  output:
+    status_code: 401

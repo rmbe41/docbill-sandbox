@@ -1,0 +1,13 @@
+fixture_id: "HEALTH_001"
+name: "Health liefert Spec-JSON und GOÄ-Version"
+input:
+  type: "http_get"
+  path: "/functions/v1/health"
+expected:
+  output:
+    status_code: 200
+    json_path:
+      status: "healthy"
+      components.goae_json.status: "ok"
+    response_time_max_ms: 15000
+  no_pii_in_llm_request: true

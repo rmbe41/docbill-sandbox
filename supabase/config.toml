@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.benchmark-run]
 verify_jwt = false
+
+[functions.health]
+verify_jwt = false

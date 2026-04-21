@@ -1,0 +1,6 @@
+dist
+node_modules
+coverage
+package-lock.json
+supabase/functions/goae-chat/goae-catalog*.json
+benchmarks/**/*.json

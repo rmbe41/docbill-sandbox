@@ -26,3 +26,7 @@ dist-ssr
 
 # Kopie aus benchmarks/ vor deploy (siehe package.json supabase:deploy)
 supabase/functions/benchmark-run/catalog-v2-exclusions.generated.json
+
+# Cycle 01 E2E / Review (lokal/CI-Artefakte)
+e2e-report.json
+review-report.json
