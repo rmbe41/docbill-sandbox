@@ -18,6 +18,12 @@ Foundation → Modus C → Modus A → Modus B → Batch/PAD → Wissens-Managem
 | -------------------------------- | ------------------------------------------------------------- |
 | `01_DEV_LIFECYCLE_CursorPLAN.md` | Cycle 01: E2E, Health, CI, Review-Agent, Monitoring-Grundlage |
 
+## PostHog: Event `health_check`
+
+- Wird von der Edge Function **`health`** bei jedem erfolgreichen Lauf gesendet (Ingest: `https://eu.i.posthog.com/i/v0/e/` bzw. optional `POSTHOG_INGEST_URL` / `POSTHOG_HOST`).
+- **In PostHog:** *Activity* / *Live events* oder *Data management* → nach Event-Name **`health_check`** filtern; Properties u. a. `overall`, `response_time_ms`, `source: supabase_edge_health`.
+- Supabase Secrets: `POSTHOG_API_KEY` (Project API Key `phc_…`).
+
 ## Alerting (PostHog → Slack) — Checkliste
 
 Konfiguration in PostHog/Slack nach Spec §2.3:

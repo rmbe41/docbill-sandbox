@@ -62,29 +62,58 @@ async function checkLlmApi(): Promise<ComponentState> {
   }
 }
 
+/** PostHog Ingest (EU Cloud): https://eu.i.posthog.com/i/v0/e/ — siehe PostHog Docs „post-only endpoints“. */
+function resolvePostHogIngestUrl(): string {
+  const full = Deno.env.get("POSTHOG_INGEST_URL");
+  if (full?.startsWith("http")) {
+    return full.replace(/\/$/, "");
+  }
+  const base = (Deno.env.get("POSTHOG_HOST") ?? "https://eu.i.posthog.com").replace(/\/$/, "");
+  // Legacy: eu.posthog.com → aktuelle Ingest-Domain
+  const normalized =
+    base === "https://eu.posthog.com" ? "https://eu.i.posthog.com" : base;
+  return `${normalized}/i/v0/e/`;
+}
+
 async function sendPostHogHealthCheck(props: {
   overall: string;
   response_time_ms: number;
 }): Promise<void> {
   const key = Deno.env.get("POSTHOG_API_KEY");
-  const host = Deno.env.get("POSTHOG_HOST") ?? "https://eu.posthog.com";
   if (!key) return;
+
+  const url = resolvePostHogIngestUrl();
   const body = {
     api_key: key,
     event: "health_check",
+    distinct_id: "edge_health",
     properties: {
-      distinct_id: "edge_health",
-      ...props,
+      overall: props.overall,
+      response_time_ms: props.response_time_ms,
+      source: "supabase_edge_health",
+      $lib: "docbill-health-edge",
+      $process_person_profile: false,
     },
+    timestamp: new Date().toISOString(),
   };
+
   try {
-    await fetch(`${host.replace(/\/$/, "")}/capture/`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-  } catch {
-    /* ignore */
+    if (!res.ok) {
+      console.error(
+        JSON.stringify({
+          level: "warn",
+          msg: "posthog_ingest_http",
+          status: res.status,
+        }),
+      );
+    }
+  } catch (e) {
+    console.error(JSON.stringify({ level: "warn", msg: "posthog_ingest_failed", detail: String(e) }));
   }
 }
 
