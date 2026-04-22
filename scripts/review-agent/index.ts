@@ -33,7 +33,7 @@ interface CodeReviewReport {
 const STANDARDS_PROMPT = `Du bist Review-Agent für DocBill. Prüfe den Git-Diff gegen:
 
 DocBill-Regeln:
-1. Keine hartcodierten GOÄ-/EBM-Ziffern im Code – nur aus JSON-Datenbasis.
+1. Keine hartcodierten GOÄ-/EBM-Ziffern in Anwendungs-Code (.ts, .tsx, Edge Functions, Prompts als Fließtext in Code, etc.) – Abrechnungscodes sollen aus der JSON-Datenbasis geladen werden. Ausnahme: Eingecheckte Katalog-/Daten-JSON unter data/, src/data/ oder vergleichbare kanonische Gebührenverzeichnis-Dateien sind erlaubt und enthalten zwangsläufig Ziffern; dort KEINE Befunde melden.
 2. Jeder LLM-Prompt in eigener, versionierter Prompt-Datei.
 3. Pseudonymisierung nicht in Controller-/Route-Dateien.
 4. API-Routen: Input-Validation (zod).
@@ -60,6 +60,30 @@ Antworte NUR mit gültigem JSON (kein Markdown) in exakt diesem Schema:
 }
 
 line ist best effort (Zeile im Diff-Kontext).`;
+
+function isFeeCatalogDataPath(file: string): boolean {
+  const normalized = file
+    .replace(/^[ab]\//, "")
+    .replace(/\\/g, "/")
+    .trim();
+  if (!normalized.toLowerCase().endsWith(".json")) return false;
+  if (normalized.startsWith("data/") || normalized.includes("/data/")) return true;
+  if (normalized.startsWith("src/data/") || normalized.includes("/src/data/")) return true;
+  const base = normalized.split("/").pop() ?? "";
+  return /catalog/i.test(base);
+}
+
+/** LLMs melden Regel 1 fälschlich auf Katalog-JSON – für CI-Pass keine criticals auf diesen Pfaden. */
+function downgradeCriticalsOnCatalogDataFiles(findings: Finding[]): Finding[] {
+  return findings.map((f) => {
+    if (f.severity !== "critical" || !isFeeCatalogDataPath(f.file)) return f;
+    return {
+      ...f,
+      severity: "info",
+      message: `${f.message} [Review-Agent: Pfad gilt als Katalog-/Daten-JSON – critical abgestuft.]`,
+    };
+  });
+}
 
 function getDiff(): string {
   const base = process.env.REVIEW_BASE_REF ?? "HEAD~1";
@@ -131,10 +155,12 @@ async function callOpenRouter(diff: string): Promise<CodeReviewReport> {
     files_reviewed?: number;
   };
 
-  const findings = (parsed.findings ?? []).map((f) => ({
-    ...f,
-    line: typeof f.line === "number" ? f.line : 0,
-  }));
+  const findings = downgradeCriticalsOnCatalogDataFiles(
+    (parsed.findings ?? []).map((f) => ({
+      ...f,
+      line: typeof f.line === "number" ? f.line : 0,
+    })),
+  );
   const critical = findings.filter((f) => f.severity === "critical").length;
   const warning = findings.filter((f) => f.severity === "warning").length;
   const info = findings.filter((f) => f.severity === "info").length;

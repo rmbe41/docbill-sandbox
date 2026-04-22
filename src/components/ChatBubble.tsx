@@ -1,5 +1,13 @@
-import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import React, {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useMemo,
+  type ComponentPropsWithoutRef,
+} from "react";
 import ReactMarkdown from "react-markdown";
+import type { Components, ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { FileText, ThumbsUp, ThumbsDown } from "lucide-react";
@@ -147,15 +155,27 @@ function assistantMessageFeedbackBody(m: ChatMessage): string {
   return "";
 }
 
+type MdHeadingProps = ComponentPropsWithoutRef<"h1"> & ExtraProps;
+
+function frageHeadingAsP({ children, node: _node, ...props }: MdHeadingProps) {
+  return (
+    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...(props as ComponentPropsWithoutRef<"p">)}>
+      {children}
+    </p>
+  );
+}
+
 // Custom markdown components – flache Typografie, keine Boxen
-const markdownComponents = {
-  h2: ({ children, ...props }: any) => (
+const markdownComponents: Partial<Components> = {
+  h2: ({ children, node: _node, ...props }: ComponentPropsWithoutRef<"h2"> & ExtraProps) => (
     <h2 className="font-semibold mt-6 mb-2 first:mt-0" {...props}>
       {children}
     </h2>
   ),
-  hr: (props: any) => <hr className="section-divider" {...props} />,
-  table: ({ children, ...props }: any) => (
+  hr: ({ node: _node, ...props }: ComponentPropsWithoutRef<"hr"> & ExtraProps) => (
+    <hr className="section-divider" {...props} />
+  ),
+  table: ({ children, node: _node, ...props }: ComponentPropsWithoutRef<"table"> & ExtraProps) => (
     <div className="overflow-x-auto my-4">
       <table {...props}>{children}</table>
     </div>
@@ -163,38 +183,14 @@ const markdownComponents = {
 };
 
 /** Frage-Structured: keine großen Überschriften in Unterfeldern (Prompt verbietet ###); falls doch, wie Absatz. */
-const frageSectionMarkdownComponents = {
+const frageSectionMarkdownComponents: Partial<Components> = {
   ...markdownComponents,
-  h1: ({ children, ...props }: any) => (
-    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
-      {children}
-    </p>
-  ),
-  h2: ({ children, ...props }: any) => (
-    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
-      {children}
-    </p>
-  ),
-  h3: ({ children, ...props }: any) => (
-    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
-      {children}
-    </p>
-  ),
-  h4: ({ children, ...props }: any) => (
-    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
-      {children}
-    </p>
-  ),
-  h5: ({ children, ...props }: any) => (
-    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
-      {children}
-    </p>
-  ),
-  h6: ({ children, ...props }: any) => (
-    <p className="font-semibold my-1.5 first:mt-0 text-sm" {...props}>
-      {children}
-    </p>
-  ),
+  h1: frageHeadingAsP,
+  h2: frageHeadingAsP,
+  h3: frageHeadingAsP,
+  h4: frageHeadingAsP,
+  h5: frageHeadingAsP,
+  h6: frageHeadingAsP,
 };
 
 function displayNameFromUser(user: SupabaseUser): string | null {

@@ -37,7 +37,6 @@ export function BegruendungBeispielePicker({
 }: BegruendungBeispielePickerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const list = useMemo(() => beispiele.filter((s) => s.trim().length > 0).slice(0, 3), [beispiele]);
-  const listFingerprint = list.join("\u0000");
 
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
@@ -52,7 +51,7 @@ export function BegruendungBeispielePicker({
     const i = list.indexOf(p);
     setSelectedIdx(i >= 0 ? i : -1);
     setDraft(p);
-  }, [persistedText, listFingerprint]);
+  }, [persistedText, list]);
 
   const lab = labels ?? DEFAULT_LABELS;
 

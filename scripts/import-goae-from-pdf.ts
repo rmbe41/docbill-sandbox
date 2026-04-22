@@ -339,7 +339,7 @@ async function main() {
   const pdfPath = resolve(pdfArg);
   const buf = await readFile(pdfPath);
   const pages = await extractPdfPagesFromBuffer(buf);
-  let entries = parsePdfPagesToEntries(pages);
+  const entries = parsePdfPagesToEntries(pages);
   entries.sort(sortEntries);
 
   const srcData = join(__dirname, "../src/data/goae-catalog-full.json");
