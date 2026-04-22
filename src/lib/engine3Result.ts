@@ -161,6 +161,11 @@ function enrichPositionBegruendungBeispieleClient(p: Engine3Position): Engine3Po
   return p;
 }
 
+function enrichTopVorschlag(t: Engine3TopVorschlag): Engine3TopVorschlag {
+  const p = enrichPositionBegruendungBeispieleClient(t);
+  return { ...p, rang: t.rang, ...(t.empfohlen !== undefined ? { empfohlen: t.empfohlen } : {}) };
+}
+
 function unwrapEngine3Payload(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const root = raw as Record<string, unknown>;
@@ -384,7 +389,7 @@ export function parseEngine3ResultData(raw: unknown): Engine3ResultData | null {
 
   const posEnriched = positionen.map(enrichPositionBegruendungBeispieleClient);
   const optEnriched = optimierungen?.map(enrichPositionBegruendungBeispieleClient);
-  const topEnriched = topVorschlaege?.map((t) => enrichPositionBegruendungBeispieleClient(t));
+  const topEnriched = topVorschlaege?.map(enrichTopVorschlag);
 
   return {
     modus,

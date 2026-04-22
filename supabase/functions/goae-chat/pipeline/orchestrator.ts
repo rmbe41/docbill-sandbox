@@ -12,7 +12,9 @@ import { parseDokumentWithRetry } from "./dokument-parser.ts";
 import { analysiereMedizinisch } from "./medizinisches-nlp.ts";
 import { extrahiereLeistungen } from "./leistungs-extraktion.ts";
 import { mappeGoae } from "./goae-mapping.ts";
+import { mappeEbm } from "./ebm-mapping.ts";
 import { pruefeRechnung } from "./regelengine.ts";
+import { pruefeRechnungEbm } from "./ebm-regelengine.ts";
 import { generateTextStream, buildTextGenerationPrompt } from "./text-generator.ts";
 import { isFreeModel } from "../model-resolver.ts";
 import type {
@@ -20,6 +22,10 @@ import type {
   PipelineResult,
   PipelineProgress,
 } from "./types.ts";
+import {
+  buildAnalyseFromRegelpruefung,
+  encodeDocbillAnalyseSse,
+} from "../analyse-envelope.ts";
 
 const PIPELINE_STEPS: { label: string }[] = [
   { label: "Dokument wird analysiert..." },
@@ -82,6 +88,7 @@ export async function runPipeline(
       await sendProgress(0, PIPELINE_STEPS[0].label);
       const parsedRechnung = await parseDokumentWithRetry(input.files, apiKey, input.model, {
         multiDocumentInvoiceReview: input.files.length >= 2,
+        regelwerk: input.regelwerk === "EBM" ? "EBM" : "GOAE",
       });
 
       // Step 2: Medizinisches NLP
@@ -93,6 +100,7 @@ export async function runPipeline(
         input.model,
         undefined,
         kontextOk,
+        { pseudonymSessionId: input.pseudonymSessionId },
       );
 
       // Step 3: Leistungs-Extraktion (deterministic)
@@ -102,26 +110,39 @@ export async function runPipeline(
         medizinischeAnalyse,
       );
 
-      // Step 4: GOÄ Mapping
+      // Step 4: Katalog-Mapping (GOÄ oder EBM)
       await sendProgress(3, PIPELINE_STEPS[3].label);
-      const mappings = await mappeGoae(
-        parsedRechnung,
-        leistungen,
-        medizinischeAnalyse,
-        apiKey,
-        input.model,
-        undefined,
-        kontextOk,
-      );
+      const ebm = input.regelwerk === "EBM";
+      const mappings = ebm
+        ? await mappeEbm(
+          parsedRechnung,
+          leistungen,
+          medizinischeAnalyse,
+          apiKey,
+          input.model,
+          undefined,
+          kontextOk,
+        )
+        : await mappeGoae(
+          parsedRechnung,
+          leistungen,
+          medizinischeAnalyse,
+          apiKey,
+          input.model,
+          undefined,
+          kontextOk,
+        );
 
       // Step 5: Regelengine (deterministic)
       await sendProgress(4, PIPELINE_STEPS[4].label);
-      const pruefung = pruefeRechnung(
-        parsedRechnung,
-        medizinischeAnalyse,
-        mappings,
-        "",
-      );
+      const pruefung = ebm
+        ? pruefeRechnungEbm(parsedRechnung, medizinischeAnalyse, mappings)
+        : pruefeRechnung(
+          parsedRechnung,
+          medizinischeAnalyse,
+          mappings,
+          "",
+        );
 
       const pipelineResult: PipelineResult = {
         parsedRechnung,
@@ -129,10 +150,18 @@ export async function runPipeline(
         leistungen,
         mappings,
         pruefung,
+        regelwerk: input.regelwerk === "EBM" ? "EBM" : "GOAE",
       };
 
       // Send structured result for frontend storage
       await sendPipelineResult(pipelineResult);
+
+      const analysePayload = buildAnalyseFromRegelpruefung(
+        input.mode ?? "A",
+        input.regelwerk ?? "GOAE",
+        pipelineResult.pruefung,
+      );
+      await writer.write(encoder.encode(encodeDocbillAnalyseSse(analysePayload)));
 
       // Step 6: Textgenerierung (streaming)
       await sendProgress(5, PIPELINE_STEPS[5].label);

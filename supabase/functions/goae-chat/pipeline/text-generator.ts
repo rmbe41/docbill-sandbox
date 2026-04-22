@@ -21,6 +21,11 @@ import {
   isRetryableModelStatus,
   getReasoningConfigForStream,
 } from "../model-resolver.ts";
+import { getPseudonymRequestContext } from "../privacy/pseudonym-request-context.ts";
+import { pseudonymizeForLlmSession } from "../privacy/pseudonymize-orchestrator.ts";
+import { loadPseudonymMap } from "../privacy/pseudonym-redis.ts";
+import { reidentifyText } from "../privacy/pseudonymize-bridge.ts";
+import { completionTextFromJsonResponse } from "./direct-model.ts";
 
 /** Timeout für Textgenerierung (90s) – verhindert endloses Hängen */
 const TEXT_FETCH_TIMEOUT_MS = 90000;
@@ -67,10 +72,30 @@ function buildTextSystemPrompt(kontextWissenEnabled: boolean): string {
   return TEXT_SYSTEM_PROMPT + (kontextWissenEnabled ? TEXT_SYSTEM_GOAE_BLOCK : TEXT_SYSTEM_NO_EMBEDDED_KNOWLEDGE);
 }
 
+const TEXT_SYSTEM_NO_EBM_KNOWLEDGE = `
+
+Hinweis: Es steht **kein** vollständiger EBM-Referenztext im System. Stütze dich auf die strukturierten Prüfergebnisse; formuliere zurückhaltend bei Euro-/GOP-Details.`;
+
+const TEXT_EBM_BRIEF = `Du bist DocBill-EBM, ein KI-Assistent für **GKV-Abrechnung** (EBM, **GOP** fünf Stellen).
+
+Wie bei GOÄ-DocBill: **kurze** Einordnung, **höchstens 4** Bullets Nächste Schritte, keine Tabelle, keine Wiederholung der UI.
+
+WICHTIG:
+- Regelwerk: **EBM** — Faktor/Steigerung i. d. R. **nicht** analog GOÄ; Betragsprüfung = Katalog (Punkte, Orientierungswert)
+- Keine personenbezogenen Daten; Patient als „Patient/in“
+
+## FORMAT: wie vorgegeben: \`### Kurzfassung\` (2 Sätze), \`### Nächste Schritte\` (max. 4 Bullets).`;
+
+function buildTextSystemPromptEbm(kontextWissenEnabled: boolean): string {
+  return TEXT_EBM_BRIEF + (kontextWissenEnabled ? "" : TEXT_SYSTEM_NO_EBM_KNOWLEDGE);
+}
+
 /** @deprecated Prefer buildTextSystemPrompt(true) — behält bisheriges Verhalten. */
 const TEXT_SYSTEM_PROMPT_LEGACY = buildTextSystemPrompt(true);
 
 export function buildTextGenerationPrompt(result: PipelineResult): string {
+  const rw = result.regelwerk === "EBM" ? "EBM" : "GOAE";
+  const posLabel = rw === "EBM" ? "GOP" : "GOÄ";
   const lines: string[] = [];
 
   lines.push("# Ergebnisse der automatischen Rechnungsprüfung\n");
@@ -92,8 +117,12 @@ export function buildTextGenerationPrompt(result: PipelineResult): string {
   // Geprüfte Positionen
   lines.push("\n## Geprüfte Positionen\n");
   for (const pos of result.pruefung.positionen) {
-    lines.push(`### Position ${pos.nr}: GOÄ ${pos.ziffer} – ${pos.bezeichnung}`);
-    lines.push(`Faktor: ${pos.faktor}× | Betrag: ${pos.betrag.toFixed(2)}€ | Berechnet: ${pos.berechneterBetrag.toFixed(2)}€ | Prüfung: ${pos.status}`);
+    lines.push(`### Position ${pos.nr}: ${posLabel} ${pos.ziffer} – ${pos.bezeichnung}`);
+    lines.push(
+      rw === "EBM"
+        ? `Faktor: ${pos.faktor}× | Betrag: ${pos.betrag.toFixed(2)}€ | Katalog: ${pos.berechneterBetrag.toFixed(2)}€ | Prüfung: ${pos.status}`
+        : `Faktor: ${pos.faktor}× | Betrag: ${pos.betrag.toFixed(2)}€ | Berechnet: ${pos.berechneterBetrag.toFixed(2)}€ | Prüfung: ${pos.status}`,
+    );
     if (pos.begruendung) {
       lines.push(`Begründung: ${pos.begruendung}`);
     }
@@ -113,7 +142,7 @@ export function buildTextGenerationPrompt(result: PipelineResult): string {
     lines.push("## Optimierungsvorschläge\n");
     for (const opt of result.pruefung.optimierungen) {
       lines.push(
-        `- GOÄ ${opt.ziffer} (${opt.bezeichnung}): ${opt.faktor}× = ${opt.betrag.toFixed(2)}€`,
+        `- ${posLabel} ${opt.ziffer} (${opt.bezeichnung}): ${opt.faktor}× = ${opt.betrag.toFixed(2)}€`,
       );
       lines.push(`  Grund: ${opt.begruendung}`);
     }
@@ -147,7 +176,9 @@ export async function generateTextStream(
   userMessage?: string,
   kontextWissenEnabled = true,
 ): Promise<ReadableStream<Uint8Array>> {
-  let systemContent = buildTextSystemPrompt(kontextWissenEnabled);
+  let systemContent = result.regelwerk === "EBM"
+    ? buildTextSystemPromptEbm(kontextWissenEnabled)
+    : buildTextSystemPrompt(kontextWissenEnabled);
   if (adminContext) {
     systemContent += `\n\n## ADMIN-KONTEXT:\n${adminContext}`;
   }
@@ -164,15 +195,37 @@ export async function generateTextStream(
   const reasoningConfig = getReasoningConfigForStream(model);
   let lastError = "Textgenerierung fehlgeschlagen";
 
+  const pseudoCtx = getPseudonymRequestContext();
+  let systemForApi = systemContent;
+  let promptForApi = prompt;
+  if (pseudoCtx) {
+    systemForApi = (
+      await pseudonymizeForLlmSession({
+        plaintext: systemContent,
+        sessionId: pseudoCtx.sessionId,
+        apiKey: pseudoCtx.apiKey,
+        model: pseudoCtx.model,
+      })
+    ).text;
+    promptForApi = (
+      await pseudonymizeForLlmSession({
+        plaintext: prompt,
+        sessionId: pseudoCtx.sessionId,
+        apiKey: pseudoCtx.apiKey,
+        model: pseudoCtx.model,
+      })
+    ).text;
+  }
+
   for (let i = 0; i < modelsToTry.length; i++) {
     let response: Response;
     const reqBody: Record<string, unknown> = {
       model: modelsToTry[i],
       messages: [
-        { role: "system", content: systemContent },
-        { role: "user", content: prompt },
+        { role: "system", content: systemForApi },
+        { role: "user", content: promptForApi },
       ],
-      stream: true,
+      stream: pseudoCtx ? false : true,
       temperature: 0.3,
     };
     if (reasoningConfig) reqBody.reasoning = reasoningConfig;
@@ -199,6 +252,27 @@ export async function generateTextStream(
     }
 
     if (response.ok) {
+      if (pseudoCtx) {
+        let text = await completionTextFromJsonResponse(response);
+        const map = await loadPseudonymMap(pseudoCtx.sessionId);
+        if (map?.mappings.length) text = reidentifyText(text, map);
+        const enc = new TextEncoder();
+        const chunkSize = 120;
+        return new ReadableStream({
+          start(controller) {
+            for (let j = 0; j < text.length; j += chunkSize) {
+              controller.enqueue(
+                enc.encode(
+                  `data: ${JSON.stringify({
+                    choices: [{ delta: { content: text.slice(j, j + chunkSize) } }],
+                  })}\n\n`,
+                ),
+              );
+            }
+            controller.close();
+          },
+        });
+      }
       return response.body!;
     }
 

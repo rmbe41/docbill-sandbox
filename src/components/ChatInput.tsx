@@ -3,6 +3,7 @@ import { Send, Square, Paperclip, X, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useDraft } from "@/hooks/useDraft";
+import { useToast } from "@/hooks/use-toast";
 import FileOverlay from "@/components/FileOverlay";
 
 type ChatInputProps = {
@@ -42,12 +43,14 @@ const ALLOWED_TYPES = [
   "image/jpeg", "image/png", "image/gif", "image/bmp", "image/tiff", "image/heic",
 ];
 
-const ALLOWED_EXT = /\.(jpe?g|png|gif|bmp|tiff?|heic|pdf)$/i;
+const MAX_CHAT_ATTACHMENTS = 500;
+const ALLOWED_EXT = /\.(jpe?g|png|gif|bmp|tiff?|heic|pdf|pad)$/i;
 
 const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
   { onSend, isLoading, onStop, attachmentShortcutHint, stopShortcutHint, draftConversationId = null },
   ref,
 ) {
+  const { toast } = useToast();
   const { text, setText, files, addFiles, removeFile, clearFiles, clearDraft } = useDraft();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -266,15 +269,35 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       (f) => ALLOWED_TYPES.includes(f.type) || ALLOWED_EXT.test(f.name),
     );
 
-  const handleFileDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const dropped = filterAllowed(e.dataTransfer.files);
-    if (dropped.length > 0) addFiles(dropped);
-  }, [addFiles]);
+  const enqueueFiles = useCallback(
+    (incoming: File[]) => {
+      if (incoming.length === 0) return;
+      const room = Math.max(0, MAX_CHAT_ATTACHMENTS - files.length);
+      const slice = incoming.slice(0, room);
+      if (slice.length < incoming.length) {
+        toast({
+          title: "Dateilimit",
+          description: `Es können höchstens ${MAX_CHAT_ATTACHMENTS} Dateien gleichzeitig angehängt werden (Spec: Batch-Upload).`,
+          variant: "destructive",
+        });
+      }
+      if (slice.length > 0) addFiles(slice);
+    },
+    [addFiles, files.length, toast],
+  );
+
+  const handleFileDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const dropped = filterAllowed(e.dataTransfer.files);
+      if (dropped.length > 0) enqueueFiles(dropped);
+    },
+    [enqueueFiles],
+  );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = filterAllowed(e.target.files || []);
-    if (selected.length > 0) addFiles(selected);
+    if (selected.length > 0) enqueueFiles(selected);
     e.target.value = "";
   };
 
@@ -336,8 +359,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           className="flex-shrink-0 p-1.5 sm:p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
           title={
             attachmentShortcutHint
-              ? `Datei hochladen (PDF, JPEG, PNG, GIF, BMP, TIFF, HEIC) — ${attachmentShortcutHint}`
-              : "Datei hochladen (PDF, JPEG, PNG, GIF, BMP, TIFF, HEIC)"
+              ? `Datei hochladen (PDF, PAD, Bilder; bis ${MAX_CHAT_ATTACHMENTS} Dateien) — ${attachmentShortcutHint}`
+              : `Datei hochladen (PDF, PAD, Bilder; bis ${MAX_CHAT_ATTACHMENTS} Dateien)`
           }
         >
           <Paperclip className="w-5 h-5" />
@@ -345,7 +368,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.tif,.tiff,.heic"
+          accept=".pdf,.pad,.jpg,.jpeg,.png,.gif,.bmp,.tif,.tiff,.heic"
           multiple
           className="hidden"
           onChange={handleFileSelect}

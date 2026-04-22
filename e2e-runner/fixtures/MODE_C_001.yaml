@@ -1,0 +1,27 @@
+# Spec: specs/01_DEV_LIFECYCLE.md §2.2 + docs/plans/02_MODES_AND_PIPELINE.md_CursorPLAN.md (Modus C).
+# Gegen Mock: liefert synthetischen docbill_analyse-SSE-Stream. Gegen Staging: E2E_ANON_JWT setzen.
+fixture_id: "MODE_C_001"
+name: "Modus C — Antwort enthält docbill_analyse mit Pflicht-Disclaimer und 8 Kategorien"
+input:
+  type: "http_post"
+  path: "/functions/v1/goae-chat"
+  headers:
+    Content-Type: "application/json"
+    Authorization: "Bearer e2e-mock-token"
+  body:
+    mode: "C"
+    regelwerk: "GOAE"
+    messages:
+      - role: "user"
+        content: "Ab welchem Faktor ist bei GOÄ 1240 eine Begründung erforderlich?"
+    engine_type: "direct"
+expected:
+  output:
+    status_code: 200
+    text_contains:
+      - "docbill_analyse"
+      - "DocBill ist eine KI"
+      - '"kategorien"'
+      - '"kategorie":8'
+    response_time_max_ms: 60000
+  no_pii_in_llm_request: true

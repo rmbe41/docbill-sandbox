@@ -18,7 +18,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Upload, Trash2, KeyRound, Mail } from "lucide-react";
+import { Loader2, Upload, Trash2, KeyRound, Mail, FileDown, Info } from "lucide-react";
+import { buildUserDataExportJson } from "@/lib/compliance/exportUserData";
+import { downloadTextFile } from "@/lib/export";
 import { cn } from "@/lib/utils";
 
 function getInitials(email: string | undefined, name: string | undefined): string {
@@ -59,6 +61,7 @@ const ProfileContent = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [exportingData, setExportingData] = useState(false);
 
   const syncFromUser = useCallback(() => {
     if (!user) return;
@@ -255,6 +258,37 @@ const ProfileContent = () => {
     }
   };
 
+  const handleExportData = async () => {
+    if (!user) return;
+    setExportingData(true);
+    try {
+      const payload = await buildUserDataExportJson(supabase, user.id, user.email ?? null);
+      const safe = (user.email ?? "export").replace(/[^a-zA-Z0-9@._-]+/g, "_");
+      downloadTextFile(
+        `docbill-datenexport-${safe}-${new Date().toISOString().slice(0, 10)}.json`,
+        JSON.stringify(payload, null, 2),
+        "application/json;charset=utf-8",
+      );
+      if (payload.exportErrors?.length) {
+        toast({
+          title: "Export erstellt",
+          description: "Teilinhalte fehlten (siehe exportErrors in der Datei).",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Export erstellt", description: "JSON-Datei wurde heruntergeladen." });
+      }
+    } catch (e: unknown) {
+      toast({
+        title: "Export fehlgeschlagen",
+        description: e instanceof Error ? e.message : "Bitte erneut versuchen.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingData(false);
+    }
+  };
+
   if (!user) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -369,10 +403,40 @@ const ProfileContent = () => {
         </section>
       )}
 
+      <section className="p-6 rounded-xl border border-border bg-card/50 shadow-sm space-y-3">
+        <h2 className="text-sm font-semibold text-foreground">Datenexport (Auskunft)</h2>
+        <p className="text-sm text-muted-foreground">
+          Nach DSGVO Art. 15 können Sie eine Kopie Ihrer in DocBill gespeicherten Nutzerdaten herunterladen.
+        </p>
+        <Button type="button" variant="outline" className="gap-2" disabled={exportingData} onClick={() => void handleExportData()}>
+          {exportingData ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+          Alle Daten als JSON
+        </Button>
+      </section>
+
+      <section className="p-6 rounded-xl border border-border/80 bg-muted/15 space-y-3">
+        <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Info className="h-4 w-4 shrink-0" />
+          Leistungsumfang (v1.3)
+        </h2>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Folgendes liegt bewusst nicht in DocBill (Produktversion 1.3):
+        </p>
+        <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-1.5">
+          <li>Rechtliche Beratung oder Haftungsübernahme</li>
+          <li>Schnittstelle zu PKV-Systemen für automatische Einreichung</li>
+          <li>KI-basierte Diagnoseunterstützung</li>
+          <li>Tiefe PVS-Integration (außer PAD-Import/Export)</li>
+          <li>Mehrsprachigkeit (nur Deutsch)</li>
+          <li>Stationäre Abrechnung (DRG/PEPP)</li>
+        </ul>
+      </section>
+
       <section className="p-6 rounded-xl border border-destructive/40 bg-destructive/5 space-y-4">
         <h2 className="text-sm font-semibold text-destructive">Konto löschen</h2>
         <p className="text-sm text-muted-foreground">
-          Ihr Konto und die zugehörigen Daten werden unwiderruflich entfernt.
+          Gemäß DSGVO Art. 17 können Sie die Löschung Ihrer in DocBill gespeicherten Daten verlangen. Ihr Konto und die
+          zugehörigen Inhalte werden dabei unwiderruflich entfernt.
         </p>
         <Button type="button" variant="destructive" onClick={() => setDeleteOpen(true)}>
           Konto löschen…

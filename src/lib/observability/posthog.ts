@@ -21,3 +21,26 @@ export function captureHealthPageView(): void {
   if (!key) return;
   posthog.capture("health_page_view");
 }
+
+/**
+ * Spec 07 §12: KPIs Antwortzeit (P95) – Ereignis pro abgeschlossenem goae-chat-Durchlauf.
+ * `modus_label`: A/B/C laut Anfrage; `latenz_sekunde`: nützlich für P95-Buckets in PostHog.
+ */
+export function captureGoaeChatComplete(props: {
+  modus?: "A" | "B" | "C";
+  /** Ohne A/B/C z. B. "C" (Fragemodus) vs "AB" (Rechnung/Leistung). */
+  modusKlasse: "C" | "AB" | "unbekannt";
+  durationMs: number;
+  engineType: string;
+}): void {
+  if (!key) return;
+  initPostHog();
+  const latenzSekunde = Math.round((props.durationMs / 1000) * 1000) / 1000;
+  posthog.capture("docbill_goae_chat_complete", {
+    modus: props.modus ?? null,
+    modus_klasse: props.modusKlasse,
+    latenz_ms: props.durationMs,
+    latenz_sekunde: latenzSekunde,
+    engine_type: props.engineType,
+  });
+}

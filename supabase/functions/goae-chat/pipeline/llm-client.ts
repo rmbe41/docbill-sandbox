@@ -8,6 +8,14 @@ import {
   isRetryableModelStatus,
   resolveModel,
 } from "../model-resolver.ts";
+import { sendLlmRequestPostHog } from "../posthog-llm.ts";
+import type { PseudonymRequestContext } from "../privacy/pseudonym-request-context.ts";
+import { getPseudonymRequestContext } from "../privacy/pseudonym-request-context.ts";
+import { pseudonymizeForLlmSession } from "../privacy/pseudonymize-orchestrator.ts";
+import { loadPseudonymMap } from "../privacy/pseudonym-redis.ts";
+import { reidentifyText } from "../privacy/pseudonymize-bridge.ts";
+
+export { extractJson } from "./extract-json.ts";
 
 /** Timeout für LLM-Aufrufe (90s) – deckt fetch UND Body-Lesen ab (resp.json() kann sonst endlos hängen) */
 const LLM_FETCH_TIMEOUT_MS = 90000;
@@ -23,6 +31,17 @@ export interface LlmCallOptions {
   plugins?: unknown[];
   /** When true, use only the specified model (no fallbacks). Used for parser retries. */
   skipFallbacks?: boolean;
+  /** Interne Hilfsaufrufe (z. B. NER Stufe 2) — keine Pseudonymisierung, vermeidet Rekursion. */
+  skipPseudonymOutbound?: boolean;
+  /** Expliziter Kontext; sonst `getPseudonymRequestContext()` (Request-ALS). */
+  pseudonymToExternal?: PseudonymRequestContext;
+}
+
+async function maybeReidentifyLlmText(text: string, pseudo: PseudonymRequestContext | undefined): Promise<string> {
+  if (!pseudo?.sessionId || !text) return text;
+  const map = await loadPseudonymMap(pseudo.sessionId);
+  if (!map?.mappings.length) return text;
+  return reidentifyText(text, map);
 }
 
 export async function callLlm(opts: LlmCallOptions): Promise<string> {
@@ -36,12 +55,45 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
     : buildFallbackModels(opts.model, { multimodal: hasMultimodal });
   let lastError = "Unbekannter Fehler";
 
+  const pseudo = opts.skipPseudonymOutbound
+    ? undefined
+    : (opts.pseudonymToExternal ?? getPseudonymRequestContext());
+
+  let systemPrompt = opts.systemPrompt;
+  let userContent = opts.userContent;
+  if (pseudo?.sessionId) {
+    const s = await pseudonymizeForLlmSession({
+      plaintext: systemPrompt,
+      sessionId: pseudo.sessionId,
+      apiKey: pseudo.apiKey,
+      model: pseudo.model,
+    });
+    systemPrompt = s.text;
+    userContent = await Promise.all(
+      opts.userContent.map(async (part) => {
+        if (!part || typeof part !== "object") return part;
+        const o = part as Record<string, unknown>;
+        if (o.type === "text" && typeof o.text === "string") {
+          const r = await pseudonymizeForLlmSession({
+            plaintext: o.text,
+            sessionId: pseudo.sessionId,
+            apiKey: pseudo.apiKey,
+            model: pseudo.model,
+          });
+          return { ...o, text: r.text };
+        }
+        return part;
+      }),
+    );
+  }
+
   for (let i = 0; i < modelsToTry.length; i++) {
+    const modelUsed = modelsToTry[i];
     const body: Record<string, unknown> = {
-      model: modelsToTry[i],
+      model: modelUsed,
       messages: [
-        { role: "system", content: opts.systemPrompt },
-        { role: "user", content: opts.userContent },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
       ],
       stream: false,
       temperature: opts.temperature ?? 0.1,
@@ -61,6 +113,7 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), LLM_FETCH_TIMEOUT_MS);
+    const reqStarted = performance.now();
 
     let resp: Response;
     try {
@@ -79,31 +132,62 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
       lastError = isAbort
         ? `LLM-Aufruf Timeout (${LLM_FETCH_TIMEOUT_MS / 1000}s) – Modell ${modelsToTry[i]} antwortet nicht`
         : (e instanceof Error ? e.message : String(e));
+      const durationMs = Math.round(performance.now() - reqStarted);
+      await sendLlmRequestPostHog({
+        duration_ms: durationMs,
+        model: modelUsed,
+        success: false,
+      });
       if (i === modelsToTry.length - 1) throw new Error(lastError);
       continue;
     }
 
     try {
       if (resp.ok) {
-        const data = await resp.json();
+        const data = (await resp.json()) as {
+          choices?: { message?: { content?: unknown } }[];
+          usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+        };
         clearTimeout(timeoutId);
+        const durationMs = Math.round(performance.now() - reqStarted);
+        const u = data.usage;
+        await sendLlmRequestPostHog({
+          duration_ms: durationMs,
+          model: modelUsed,
+          success: true,
+          token_count: u
+            ? {
+                prompt: u.prompt_tokens,
+                completion: u.completion_tokens,
+                total: u.total_tokens,
+              }
+            : undefined,
+        });
         const content = data.choices?.[0]?.message?.content;
         if (content == null) return "";
-        if (typeof content === "string") return content;
+        if (typeof content === "string") return await maybeReidentifyLlmText(content, pseudo);
         if (Array.isArray(content)) {
           const textParts = content
             .filter((p: { type?: string; text?: string }) => p?.type === "text" && p?.text)
             .map((p: { text?: string }) => p.text as string);
-          if (textParts.length > 0) return textParts.join("\n");
+          if (textParts.length > 0) {
+            return await maybeReidentifyLlmText(textParts.join("\n"), pseudo);
+          }
         }
         if (content && typeof content === "object" && "text" in content && typeof (content as { text?: string }).text === "string") {
-          return (content as { text: string }).text;
+          return await maybeReidentifyLlmText((content as { text: string }).text, pseudo);
         }
-        return String(content);
+        return await maybeReidentifyLlmText(String(content), pseudo);
       }
 
       const text = await resp.text();
       clearTimeout(timeoutId);
+      const durationMs = Math.round(performance.now() - reqStarted);
+      await sendLlmRequestPostHog({
+        duration_ms: durationMs,
+        model: modelUsed,
+        success: false,
+      });
       lastError = `LLM-Aufruf fehlgeschlagen (${resp.status}) mit Modell ${modelsToTry[i]}: ${text}`;
       if (!isRetryableModelStatus(resp.status) || i === modelsToTry.length - 1) {
         throw new Error(lastError);
@@ -113,6 +197,12 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
       const isAbort = e instanceof Error && e.name === "AbortError";
       if (isAbort) {
         lastError = `LLM-Aufruf Timeout (${LLM_FETCH_TIMEOUT_MS / 1000}s) – Modell ${modelsToTry[i]} antwortet nicht`;
+        const durationMs = Math.round(performance.now() - reqStarted);
+        await sendLlmRequestPostHog({
+          duration_ms: durationMs,
+          model: modelUsed,
+          success: false,
+        });
         if (i === modelsToTry.length - 1) throw new Error(lastError);
         continue;
       }
@@ -129,120 +219,5 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
  */
 export function pickExtractionModel(userModel: string): string {
   return resolveModel(userModel);
-}
-
-/** Entfernt typische LLM-JSON-Fehler (trailing commas, BOM, Steuerzeichen). */
-function sanitizeForJson(s: string): string {
-  let out = s
-    .replace(/^\uFEFF/, "") // BOM
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ") // Steuerzeichen
-    .trim();
-  // Trailing comma vor } oder ]
-  out = out.replace(/,(\s*[}\]])/g, "$1");
-  return out;
-}
-
-/** Findet die passende schließende Klammer für { oder [ an Position start (berücksichtigt Strings). */
-function findMatchingBrace(str: string, start: number): number {
-  const open = str[start];
-  const close = open === "{" ? "}" : "]";
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let quote = '"';
-  for (let i = start; i < str.length; i++) {
-    const c = str[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (inString) {
-      if (c === "\\") escape = true;
-      else if (c === quote) inString = false;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      inString = true;
-      quote = c;
-      continue;
-    }
-    if (c === open) depth++;
-    else if (c === close) {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-function tryParse<T>(str: string): T | null {
-  try {
-    return JSON.parse(str) as T;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Extrahiert JSON aus einem LLM-Response-String.
- * Robust gegen leere Antworten, Markdown-Wrapper, trailing commas, BOM.
- */
-export function extractJson<T>(raw: string): T {
-  if (!raw || typeof raw !== "string") {
-    throw new Error(
-      "Konnte kein gültiges JSON extrahieren: LLM-Antwort war leer oder ungültig.",
-    );
-  }
-
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    throw new Error(
-      "Konnte kein gültiges JSON extrahieren: LLM-Antwort war leer.",
-    );
-  }
-
-  // 1. Direkt parsen
-  let result = tryParse<T>(trimmed);
-  if (result !== null) return result;
-
-  // 2. Sanitized parsen (trailing commas, BOM, Steuerzeichen)
-  const sanitized = sanitizeForJson(trimmed);
-  result = tryParse<T>(sanitized);
-  if (result !== null) return result;
-
-  // 3. Markdown-Codeblock ```json ... ```
-  const jsonBlockMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (jsonBlockMatch) {
-    const block = sanitizeForJson(jsonBlockMatch[1]);
-    result = tryParse<T>(block);
-    if (result !== null) return result;
-  }
-
-  // 4. Erstes { bis passende } (balanciert, berücksichtigt } in Strings)
-  const firstBrace = trimmed.indexOf("{");
-  if (firstBrace !== -1) {
-    const lastBrace = findMatchingBrace(trimmed, firstBrace);
-    if (lastBrace !== -1) {
-      const slice = sanitizeForJson(trimmed.slice(firstBrace, lastBrace + 1));
-      result = tryParse<T>(slice);
-      if (result !== null) return result;
-    }
-  }
-
-  // 5. Erstes [ bis passende ] (balanciert, für Array-Responses)
-  const firstBracket = trimmed.indexOf("[");
-  if (firstBracket !== -1) {
-    const lastBracket = findMatchingBrace(trimmed, firstBracket);
-    if (lastBracket !== -1) {
-      const slice = sanitizeForJson(trimmed.slice(firstBracket, lastBracket + 1));
-      result = tryParse<T>(slice);
-      if (result !== null) return result;
-    }
-  }
-
-  const preview = trimmed.length > 200 ? trimmed.slice(0, 200) + "…" : trimmed;
-  throw new Error(
-    `Konnte kein gültiges JSON aus der LLM-Antwort extrahieren. Vorschau: "${preview.replace(/\n/g, " ")}"`,
-  );
 }
 

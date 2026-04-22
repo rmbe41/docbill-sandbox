@@ -554,6 +554,18 @@ const Index = () => {
                         chatInputRef.current?.setComposerText(text)
                       }
                       onResumeEngine3WithCaseGroups={resumeEngine3WithCaseGroups}
+                      begruendungRegenerateContext={
+                        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+                          ? {
+                              supabaseKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+                              model: effectiveModel,
+                              kontext_wissen: userSettings.kontext_wissen !== false,
+                              ...(activeConversationId?.trim()
+                                ? { pseudonym_session_id: activeConversationId.trim() }
+                                : {}),
+                            }
+                          : undefined
+                      }
                     />
                   ))}
                   {isChatBusy && analysisStartTime != null && (
@@ -563,6 +575,10 @@ const Index = () => {
                         totalSteps={pipelineStep.totalSteps}
                         label={pipelineStep.label}
                         startTime={analysisStartTime}
+                        fileNames={activeRunInfo?.progressFileNames}
+                        caseIndex={pipelineStep.caseIndex}
+                        totalCases={pipelineStep.totalCases}
+                        kategorieLabel={pipelineStep.kategorieLabel}
                       />
                     ) : (
                       <AnalysisStopwatch startTime={analysisStartTime} />

@@ -4,7 +4,7 @@
 
 import {
   enrichRagQueryForAuslegung,
-  loadRelevantAdminContext,
+  loadKontextAdminUndOrganisation,
   buildPipelineQuery,
   preflightEngine3KiContext,
   type LastResultContext,
@@ -17,12 +17,21 @@ import {
   GOAE_SONDERBEREICHE_KOMPAKT,
 } from "../../goae-regeln.ts";
 import { buildMappingCatalogMarkdown } from "../../goae-catalog-json.ts";
+import {
+  buildFallbackEbmCatalogMarkdown,
+  buildSelectiveEbmCatalogMarkdown,
+  ebmByGop,
+} from "../../ebm-catalog-json.ts";
 import { parseBehandlungsbericht } from "../dokument-parser.ts";
 import { analysiereMedizinisch } from "../medizinisches-nlp.ts";
 import { callLlm, extractJson, pickExtractionModel } from "../llm-client.ts";
 import { buildFallbackModels } from "../../model-resolver.ts";
 import type { FilePayload, ParsedRechnung } from "../types.ts";
 import { buildEngine3AssistantMarkdown } from "./markdown-narrative.ts";
+import {
+  buildAnalyseFromEngine3Like,
+  encodeDocbillAnalyseSse,
+} from "../../analyse-envelope.ts";
 import {
   applyEngine3AusschlussPass,
   applyRecalcAndConsistency,
@@ -33,6 +42,7 @@ import {
   parseEngine3ResultJson,
   toClientEngine3Result,
   type Engine3Modus,
+  type Engine3Regelwerk,
   type Engine3ResultData,
 } from "./validate.ts";
 import {
@@ -76,8 +86,32 @@ export interface Engine3StreamInput {
   lastEngine3Result?: unknown;
   /** Default an: GOÄ-Katalog, Regeltexte und Admin-RAG in LLM-Prompts */
   kontextWissenEnabled?: boolean;
+  /** organisations_id für Kommentarliteratur-RAG */
+  organisationKontextId?: string | null;
   /** Nach Segmentierungs-Rückfrage: Gruppen von Datei-Indizes (0-basiert), Partition der Uploads. */
   engine3CaseGroups?: number[][];
+  mode?: "A" | "B" | "C";
+  regelwerk?: "GOAE" | "EBM";
+  pseudonymSessionId?: string;
+}
+
+async function writeEngine3DocbillAnalyse(
+  writer: WritableStreamDefaultWriter<Uint8Array>,
+  encoder: TextEncoder,
+  finalData: Engine3ResultData,
+  input: Engine3StreamInput,
+): Promise<void> {
+  const mode = input.mode ?? (input.modus === "leistungen_abrechnen" ? "B" : "A");
+  const regelwerk = input.regelwerk ?? "GOAE";
+  const payload = buildAnalyseFromEngine3Like(mode, regelwerk, {
+    positionen: finalData.positionen.map((p) => ({
+      ziffer: p.ziffer,
+      betrag: p.betrag,
+      status: String(p.status),
+    })),
+    optimierungen: finalData.optimierungen?.map((p) => ({ ziffer: p.ziffer, betrag: p.betrag })),
+  });
+  await writer.write(encoder.encode(encodeDocbillAnalyseSse(payload)));
 }
 
 /** Einheitliche, systemseitige Quellenliste für UI und Nachvollziehbarkeit (nicht modell-halluziniert). */
@@ -95,15 +129,24 @@ function buildEngine3SystemQuellen(input: Engine3StreamInput, data: Engine3Resul
     }
     return lines.length > 0 ? lines : ["Kein mitgeliefertes Kontextwissen (Nutzer-Einstellung)"];
   }
-  const lines: string[] = [
-    "GOÄ-Paragraphen und Bewertungsregeln (eingebetteter DocBill-Referenzblock)",
-    "GOÄ-Ziffern und Punktwerte (kontextbezogener Katalogauszug, DocBill JSON)",
-  ];
+  const lines: string[] = input.regelwerk === "EBM"
+    ? [
+      "EBM (GKV): GOP- und Orientierungswert-Referenz (eingebetteter DocBill-Katalogauszug)",
+      "Keine GOÄ-Punktwert-0,0582873-Logik in diesem Regelwerk",
+    ]
+    : [
+      "GOÄ-Paragraphen und Bewertungsregeln (eingebetteter DocBill-Referenzblock)",
+      "GOÄ-Ziffern und Punktwerte (kontextbezogener Katalogauszug, DocBill JSON)",
+    ];
   const nFiles = input.files?.length ?? 0;
   if (nFiles > 0) {
     lines.push(`Eingabe: hochgeladene Datei(en) (${nFiles})`);
   } else if (input.modus === "leistungen_abrechnen") {
-    lines.push("Eingabe: Freitext der Nutzeranfrage (ohne Dateiupload)");
+    lines.push(
+      input.regelwerk === "EBM"
+        ? "Eingabe: Freitext der Nutzeranfrage (ohne Dateiupload; EBM-Auszug im Prompt)"
+        : "Eingabe: Freitext der Nutzeranfrage (ohne Dateiupload)",
+    );
   }
   const seen = new Set(lines);
   for (const a of data.adminQuellen ?? []) {
@@ -117,13 +160,66 @@ function buildEngine3SystemQuellen(input: Engine3StreamInput, data: Engine3Resul
   return lines;
 }
 
+function ebmGopSeedFromTexts(texts: string[]): Set<string> {
+  const s = new Set<string>();
+  const r = /\b(\d{5})\b/g;
+  for (const t of texts) {
+    if (!t) continue;
+    let m: RegExpExecArray | null;
+    const rr = new RegExp(r);
+    while ((m = rr.exec(t)) !== null) {
+      if (m[1] !== "00000" && ebmByGop.has(m[1])) s.add(m[1]);
+    }
+  }
+  return s;
+}
+
 function leistungenPrompt(
   parsedJson: string,
   analyseJson: string,
   katalogMd: string,
   adminContext: string,
   extraRules: string,
+  regelwerk: Engine3Regelwerk = "GOAE",
 ): string {
+  if (regelwerk === "EBM") {
+    return `Du bist EBM-DocBill Engine 3. Modus: **Leistungen abrechnen** (GKV, **GOP** fünf Stellen, Aus Text/Akte Vorschläge).
+
+Erstelle eine regelkonforme **EBM**-Positionsliste. Nutze nur **GOPs** aus dem Katalogauszug. **faktor** in der Regel 1,0. **betrag** = Euro laut Katalog (nicht GOÄ 0,0582873).
+Ordne jeder Position ein **quelleText** (Zitat/Paraphrase) zu. Unsichere Zuordnungen: status "warnung".
+
+**Pflicht-Checkliste**
+- Nur GOPs aus dem Auszug; keine erfundenen Nummern.
+- **Ausschlüsse:** Katalogausschnitt beachten; Konflikte in **hinweise** und ggf. status warnung/fehler.
+- **Hinweis-Zuordnung:** **betrifftPositionen** mit **nr** der betroffenen Zeilen, wo sinnvoll.
+- **Warnung/Fehler:** Wie in GOÄ-Modus: ausreichend erklärender Text (Hinweis/Anmerkung).
+
+**System-Nachbearbeitung:** DocBill wendet EBM-Rechen- und Ausschlussregeln deterministisch an; Ergebnis ist maßgeblich.
+
+Antworte NUR mit JSON (Schema wie GOÄ-Modus, aber **faktor** typischerweise 1,0; **ziffer** = 5-stellige GOP):
+{
+  "klinischerKontext": "2–4 Sätze",
+  "fachgebiet": "string",
+  "positionen": [ { "nr": 1, "ziffer": "01100", "bezeichnung": "…", "faktor": 1.0, "betrag": 0.0, "status": "korrekt|warnung|vorschlag", "anmerkung": "optional", "quelleText": "…", "begruendung": "optional" } ],
+  "hinweise": [ { "schwere": "info|warnung|fehler", "titel": "…", "detail": "…", "regelReferenz": "optional", "betrifftPositionen": [1] } ],
+  "optimierungen": [],
+  "adminQuellen": []
+}
+
+Dokument-/Freitext JSON:
+${parsedJson}
+
+Medizinische Analyse JSON:
+${analyseJson}
+
+${extraRules ? `## ZUSÄTZLICHE REGELN:\n${extraRules}\n` : ""}
+
+${adminContext ? `${adminContext}\n` : ""}
+
+## EBM-KATALOG (Auszug)
+${katalogMd}
+`;
+  }
   return `Du bist GOÄ-DocBill Engine 3. Modus: **Leistungen abrechnen** (Aus Text/Akte Vorschläge).
 
 Erstelle eine regelkonforme GOÄ-Liste zur Abrechnung der dokumentierten Leistungen.
@@ -193,6 +289,7 @@ async function critiqueRefineIfNeeded(
   userModel: string,
   data: Engine3ResultData,
   katalogMd: string,
+  regelwerk: Engine3Regelwerk = "GOAE",
 ): Promise<Engine3ResultData> {
   const model = pickExtractionModel(userModel);
   const body = JSON.stringify(data);
@@ -216,16 +313,19 @@ async function critiqueRefineIfNeeded(
       skipFallbacks: true,
     });
     const parsed = extractJson<unknown>(raw);
-    const next = parseEngine3ResultJson(parsed, data.modus);
+    const next = parseEngine3ResultJson(parsed, data.modus, regelwerk);
     if (!next) return data;
     const adminMerged = [
       ...new Set([...(next.adminQuellen ?? []), ...(data.adminQuellen ?? [])]),
     ].slice(0, 12);
-    return applyRecalcAndConsistency({
-      ...next,
-      goaeStandHinweis: next.goaeStandHinweis ?? data.goaeStandHinweis,
-      ...(adminMerged.length ? { adminQuellen: adminMerged } : {}),
-    });
+    return applyRecalcAndConsistency(
+      {
+        ...next,
+        goaeStandHinweis: next.goaeStandHinweis ?? data.goaeStandHinweis,
+        ...(adminMerged.length ? { adminQuellen: adminMerged } : {}),
+      },
+      regelwerk,
+    );
   } catch {
     return data;
   }
@@ -328,14 +428,18 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
             lastResult: input.lastResult,
             lastEngine3Result: input.lastEngine3Result,
             kontextWissenEnabled: kontextOk,
+            organisationKontextId: input.organisationKontextId,
             apiKey,
             quellenFileCount: 1,
+            pseudonymSessionId: input.pseudonymSessionId,
+            regelwerk: input.regelwerk === "EBM" ? "EBM" : "GOAE",
           });
           await sendProgress(4, ENGINE3_STEPS[4].label);
           const clientPayload = toClientEngine3Result(finalData);
           await writer.write(
             encoder.encode(`data: ${JSON.stringify({ type: "engine3_result", data: clientPayload })}\n\n`),
           );
+          await writeEngine3DocbillAnalyse(writer, encoder, finalData, input);
           await streamMarkdown(buildEngine3AssistantMarkdown(finalData));
           await writer.write(encoder.encode("data: [DONE]\n\n"));
           await writer.close();
@@ -401,14 +505,18 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
             lastResult: input.lastResult,
             lastEngine3Result: input.lastEngine3Result,
             kontextWissenEnabled: kontextOk,
+            organisationKontextId: input.organisationKontextId,
             apiKey,
             quellenFileCount: filesCase.length,
+            pseudonymSessionId: input.pseudonymSessionId,
+            regelwerk: input.regelwerk === "EBM" ? "EBM" : "GOAE",
           });
           await sendProgress(4, ENGINE3_STEPS[4].label);
           const clientPayload = toClientEngine3Result(finalData);
           await writer.write(
             encoder.encode(`data: ${JSON.stringify({ type: "engine3_result", data: clientPayload })}\n\n`),
           );
+          await writeEngine3DocbillAnalyse(writer, encoder, finalData, input);
           await streamMarkdown(buildEngine3AssistantMarkdown(finalData));
           await writer.write(encoder.encode("data: [DONE]\n\n"));
           await writer.close();
@@ -425,6 +533,7 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
           data: ReturnType<typeof toClientEngine3Result>;
         }[] = [];
         const narrativeParts: string[] = [];
+        let firstBatchEngine3Data: Engine3ResultData | undefined;
 
         for (let i = 0; i < totalCases; i++) {
           const c = casesForRun[i];
@@ -443,8 +552,11 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
             lastResult: input.lastResult,
             lastEngine3Result: i === 0 ? input.lastEngine3Result : undefined,
             kontextWissenEnabled: kontextOk,
+            organisationKontextId: input.organisationKontextId,
             apiKey,
             quellenFileCount: filesCase.length,
+            pseudonymSessionId: input.pseudonymSessionId,
+            regelwerk: input.regelwerk === "EBM" ? "EBM" : "GOAE",
           });
 
           await sendProgress(4, ENGINE3_STEPS[4].label, caseMeta);
@@ -459,6 +571,7 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
             filenames: filesCase.map((f) => f.name),
             data: clientPayload,
           });
+          if (i === 0) firstBatchEngine3Data = finalData;
           await writer.write(
             encoder.encode(
               `data: ${JSON.stringify({
@@ -492,6 +605,9 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
             })}\n\n`,
           ),
         );
+        if (firstBatchEngine3Data) {
+          await writeEngine3DocbillAnalyse(writer, encoder, firstBatchEngine3Data, input);
+        }
         await streamMarkdown(narrativeParts.join(""));
         await writer.write(encoder.encode("data: [DONE]\n\n"));
         await writer.close();
@@ -511,7 +627,9 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
         };
       }
 
-      const med = await analysiereMedizinisch(parsed, apiKey, input.model, undefined, kontextOk);
+      const med = await analysiereMedizinisch(parsed, apiKey, input.model, undefined, kontextOk, {
+        pseudonymSessionId: input.pseudonymSessionId,
+      });
 
       await sendProgress(2, ENGINE3_STEPS[2].label);
       const mergeQuery = enrichRagQueryForAuslegung(
@@ -522,17 +640,35 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
         ),
       );
       const adminBlock = kontextOk
-        ? await loadRelevantAdminContext(mergeQuery, apiKey, {
+        ? await loadKontextAdminUndOrganisation(mergeQuery, apiKey, {
             vectorQuery: enrichRagQueryForAuslegung(input.userMessage.trim() || mergeQuery),
+            organisationKontextId: input.organisationKontextId ?? null,
           })
         : "";
+      const rwE3: Engine3Regelwerk = input.regelwerk === "EBM" ? "EBM" : "GOAE";
       const leistungTexts = leistungstexteFromParsed(parsed, input.userMessage);
-      const katalogMd = kontextOk
+      const katalogMdGoae = kontextOk
         ? buildMappingCatalogMarkdown({
             leistungTexts,
             fachgebiet: med.fachgebiet,
             maxLines: 200,
           })
+        : "";
+      const katalogMdEbm = kontextOk
+        ? (() => {
+            const gops = ebmGopSeedFromTexts([
+              ...leistungTexts,
+              med.fachgebiet,
+              med.klinischerKontext || "",
+            ]);
+            if (gops.size === 0) return buildFallbackEbmCatalogMarkdown(120);
+            return buildSelectiveEbmCatalogMarkdown({
+              gops,
+              maxLines: 200,
+              subtitle: "## EBM-Katalog (Auszug)",
+              priorityGops: gops,
+            });
+          })()
         : "";
 
       const staticGoae = kontextOk
@@ -546,7 +682,9 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
         : "";
 
       const katalogBundle = kontextOk
-        ? `${staticGoae}\n\n${katalogMd}`
+        ? (rwE3 === "EBM"
+          ? `EBM (GKV): **GOP** fünf Stellen; Betrag in Euro gemäß Katalog (Punkte und Orientierungswert). Kein GOÄ-Punktwert 0,0582873.\n\n${katalogMdEbm}`
+          : `${staticGoae}\n\n${katalogMdGoae}`)
         : "(Hinweis für das Modell: Der Nutzer hat **Kontextwissen** ausgeschaltet. Es gibt keinen eingebetteten GOÄ-Regelblock, keinen Katalogauszug und keinen ADMIN-KONTEXT. Nutze ausschließlich die Eingabe-JSONs; erfinde keine Ziffern oder Beträge; Unsicherheit in **hinweise**.)";
 
       await sendProgress(3, ENGINE3_STEPS[3].label);
@@ -571,10 +709,22 @@ export async function runEngine3AsStream(input: Engine3StreamInput, apiKey: stri
         katalogBundle,
         adminBlock,
         input.extraRules ?? "",
+        rwE3,
       );
 
       const systemStatic = kontextOk
-        ? `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
+        ? (rwE3 === "EBM"
+          ? `Du bist Engine 3 von EBM-DocBill (GKV). Antworte ausschließlich mit gültigem JSON (ein Objekt).
+**ziffer** = 5-stellige GOP. **faktor** meist 1,0. **betrag** = Euro laut EBM-Auszug (nicht GOÄ 0,0582873).
+Keine personenbezogenen Daten; Patient nur als „Patient/in“.
+Auslegung nur mit Fundstelle im **ADMIN-KONTEXT**.
+Jede **Position** braucht **quelleText**.
+${
+            input.lastEngine3Result != null
+              ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(input.lastEngine3Result).slice(0, 8000)}`
+              : ""
+          }`
+          : `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
 Punktwert GOÄ: 0,0582873 EUR pro Punkt. Betrag = Punkte × Punktwert × Faktor (auf Cent runden).
 Keine personenbezogenen Daten in Freitextfeldern wiederholen. Patient nur als „Patient/in“.
 Auslegungsfragen (z. B. BÄK): nur mit konkreter Fundstelle aus dem mitgelieferten **ADMIN-KONTEXT**; ohne solche Quelle keine behauptete amtliche Position.
@@ -583,8 +733,15 @@ ${
             input.lastEngine3Result != null
               ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(input.lastEngine3Result).slice(0, 8000)}`
               : ""
+          }`)
+        : (rwE3 === "EBM"
+          ? `Du bist Engine 3 von EBM-DocBill. JSON-only. Kein Katalog in dieser Anfrage (Kontext aus). Erfinde keine GOPs. **quelleText** pro Position.
+${
+            input.lastEngine3Result != null
+              ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(input.lastEngine3Result).slice(0, 8000)}`
+              : ""
           }`
-        : `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
+          : `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
 Punktwert GOÄ: 0,0582873 EUR pro Punkt. Betrag = Punkte × Punktwert × Faktor (auf Cent runden).
 Keine personenbezogenen Daten in Freitextfeldern wiederholen. Patient nur als „Patient/in“.
 **Kein** eingebetteter GOÄ-Katalog, Regelblock oder ADMIN-KONTEXT in dieser Anfrage (Nutzer hat Kontextwissen ausgeschaltet). Nutze ausschließlich die **Eingabe-JSONs** im Nutzerprompt. Erfinde keine Ziffern; Unsicherheit und Lücken klar in **hinweise**; **warnung**/**fehler** wo angebracht. Jede **Position** ein nicht leeres **quelleText** mit Bezug zur Eingabe. Keine behaupteten Auslegungen oder Kommentar-Zitate ohne Beleg.
@@ -592,7 +749,7 @@ ${
             input.lastEngine3Result != null
               ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(input.lastEngine3Result).slice(0, 8000)}`
               : ""
-          }`;
+          }`);
 
       let resultData: Engine3ResultData | null = null;
       const modelsToTry = buildFallbackModels(input.model, { multimodal: false });
@@ -613,7 +770,7 @@ ${
           });
           const obj = extractJson<unknown>(raw);
           lastExtracted = obj;
-          resultData = parseEngine3ResultJson(obj, input.modus);
+          resultData = parseEngine3ResultJson(obj, input.modus, rwE3);
           if (resultData) break;
         } catch (e) {
           lastErr = e instanceof Error ? e.message : String(e);
@@ -656,19 +813,33 @@ ${
         );
       }
 
-      resultData.goaeStandHinweis = resultData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
+      resultData.goaeStandHinweis = resultData.goaeStandHinweis ??
+        (rwE3 === "EBM"
+          ? "EBM: GOP und Euro nach DocBill-Katalog (JSON); Orientierungswert siehe Kopfzeile Katalog."
+          : GOAE_STAND_HINWEIS);
+
+      const katalogMdCritique = rwE3 === "EBM" ? katalogMdEbm : katalogMdGoae;
 
       await sendProgress(4, ENGINE3_STEPS[4].label);
-      let finalData = applyRecalcAndConsistency(resultData);
-      finalData = applyEngine3AusschlussPass(finalData);
-      finalData = await critiqueRefineIfNeeded(apiKey, input.model, finalData, katalogMd);
-      finalData = applyRecalcAndConsistency(finalData);
-      finalData = applyEngine3AusschlussPass(finalData);
+      let finalData = applyRecalcAndConsistency(resultData, rwE3);
+      finalData = applyEngine3AusschlussPass(finalData, rwE3);
+      finalData = await critiqueRefineIfNeeded(
+        apiKey,
+        input.model,
+        finalData,
+        katalogMdCritique,
+        rwE3,
+      );
+      finalData = applyRecalcAndConsistency(finalData, rwE3);
+      finalData = applyEngine3AusschlussPass(finalData, rwE3);
       finalData = enforceEngine3Quellenbezug(finalData);
       finalData = ensureWarnungFehlerHaveUIFacingRationale(finalData);
       finalData = enrichEngine3BegruendungBeispiele(finalData);
 
-      finalData.goaeStandHinweis = finalData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
+      finalData.goaeStandHinweis = finalData.goaeStandHinweis ??
+        (rwE3 === "EBM"
+          ? "EBM: GOP und Euro nach DocBill-Katalog (JSON); Orientierungswert siehe Kopfzeile Katalog."
+          : GOAE_STAND_HINWEIS);
       finalData = filterEngine3AdminQuellenToEvidence(finalData);
       finalData.quellen = buildEngine3SystemQuellen(input, finalData);
 
@@ -678,6 +849,8 @@ ${
         data: clientPayload,
       })}\n\n`;
       await writer.write(encoder.encode(resultEvent));
+
+      await writeEngine3DocbillAnalyse(writer, encoder, finalData, input);
 
       const narrativeMd = buildEngine3AssistantMarkdown(finalData);
       await streamMarkdown(narrativeMd);

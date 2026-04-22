@@ -13,7 +13,7 @@
 
 **Upload-Phase:**
 
-Der Nutzer kann mehrere PDFs gleichzeitig hochladen (Drag & Drop, bis zu 500 Dateien) oder eine große PAD-Datei importieren, die mehrere Patienten/Rechnungen enthält. Das System erkennt automatisch die einzelnen Rechnungen innerhalb einer PAD-Datei.
+Der Nutzer kann mehrere PDFs gleichzeitig hochladen (Drag & Drop, bis zu 500 Dateien) oder eine große PAD-Datei importieren, die mehrere Patienten/Rechnungen enthält. Das System erkennt automatisch die einzelnen Rechnungen innerhalb einer PAD-Datei. Bilder und PAD-Teilstücke können vor dem Anlegen **Fällen** zugeordnet werden: gleiche erkannte Pat-ID im Text wird vorbelegt; der Nutzer kann mehrere Unterlagen markieren und zu einem gemeinsamen Fall zusammenführen. In der Batch-Detailansicht sind Unterlagen **nach Fall gruppiert**; Zusammenführen und „in neuen Fall“ sind dort weiterhin möglich. Export und Bulk-Annehmen beziehen sich weiterhin auf einzelne Unterlagen (Zeilen).
 
 **Batch-Identifikation:**
 
@@ -27,7 +27,8 @@ interface Batch {
   erstelltVon: string;          // userId
   erstelltAm: string;
   aktualisiertAm: string;
-  rechnungenCount: number;
+  faelleCount: number;          // Anzahl Fälle (Patientenkontexte)
+  rechnungenCount: number;      // Anzahl Unterlagen (Dateien/PAD-Blöcke)
   status: 'processing' | 'complete' | 'partial';
   zusammenfassung: {
     gesamtbetrag: number;       // Euro

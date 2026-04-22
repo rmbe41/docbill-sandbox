@@ -9,6 +9,9 @@ verify_jwt = false
 [functions.admin-context-upload]
 verify_jwt = false
 
+[functions.organisation-kommentar-upload]
+verify_jwt = false
+
 [functions.delete-account]
 verify_jwt = true
 
@@ -19,4 +22,19 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.health]
+verify_jwt = false
+
+[functions.crawl-knowledge-base]
+verify_jwt = false
+
+[functions.beschluss-relevanz-run]
+verify_jwt = false
+
+[functions.kb-weekly-report]
+verify_jwt = false
+
+[functions.process-background-job]
+verify_jwt = false
+
+[functions.purge-job-queue-pii]
 verify_jwt = false

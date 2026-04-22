@@ -30,6 +30,7 @@ export function dbRowToChatMessage(m: {
       engine3FaktorOverrides: s.engine3FaktorOverrides,
       engine3BegruendungText: s.engine3BegruendungText,
       serviceBegruendungText: s.serviceBegruendungText,
+      docbillAnalyse: s.docbillAnalyse,
     };
   }
   return base;

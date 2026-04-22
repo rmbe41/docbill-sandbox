@@ -16,6 +16,12 @@ export interface PipelineInput {
   extraRules?: string;
   /** false: keine GOÄ-/Admin-Blöcke in LLM-Prompts (Nutzer-Einstellung). Default an. */
   kontextWissenEnabled?: boolean;
+  /** Spec 02 — default A bei Rechnungsprüfung */
+  mode?: "A" | "B" | "C";
+  /** GOÄ vs. EBM */
+  regelwerk?: "GOAE" | "EBM";
+  /** Spec 8.2 — Pseudonym-Redis-Session (Client kann Konversations-ID senden) */
+  pseudonymSessionId?: string;
 }
 
 export interface FilePayload {
@@ -124,7 +130,13 @@ export interface Pruefung {
     | "begruendung_fehlt"
     | "analog"
     | "zielleistung"
-    | "faktor_erhoehung_empfohlen";
+    | "faktor_erhoehung_empfohlen"
+    | "ebm_betrag"
+    | "ebm_ausschluss"
+    | "ebm_pflicht_kombi"
+    | "ebm_doppelt"
+    | "ebm_unbekannte_gop"
+    | "ebm_meta_unvollstaendig";
   schwere: "fehler" | "warnung" | "info";
   nachricht: string;
   vorschlag?: string;
@@ -185,6 +197,8 @@ export interface PipelineResult {
   leistungen: ExtrahierteLeistung[];
   mappings: GoaeMappingResult;
   pruefung: RegelpruefungErgebnis;
+  /** gesetzt in runPipeline: GOÄ vs. EBM-Regelprüfung */
+  regelwerk?: "GOAE" | "EBM";
 }
 
 // ---------------------------------------------------------------------------

@@ -3,10 +3,12 @@ import type { ServiceBillingResultData } from "@/components/ServiceBillingResult
 import type { Engine3ResultData } from "@/lib/engine3Result";
 import type { Json } from "@/integrations/supabase/types";
 import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
+import type { DocbillAnalyseV1 } from "@/lib/analyse/types";
 
 export const MESSAGE_STRUCTURED_VERSION = 1 as const;
 
-export type FilePayloadStored = { name: string; type: string; data: string };
+/** `data` (Base64) und/oder `storage_path` (Bucket job-uploads) — mindestens eines sinnvoll. */
+export type FilePayloadStored = { name: string; type: string; data?: string; storage_path?: string };
 
 /** Ein abgeschlossener Engine-3-Vorgang (eine Prüfeinheit). */
 export type Engine3CaseStored = {
@@ -54,6 +56,8 @@ export type MessageStructuredContentV1 = {
   /** Service-Billing: bearbeitete Begründung pro Zeile (Schlüssel wie getKey). */
   serviceBegruendungText?: Record<string, string>;
   attachments?: FilePayloadStored[];
+  /** Spec 02 — SSE docbill_analyse */
+  docbillAnalyse?: DocbillAnalyseV1;
 };
 
 /** Patch: `null` entfernt einen gespeicherten Override (Merge in mergeStructuredContent). */
@@ -93,7 +97,7 @@ export function parseMessageStructured(
   if (json == null || typeof json !== "object" || Array.isArray(json)) return null;
   const o = json as Record<string, unknown>;
   if (o.v !== MESSAGE_STRUCTURED_VERSION) return null;
-  return json as MessageStructuredContentV1;
+  return json as unknown as MessageStructuredContentV1;
 }
 
 export function attachmentsToPreviewItems(
@@ -104,7 +108,8 @@ export function attachmentsToPreviewItems(
     name: a.name,
     type: a.type,
     previewUrl:
-      a.type.startsWith("image/") || a.type === "application/pdf"
+      a.data &&
+      (a.type.startsWith("image/") || a.type === "application/pdf")
         ? `data:${a.type};base64,${a.data}`
         : undefined,
   }));
@@ -127,6 +132,7 @@ export function buildAssistantStructuredContent(params: {
   frageAnswer?: FrageAnswerStructured;
   suggestionDecisions?: MessageStructuredContentV1["suggestionDecisions"];
   kurzantwortenVorschlagStatus?: MessageStructuredContentV1["kurzantwortenVorschlagStatus"];
+  docbillAnalyse?: DocbillAnalyseV1;
 }): MessageStructuredContentV1 | null {
   if (
     params.invoiceResult == null &&
@@ -136,7 +142,8 @@ export function buildAssistantStructuredContent(params: {
     params.engine3SegmentationProposal == null &&
     params.analysisTimeSeconds == null &&
     params.frageAnswer == null &&
-    params.kurzantwortenVorschlagStatus == null
+    params.kurzantwortenVorschlagStatus == null &&
+    params.docbillAnalyse == null
   ) {
     return null;
   }
@@ -151,6 +158,7 @@ export function buildAssistantStructuredContent(params: {
     frageAnswer: params.frageAnswer,
     suggestionDecisions: params.suggestionDecisions,
     kurzantwortenVorschlagStatus: params.kurzantwortenVorschlagStatus,
+    docbillAnalyse: params.docbillAnalyse,
   };
 }
 

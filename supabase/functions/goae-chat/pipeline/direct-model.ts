@@ -16,6 +16,10 @@ import {
 import { DIRECT_SHORT_JSON_OUTPUT_RULES } from "../frage-answer-format.ts";
 import type { FilePayload } from "./types.ts";
 import { getReasoningConfigForStream, isFreeModel, resolveModel } from "../model-resolver.ts";
+import { getPseudonymRequestContext } from "../privacy/pseudonym-request-context.ts";
+import { pseudonymizeOpenRouterMessages } from "../privacy/pseudonym-openrouter-messages.ts";
+import { loadPseudonymMap } from "../privacy/pseudonym-redis.ts";
+import { reidentifyText } from "../privacy/pseudonymize-bridge.ts";
 
 const DIRECT_SYSTEM_CORE = `Du antwortest als Assistent. In diesem **Direktmodell** werden der DocBill-GOÄ-Katalog, RAG aus Admin-Wissensdateien und mehrstufige Abrechnungs-Pipelines **nicht** eingebunden – es gilt nur diese Unterhaltung (und ggf. Anhänge) sowie das gewählte Sprachmodell.
 
@@ -207,6 +211,40 @@ async function jsonErrorFromOpenRouter(
   });
 }
 
+function openAiStyleSseFromText(text: string): Response {
+  const encoder = new TextEncoder();
+  const chunkSize = 120;
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let j = 0; j < text.length; j += chunkSize) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: text.slice(j, j + chunkSize) } }],
+            })}\n\n`,
+          ),
+        );
+      }
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+  return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
+}
+
+export async function completionTextFromJsonResponse(response: Response): Promise<string> {
+  const data = (await response.json()) as { choices?: { message?: { content?: unknown } }[] };
+  const c = data.choices?.[0]?.message?.content;
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) {
+    return c
+      .filter((p: { type?: string }) => p?.type === "text")
+      .map((p: { text?: string }) => p.text ?? "")
+      .join("\n");
+  }
+  return "";
+}
+
 export async function runDirectModelStream(
   input: {
     messages: { role: string; content: string }[];
@@ -226,13 +264,17 @@ export async function runDirectModelStream(
   }
   const tail = buildMessagesForDirect(input.messages, input.files);
   const apiMessages: unknown[] = [{ role: "system", content: systemPrompt }, ...tail];
+  const ctx = getPseudonymRequestContext();
+  const messagesForApi = ctx
+    ? await pseudonymizeOpenRouterMessages([...apiMessages], ctx)
+    : apiMessages;
 
   const reasoningConfig = getReasoningConfigForStream(input.model);
 
   const body: Record<string, unknown> = {
     model: resolved,
-    messages: apiMessages,
-    stream: true,
+    messages: messagesForApi,
+    stream: ctx ? false : true,
   };
   if (reasoningConfig) body.reasoning = reasoningConfig;
   if (typeof input.maxTokens === "number" && input.maxTokens > 0) {
@@ -248,7 +290,13 @@ export async function runDirectModelStream(
     body: JSON.stringify(body),
   });
 
-  if (response.ok && response.body) {
+  if (response.ok && (response.body || ctx)) {
+    if (ctx) {
+      let text = await completionTextFromJsonResponse(response);
+      const map = await loadPseudonymMap(ctx.sessionId);
+      if (map?.mappings.length) text = reidentifyText(text, map);
+      return openAiStyleSseFromText(text);
+    }
     return new Response(response.body, {
       headers: { "Content-Type": "text/event-stream" },
     });
@@ -295,13 +343,17 @@ export async function runDirectLocalModelStream(
   }
   const tail = buildMessagesForDirect(input.messages, input.files);
   const apiMessages: unknown[] = [{ role: "system", content: systemPrompt }, ...tail];
+  const ctx = getPseudonymRequestContext();
+  const messagesForApi = ctx
+    ? await pseudonymizeOpenRouterMessages([...apiMessages], ctx)
+    : apiMessages;
 
   const reasoningConfig = getReasoningConfigForStream(input.model);
 
   const body: Record<string, unknown> = {
     model: resolved,
-    messages: apiMessages,
-    stream: true,
+    messages: messagesForApi,
+    stream: ctx ? false : true,
   };
   if (reasoningConfig) body.reasoning = reasoningConfig;
   if (typeof input.maxTokens === "number" && input.maxTokens > 0) {
@@ -317,7 +369,13 @@ export async function runDirectLocalModelStream(
     body: JSON.stringify(body),
   });
 
-  if (response.ok && response.body) {
+  if (response.ok && (response.body || ctx)) {
+    if (ctx) {
+      let text = await completionTextFromJsonResponse(response);
+      const map = await loadPseudonymMap(ctx.sessionId);
+      if (map?.mappings.length) text = reidentifyText(text, map);
+      return openAiStyleSseFromText(text);
+    }
     return new Response(response.body, {
       headers: { "Content-Type": "text/event-stream" },
     });

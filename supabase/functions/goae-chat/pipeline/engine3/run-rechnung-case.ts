@@ -4,7 +4,7 @@
 
 import {
   enrichRagQueryForAuslegung,
-  loadRelevantAdminContext,
+  loadKontextAdminUndOrganisation,
   buildPipelineQuery,
   type LastResultContext,
 } from "../../admin-context.ts";
@@ -16,6 +16,11 @@ import {
   GOAE_SONDERBEREICHE_KOMPAKT,
 } from "../../goae-regeln.ts";
 import { buildMappingCatalogMarkdown } from "../../goae-catalog-json.ts";
+import {
+  buildFallbackEbmCatalogMarkdown,
+  buildSelectiveEbmCatalogMarkdown,
+  ebmByGop,
+} from "../../ebm-catalog-json.ts";
 import { parseDokumentWithRetry } from "../dokument-parser.ts";
 import { analysiereMedizinisch } from "../medizinisches-nlp.ts";
 import { callLlm, extractJson, pickExtractionModel } from "../llm-client.ts";
@@ -30,11 +35,29 @@ import {
   filterEngine3AdminQuellenToEvidence,
   parseEngine3ResultJson,
   type Engine3Modus,
+  type Engine3Regelwerk,
   type Engine3ResultData,
 } from "./validate.ts";
 
 const GOAE_STAND_HINWEIS =
   "GOÄ-Ziffern und Punktwerte nach DocBill-Katalog (JSON); Punktwert 0,0582873 EUR.";
+
+const EBM_STAND_HINWEIS =
+  "EBM: GOPs und Euro nach DocBill-Katalog (JSON); Orientierungswert siehe Katalogkopf.";
+
+function ebmGopSeedFromTextsCase(texts: string[]): Set<string> {
+  const s = new Set<string>();
+  const r = /\b(\d{5})\b/g;
+  for (const t of texts) {
+    if (!t) continue;
+    let m: RegExpExecArray | null;
+    const rr = new RegExp(r);
+    while ((m = rr.exec(t)) !== null) {
+      if (m[1] !== "00000" && ebmByGop.has(m[1])) s.add(m[1]);
+    }
+  }
+  return s;
+}
 
 function leistungstexteFromParsed(parsed: ParsedRechnung, userMessage: string): string[] {
   const texts: string[] = [userMessage, parsed.rawText ?? "", parsed.freitext ?? ""];
@@ -122,6 +145,44 @@ ${katalogMd}
 `;
 }
 
+function rechnungPruefungPromptEbm(
+  parsedJson: string,
+  analyseJson: string,
+  katalogMd: string,
+  adminContext: string,
+  extraRules: string,
+): string {
+  return `Du bist EBM-DocBill Engine 3. Modus: **Rechnungsprüfung** (GKV, **GOP**).
+
+Du erhältst Rechnungsdaten (JSON) und medizinische Analyse. Nutze nur **GOPs** und Euro aus dem EBM-Auszug. **faktor** meist 1,0. Kein GOÄ-Punktwert 0,0582873.
+**Ausschlüsse** laut Katalog; Konflikte in **hinweise** und status.
+**quelleText** pro Position (Pflicht).
+
+Antworte NUR mit JSON (gleiche Struktur wie GOÄ-Modus; **ziffer** = 5-stellige GOP, **faktor** = 1.0):
+{
+  "klinischerKontext": "2–4 Sätze",
+  "fachgebiet": "string",
+  "positionen": [ { "nr": 1, "ziffer": "01100", "bezeichnung": "…", "faktor": 1.0, "betrag": 0.0, "status": "korrekt|warnung|fehler", "anmerkung": "optional", "quelleText": "…", "begruendung": "optional" } ],
+  "hinweise": [ { "schwere": "fehler|warnung|info", "titel": "kurz", "detail": "…", "regelReferenz": "optional", "betrifftPositionen": [1] } ],
+  "optimierungen": [],
+  "adminQuellen": []
+}
+
+Eingabe Rechnung (JSON):
+${parsedJson}
+
+Eingabe medizinische Analyse (JSON):
+${analyseJson}
+
+${extraRules ? `## ZUSÄTZLICHE REGELN:\n${extraRules}\n` : ""}
+
+${adminContext ? `${adminContext}\n` : ""}
+
+## EBM-KATALOG (Auszug)
+${katalogMd}
+`;
+}
+
 const CRITIQUE_PROMPT = `Du prüfst ein bereits erzeugtes Engine-3-JSON auf Widersprüche zum GOÄ-Katalogausschnitt und zur Rechnungs-/Leistungslogik.
 Gib das **vollständige korrigierte JSON** zurück (gleiche Keys, gleiche modus-Logik im Inhalt). Entferne unmögliche Ziffern. Korrigiere offensichtliche Doppelabrechnungen gemäß **Ausschl-** und Ausschluss-Hinweisen im Katalog (insb. Kombinationen, die sich gegenseitig ausschließen).
 Auslegungsbehauptungen (BÄK, GOÄ-Kommentar) nur, wenn sie im **ADMIN-KONTEXT** mit Dateinamen belegbar sind; sonst entfernen oder durch ehrliche Unsicherheit in **hinweise** ersetzen. **adminQuellen** und **regelReferenz** in **hinweise** müssen zu echten Fundstellen passen.
@@ -136,6 +197,7 @@ async function critiqueRefineIfNeeded(
   userModel: string,
   data: Engine3ResultData,
   katalogMd: string,
+  regelwerk: Engine3Regelwerk = "GOAE",
 ): Promise<Engine3ResultData> {
   const model = pickExtractionModel(userModel);
   const body = JSON.stringify(data);
@@ -159,16 +221,19 @@ async function critiqueRefineIfNeeded(
       skipFallbacks: true,
     });
     const parsed = extractJson<unknown>(raw);
-    const next = parseEngine3ResultJson(parsed, data.modus);
+    const next = parseEngine3ResultJson(parsed, data.modus, regelwerk);
     if (!next) return data;
     const adminMerged = [
       ...new Set([...(next.adminQuellen ?? []), ...(data.adminQuellen ?? [])]),
     ].slice(0, 12);
-    return applyRecalcAndConsistency({
-      ...next,
-      goaeStandHinweis: next.goaeStandHinweis ?? data.goaeStandHinweis,
-      ...(adminMerged.length ? { adminQuellen: adminMerged } : {}),
-    });
+    return applyRecalcAndConsistency(
+      {
+        ...next,
+        goaeStandHinweis: next.goaeStandHinweis ?? data.goaeStandHinweis,
+        ...(adminMerged.length ? { adminQuellen: adminMerged } : {}),
+      },
+      regelwerk,
+    );
   } catch {
     return data;
   }
@@ -183,9 +248,12 @@ export type RunRechnungCaseParams = {
   lastResult?: LastResultContext;
   lastEngine3Result?: unknown;
   kontextWissenEnabled: boolean;
+  organisationKontextId?: string | null;
   apiKey: string;
   /** Quellen-Zeile „Eingabe: …“ pro Case */
   quellenFileCount: number;
+  pseudonymSessionId?: string;
+  regelwerk?: Engine3Regelwerk;
 };
 
 export class Engine3CaseParseError extends Error {
@@ -198,11 +266,15 @@ export class Engine3CaseParseError extends Error {
 }
 
 export async function runRechnungPruefungCasePipeline(p: RunRechnungCaseParams): Promise<Engine3ResultData> {
+  const rw: Engine3Regelwerk = p.regelwerk ?? "GOAE";
   const parsed = await parseDokumentWithRetry(p.filesCase, p.apiKey, p.model, {
     multiDocumentInvoiceReview: p.multiDocumentInvoiceReview,
+    regelwerk: rw === "EBM" ? "EBM" : "GOAE",
   });
 
-  const med = await analysiereMedizinisch(parsed, p.apiKey, p.model, undefined, p.kontextWissenEnabled);
+  const med = await analysiereMedizinisch(parsed, p.apiKey, p.model, undefined, p.kontextWissenEnabled, {
+    pseudonymSessionId: p.pseudonymSessionId,
+  });
 
   const mergeQuery = enrichRagQueryForAuslegung(
     buildPipelineQuery(
@@ -212,18 +284,36 @@ export async function runRechnungPruefungCasePipeline(p: RunRechnungCaseParams):
     ),
   );
   const adminBlock = p.kontextWissenEnabled
-    ? await loadRelevantAdminContext(mergeQuery, p.apiKey, {
+    ? await loadKontextAdminUndOrganisation(mergeQuery, p.apiKey, {
         vectorQuery: enrichRagQueryForAuslegung(p.userMessage.trim() || mergeQuery),
+        organisationKontextId: p.organisationKontextId ?? null,
       })
     : "";
   const leistungTexts = leistungstexteFromParsed(parsed, p.userMessage);
-  const katalogMd = p.kontextWissenEnabled
+  const katalogMdGoae = p.kontextWissenEnabled
     ? buildMappingCatalogMarkdown({
         leistungTexts,
         fachgebiet: med.fachgebiet,
         maxLines: 200,
       })
     : "";
+  const katalogMdEbm = p.kontextWissenEnabled
+    ? (() => {
+        const gops = ebmGopSeedFromTextsCase([
+          ...leistungTexts,
+          med.fachgebiet,
+          med.klinischerKontext || "",
+        ]);
+        if (gops.size === 0) return buildFallbackEbmCatalogMarkdown(120);
+        return buildSelectiveEbmCatalogMarkdown({
+          gops,
+          maxLines: 200,
+          subtitle: "## EBM-Katalog (Auszug)",
+          priorityGops: gops,
+        });
+      })()
+    : "";
+  const katalogMd = rw === "EBM" ? katalogMdEbm : katalogMdGoae;
 
   const staticGoae = p.kontextWissenEnabled
     ? [
@@ -236,7 +326,9 @@ export async function runRechnungPruefungCasePipeline(p: RunRechnungCaseParams):
     : "";
 
   const katalogBundle = p.kontextWissenEnabled
-    ? `${staticGoae}\n\n${katalogMd}`
+    ? (rw === "EBM"
+      ? `EBM (GKV): GOP fünf Stellen; Euro laut Katalog. Kein GOÄ 0,0582873.\n\n${katalogMdEbm}`
+      : `${staticGoae}\n\n${katalogMdGoae}`)
     : "(Hinweis für das Modell: Der Nutzer hat **Kontextwissen** ausgeschaltet. Es gibt keinen eingebetteten GOÄ-Regelblock, keinen Katalogauszug und keinen ADMIN-KONTEXT. Nutze ausschließlich die Eingabe-JSONs; erfinde keine Ziffern oder Beträge; Unsicherheit in **hinweise**.)";
 
   const klin = (parsed.klinischeDokumentation ?? "").trim();
@@ -253,27 +345,44 @@ export async function runRechnungPruefungCasePipeline(p: RunRechnungCaseParams):
   });
   const analyseCompact = JSON.stringify(med);
 
-  const userPrompt = rechnungPruefungPrompt(
-    parsedCompact,
-    analyseCompact,
-    katalogBundle,
-    adminBlock,
-    p.extraRules ?? "",
-  );
+  const userPrompt = rw === "EBM"
+    ? rechnungPruefungPromptEbm(
+      parsedCompact,
+      analyseCompact,
+      katalogBundle,
+      adminBlock,
+      p.extraRules ?? "",
+    )
+    : rechnungPruefungPrompt(
+      parsedCompact,
+      analyseCompact,
+      katalogBundle,
+      adminBlock,
+      p.extraRules ?? "",
+    );
 
   const modus: Engine3Modus = "rechnung_pruefung";
   const systemStatic = p.kontextWissenEnabled
-    ? `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
+    ? (rw === "EBM"
+      ? `Du bist Engine 3 von EBM-DocBill (GKV). Antworte ausschließlich mit gültigem JSON (ein Objekt).
+GOP fünf Stellen; **betrag** in Euro laut EBM-Auszug; **faktor** meist 1,0. Kein GOÄ-Punktwert.
+Keine personenbezogenen Daten; Patient nur als „Patient/in“.
+Jede **Position** braucht **quelleText**.
+${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(p.lastEngine3Result).slice(0, 8000)}` : ""}`
+      : `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
 Punktwert GOÄ: 0,0582873 EUR pro Punkt. Betrag = Punkte × Punktwert × Faktor (auf Cent runden).
 Keine personenbezogenen Daten in Freitextfeldern wiederholen. Patient nur als „Patient/in“.
 Auslegungsfragen (z. B. BÄK): nur mit konkreter Fundstelle aus dem mitgelieferten **ADMIN-KONTEXT**; ohne solche Quelle keine behauptete amtliche Position.
 Alle GOÄ-Ziffern-, Punktwert- und Auslegungsaussagen beziehen sich ausschließlich auf die mitgelieferten Blöcke (GOÄ-Regeltext, Katalogauszug, ADMIN-KONTEXT, Eingabedaten). Keine frei erfundenen Paragraphen oder externen Behauptungen; eine einheitliche **Quellen**-Liste setzt das System nach deiner Antwort. Jede **Position** braucht ein nicht leeres **quelleText** (Bezug zur Eingabe); bei Auslegung aus dem Admin-Kontext **adminQuellen** mit Dateinamen füllen.
+${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(p.lastEngine3Result).slice(0, 8000)}` : ""}`)
+    : (rw === "EBM"
+      ? `Du bist Engine 3 von EBM-DocBill. JSON-only. Kein Katalog in dieser Anfrage. Erfinde keine GOPs. **quelleText** pro Position.
 ${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(p.lastEngine3Result).slice(0, 8000)}` : ""}`
-    : `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
+      : `Du bist Engine 3 von GOÄ-DocBill. Antworte ausschließlich mit gültigem JSON (ein Objekt).
 Punktwert GOÄ: 0,0582873 EUR pro Punkt. Betrag = Punkte × Punktwert × Faktor (auf Cent runden).
 Keine personenbezogenen Daten in Freitextfeldern wiederholen. Patient nur als „Patient/in“.
 **Kein** eingebetteter GOÄ-Katalog, Regelblock oder ADMIN-KONTEXT in dieser Anfrage (Nutzer hat Kontextwissen ausgeschaltet). Nutze ausschließlich die **Eingabe-JSONs** im Nutzerprompt. Erfinde keine Ziffern; Unsicherheit und Lücken klar in **hinweise**; **warnung**/**fehler** wo angebracht. Jede **Position** ein nicht leeres **quelleText** mit Bezug zur Eingabe. Keine behaupteten Auslegungen oder Kommentar-Zitate ohne Beleg.
-${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(p.lastEngine3Result).slice(0, 8000)}` : ""}`;
+${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. Fortführung):\n${JSON.stringify(p.lastEngine3Result).slice(0, 8000)}` : ""}`);
 
   let resultData: Engine3ResultData | null = null;
   const modelsToTry = buildFallbackModels(p.model, { multimodal: false });
@@ -294,7 +403,7 @@ ${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. F
       });
       const obj = extractJson<unknown>(raw);
       lastExtracted = obj;
-      resultData = parseEngine3ResultJson(obj, modus);
+      resultData = parseEngine3ResultJson(obj, modus, rw);
       if (resultData) break;
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
@@ -310,26 +419,33 @@ ${p.lastEngine3Result != null ? `\nVorheriges Engine-3-Ergebnis (Kontext, ggf. F
     );
   }
 
-  resultData.goaeStandHinweis = resultData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
+  resultData.goaeStandHinweis = resultData.goaeStandHinweis ??
+    (rw === "EBM" ? EBM_STAND_HINWEIS : GOAE_STAND_HINWEIS);
 
-  let finalData = applyRecalcAndConsistency(resultData);
-  finalData = applyEngine3AusschlussPass(finalData);
-  finalData = await critiqueRefineIfNeeded(p.apiKey, p.model, finalData, katalogMd);
-  finalData = applyRecalcAndConsistency(finalData);
-  finalData = applyEngine3AusschlussPass(finalData);
+  let finalData = applyRecalcAndConsistency(resultData, rw);
+  finalData = applyEngine3AusschlussPass(finalData, rw);
+  finalData = await critiqueRefineIfNeeded(p.apiKey, p.model, finalData, katalogMd, rw);
+  finalData = applyRecalcAndConsistency(finalData, rw);
+  finalData = applyEngine3AusschlussPass(finalData, rw);
   finalData = enforceEngine3Quellenbezug(finalData);
   finalData = ensureWarnungFehlerHaveUIFacingRationale(finalData);
   finalData = enrichEngine3BegruendungBeispiele(finalData);
 
-  finalData.goaeStandHinweis = finalData.goaeStandHinweis ?? GOAE_STAND_HINWEIS;
+  finalData.goaeStandHinweis = finalData.goaeStandHinweis ??
+    (rw === "EBM" ? EBM_STAND_HINWEIS : GOAE_STAND_HINWEIS);
   finalData = filterEngine3AdminQuellenToEvidence(finalData);
 
   const quellenLines: string[] = p.kontextWissenEnabled
-    ? [
+    ? (rw === "EBM"
+      ? [
+        "EBM (GKV): GOP- und Euro-Referenz (DocBill Katalogauszug)",
+        `Eingabe: hochgeladene Datei(en) in diesem Vorgang (${p.quellenFileCount})`,
+      ]
+      : [
         "GOÄ-Paragraphen und Bewertungsregeln (eingebetteter DocBill-Referenzblock)",
         "GOÄ-Ziffern und Punktwerte (kontextbezogener Katalogauszug, DocBill JSON)",
         `Eingabe: hochgeladene Datei(en) in diesem Vorgang (${p.quellenFileCount})`,
-      ]
+      ])
     : [`Eingabe: hochgeladene Datei(en) in diesem Vorgang (${p.quellenFileCount})`];
 
   const seen = new Set(quellenLines);

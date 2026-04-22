@@ -8,6 +8,10 @@ import {
   regelZiffernKollidieren,
   type RegelKatalogEintrag,
 } from "../../goae-catalog-json.ts";
+import { ebmByGop } from "../../ebm-catalog-json.ts";
+import { ebmZiffernKollidieren } from "../ebm-regelengine.ts";
+
+export type Engine3Regelwerk = "GOAE" | "EBM";
 import { getBegruendungBeispiele } from "./begruendung-beispiele.ts";
 
 let _regelKatalog: Map<string, RegelKatalogEintrag> | null = null;
@@ -74,6 +78,8 @@ export interface Engine3ResultData {
   adminQuellen?: string[];
   /** Vom System gesetzt: nachvollziehbare Grundlagen (GOÄ-Blöcke, Eingabe, Admin-Kontext) */
   quellen?: string[];
+  /** gesetzt in parseEngine3ResultJson: Nachbearbeitung (Recalc, Ausschluss) */
+  _regelwerk?: Engine3Regelwerk;
 }
 
 /** SSE / Client: schlanke Position; Quelle optional für UI (immer gesetzt nach Server-Enforcement). */
@@ -368,7 +374,38 @@ function katalogEintrag(ziffer: string) {
   return goaeByZiffer.get(z) ?? goaeByZiffer.get(z.toUpperCase());
 }
 
-function fixPosition(p: Engine3Position): Engine3Position {
+function fixPositionEbm(p: Engine3Position): Engine3Position {
+  const gop = String(p.ziffer ?? "").trim();
+  const e = ebmByGop.get(gop);
+  if (!e) {
+    const note = p.anmerkung?.trim() ?? "";
+    const add = "GOP im EBM-Katalogauszug nicht gefunden – Betrag nicht automatisch geprüft.";
+    return {
+      ...p,
+      status: p.status === "korrekt" ? "warnung" : p.status,
+      anmerkung: note ? `${note} ${add}` : add,
+    };
+  }
+  const expected = round2(e.euroWert);
+  if (e.punktzahl > 0 && Math.abs(expected - p.betrag) > 0.03) {
+    const note = p.anmerkung?.trim() ?? "";
+    const add = `Betrag an EBM-Katalog (${e.punktzahl} Pkt.) nachgerechnet: ${expected.toFixed(2).replace(".", ",")} €.`;
+    return {
+      ...p,
+      betrag: expected,
+      faktor: 1,
+      bezeichnung: p.bezeichnung?.trim() ? p.bezeichnung : e.bezeichnung,
+      anmerkung: note ? `${note} ${add}` : add,
+    };
+  }
+  if (!p.bezeichnung?.trim()) {
+    return { ...p, bezeichnung: e.bezeichnung, faktor: 1 };
+  }
+  return { ...p, faktor: 1 };
+}
+
+function fixPosition(p: Engine3Position, regelwerk: Engine3Regelwerk = "GOAE"): Engine3Position {
+  if (regelwerk === "EBM") return fixPositionEbm(p);
   const entry = katalogEintrag(p.ziffer);
   if (!entry) {
     const note = p.anmerkung?.trim() ?? "";
@@ -414,7 +451,11 @@ function summarize(data: Engine3ResultData): Engine3Summary {
 }
 
 /** Rohes Modell-JSON → typisiert; `null` wenn unbrauchbar. */
-export function parseEngine3ResultJson(raw: unknown, modus: Engine3Modus): Engine3ResultData | null {
+export function parseEngine3ResultJson(
+  raw: unknown,
+  modus: Engine3Modus,
+  regelwerk: Engine3Regelwerk = "GOAE",
+): Engine3ResultData | null {
   const rootRec = recordFromUnknown(raw);
   const o = unwrapEngine3Candidate(raw);
   if (!o) return null;
@@ -538,9 +579,12 @@ export function parseEngine3ResultJson(raw: unknown, modus: Engine3Modus): Engin
     modus,
     klinischerKontext: klin,
     fachgebiet: fach,
-    positionen: positionen.map(fixPosition),
+    positionen: positionen.map((pos) => fixPosition(pos, regelwerk)),
     hinweise,
-    ...(optimierungen?.length ? { optimierungen: optimierungen.map(fixPosition) } : {}),
+    ...(optimierungen?.length
+      ? { optimierungen: optimierungen.map((pos) => fixPosition(pos, regelwerk)) }
+      : {}),
+    _regelwerk: regelwerk,
     zusammenfassung: {
       geschaetzteSumme: 0,
       anzahlPositionen: 0,
@@ -557,11 +601,16 @@ export function parseEngine3ResultJson(raw: unknown, modus: Engine3Modus): Engin
   return base;
 }
 
-export function applyRecalcAndConsistency(data: Engine3ResultData): Engine3ResultData {
-  const positionen = data.positionen.map(fixPosition);
-  const optimierungen = data.optimierungen?.map(fixPosition);
+export function applyRecalcAndConsistency(
+  data: Engine3ResultData,
+  regelwerk?: Engine3Regelwerk,
+): Engine3ResultData {
+  const rw: Engine3Regelwerk = regelwerk ?? data._regelwerk ?? "GOAE";
+  const positionen = data.positionen.map((p) => fixPosition(p, rw));
+  const optimierungen = data.optimierungen?.map((p) => fixPosition(p, rw));
   const next: Engine3ResultData = {
     ...data,
+    _regelwerk: rw,
     positionen,
     ...(optimierungen?.length ? { optimierungen } : {}),
   };
@@ -614,7 +663,14 @@ function engine3StrikeSecondInPair(a: Engine3Position, b: Engine3Position): bool
  * Kollidierende Positionen werden bis zur Konfliktfreiheit auf **eine** reduziert (entfallende Zeile entfernen);
  * ein Hinweis dokumentiert die Streichung. Weitere GOÄ-Prüfungen gehören hierher statt ins LLM.
  */
-export function applyEngine3AusschlussPass(data: Engine3ResultData): Engine3ResultData {
+export function applyEngine3AusschlussPass(
+  data: Engine3ResultData,
+  regelwerk?: Engine3Regelwerk,
+): Engine3ResultData {
+  const rw: Engine3Regelwerk = regelwerk ?? data._regelwerk ?? "GOAE";
+  if (rw === "EBM") {
+    return applyEngine3AusschlussPassEbm({ ...data, _regelwerk: "EBM" });
+  }
   const katalog = getRegelKatalog();
   type Row = { ziffer: string; list: "pos" | "opt"; idx: number };
 
@@ -691,7 +747,7 @@ export function applyEngine3AusschlussPass(data: Engine3ResultData): Engine3Resu
         optimierungen: opts.length ? opts : undefined,
       };
     }
-    working = applyRecalcAndConsistency(working);
+    working = applyRecalcAndConsistency(working, "GOAE");
     changed = true;
   }
 
@@ -700,7 +756,96 @@ export function applyEngine3AusschlussPass(data: Engine3ResultData): Engine3Resu
   return applyRecalcAndConsistency({
     ...working,
     hinweise: [...working.hinweise, ...neueHinweise],
-  });
+  }, "GOAE");
+}
+
+/**
+ * EBM: Ausschlüsse aus Katalog `abrechnungsbestimmungen.ausschluss` (GOP-Referenzen).
+ */
+function applyEngine3AusschlussPassEbm(data: Engine3ResultData): Engine3ResultData {
+  type Row = { ziffer: string; list: "pos" | "opt"; idx: number };
+  let working: Engine3ResultData = data;
+  const neueHinweise: Engine3Hinweis[] = [];
+  let changed = false;
+
+  while (true) {
+    const rows: Row[] = [];
+    working.positionen.forEach((p, idx) => {
+      const z = String(p.ziffer ?? "").trim();
+      if (z && z !== "?" && ebmByGop.has(z)) rows.push({ ziffer: z, list: "pos", idx });
+    });
+    (working.optimierungen ?? []).forEach((p, idx) => {
+      const z = String(p.ziffer ?? "").trim();
+      if (z && z !== "?" && ebmByGop.has(z)) rows.push({ ziffer: z, list: "opt", idx });
+    });
+
+    let bi = -1;
+    let bj = -1;
+    outer: for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        if (!ebmZiffernKollidieren(rows[i].ziffer, rows[j].ziffer)) continue;
+        bi = i;
+        bj = j;
+        break outer;
+      }
+    }
+
+    if (bi < 0) break;
+
+    const ri = rows[bi];
+    const rj = rows[bj];
+    const pi = ri.list === "pos" ? working.positionen[ri.idx] : (working.optimierungen ?? [])[ri.idx]!;
+    const pj = rj.list === "pos" ? working.positionen[rj.idx] : (working.optimierungen ?? [])[rj.idx]!;
+    const strikeSecond = engine3StrikeSecondInPair(pi, pj);
+    const loseRow = strikeSecond ? rj : ri;
+
+    const za = ri.ziffer < rj.ziffer ? ri.ziffer : rj.ziffer;
+    const zb = ri.ziffer < rj.ziffer ? rj.ziffer : ri.ziffer;
+    const titel = `Ausschluss: EBM ${za} / ${zb}`;
+    const hasHint =
+      working.hinweise.some((h) => h.titel === titel) || neueHinweise.some((h) => h.titel === titel);
+
+    if (!hasHint) {
+      const ea = ebmByGop.get(za);
+      const eb = ebmByGop.get(zb);
+      const removedP = strikeSecond ? pj : pi;
+      const removedZ = strikeSecond ? rj.ziffer : ri.ziffer;
+      const schwere: Engine3Hinweis["schwere"] =
+        working.modus === "rechnung_pruefung" ? "fehler" : "warnung";
+      const detail =
+        `Laut EBM-Katalogaussage sind GOP ${za} (${ea?.bezeichnung?.slice(0, 60) ?? "—"}) und GOP ${zb} (${eb?.bezeichnung?.slice(0, 60) ?? "—"}) nicht nebeneinander berechnungsfähig. ` +
+        `GOP ${removedZ} (${removedP.bezeichnung.trim() || "—"}) wurde für die Darstellung gestrichen.`;
+      neueHinweise.push({
+        schwere,
+        titel,
+        detail,
+        regelReferenz: "Ausschluss EBM-Katalog",
+        betrifftPositionen: [pi.nr, pj.nr],
+      });
+    }
+
+    if (loseRow.list === "pos") {
+      working = {
+        ...working,
+        positionen: working.positionen.filter((_, idx) => idx !== loseRow.idx),
+      };
+    } else {
+      const opts = [...(working.optimierungen ?? [])];
+      opts.splice(loseRow.idx, 1);
+      working = {
+        ...working,
+        optimierungen: opts.length ? opts : undefined,
+      };
+    }
+    working = applyRecalcAndConsistency(working, "EBM");
+    changed = true;
+  }
+
+  if (!changed) return data;
+  return applyRecalcAndConsistency(
+    { ...working, hinweise: [...working.hinweise, ...neueHinweise] },
+    "EBM",
+  );
 }
 
 function isQuelleTextMissing(s: string | undefined): boolean {
@@ -842,8 +987,8 @@ export function ensureWarnungFehlerHaveUIFacingRationale(data: Engine3ResultData
   }
 
   if (hinweise.length === data.hinweise.length) return data;
-  return applyRecalcAndConsistency({
-    ...data,
-    hinweise,
-  });
+  return applyRecalcAndConsistency(
+    { ...data, hinweise },
+    data._regelwerk,
+  );
 }

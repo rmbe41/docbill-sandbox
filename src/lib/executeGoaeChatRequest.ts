@@ -7,6 +7,8 @@ import {
   type SseAccumState,
 } from "@/lib/goaeChatSse";
 import type { GuidedWorkflowKind } from "@/lib/guidedWorkflow";
+import type { JobStorageRef } from "@/lib/uploads/jobUploads";
+import { captureGoaeChatComplete } from "@/lib/observability/posthog";
 
 const CHAT_URL = import.meta.env.DEV
   ? `/api/supabase/functions/v1/goae-chat`
@@ -15,9 +17,12 @@ const CHAT_URL = import.meta.env.DEV
 export type ApiChatMessage = { role: string; content: string };
 
 export type ExecuteGoaeChatParams = {
+  /** Session access_token (nicht Anon-Key) – nötig z. B. für storage_file_refs in goae-chat. */
   supabaseKey: string;
   apiMessages: ApiChatMessage[];
   filePayloads?: { name: string; type: string; data: string }[];
+  /** Dateien aus Supabase Storage (Bucket job-uploads); spart Request-Body-Größe. */
+  storage_file_refs?: JobStorageRef[];
   model: string;
   engine_type: string;
   extra_rules: string;
@@ -36,6 +41,12 @@ export type ExecuteGoaeChatParams = {
   guidedPhase?: "collect";
   /** Partition der Datei-Indizes für Engine-3-Rechnungsprüfung (mehrere PDFs). */
   engine3CaseGroups?: number[][];
+  /** GOÄ vs. EBM (GKV) — Fragemodus-Katalog. */
+  regelwerk?: "GOAE" | "EBM";
+  /** Spec 02 Modi A/B/C (Server leitet ab, falls fehlt). */
+  mode?: "A" | "B" | "C";
+  /** Stabile Sitzung für Pseudonymisierung/Re-Identifikation über mehrere KI-Aufrufe (z. B. Konversations-ID). */
+  pseudonym_session_id?: string;
 };
 
 export type ExecuteGoaeChatHttpError = {
@@ -66,6 +77,9 @@ export async function executeGoaeChatRequest(
       body: JSON.stringify({
         messages: params.apiMessages,
         files: params.filePayloads && params.filePayloads.length > 0 ? params.filePayloads : undefined,
+        ...(params.storage_file_refs && params.storage_file_refs.length > 0
+          ? { storage_file_refs: params.storage_file_refs }
+          : {}),
         model: params.model,
         engine_type: params.engine_type,
         extra_rules: params.extra_rules,
@@ -94,6 +108,11 @@ export async function executeGoaeChatRequest(
           ? { guided_workflow: params.guidedWorkflow, guided_phase: params.guidedPhase }
           : {}),
         ...(params.engine3CaseGroups?.length ? { engine3_case_groups: params.engine3CaseGroups } : {}),
+        ...(params.regelwerk && params.regelwerk !== "GOAE" ? { regelwerk: params.regelwerk } : {}),
+        ...(params.mode ? { mode: params.mode } : {}),
+        ...(params.pseudonym_session_id?.trim()
+          ? { pseudonym_session_id: params.pseudonym_session_id.trim() }
+          : {}),
       }),
       signal: params.signal,
     });
@@ -164,5 +183,23 @@ export async function executeGoaeChatRequest(
   }).catch(() => {});
   // #endregion
 
-  return { ok: true, state, analysisTimeSeconds };
+  const durationMs = Date.now() - startTime;
+  const abEngines = new Set(["simple", "complex", "engine3", "engine3_1"]);
+  const modusKlasse: "C" | "AB" | "unbekannt" = params.mode
+    ? params.mode === "C"
+      ? "C"
+      : "AB"
+    : params.engine_type === "direct" || params.engine_type === "direct_local"
+      ? "C"
+      : abEngines.has(params.engine_type)
+        ? "AB"
+        : "unbekannt";
+  captureGoaeChatComplete({
+    modus: params.mode,
+    modusKlasse,
+    durationMs,
+    engineType: params.engine_type,
+  });
+
+  return { ok: true, state, analysisTimeSeconds: durationMs / 1000 };
 }

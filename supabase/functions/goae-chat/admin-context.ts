@@ -431,7 +431,13 @@ export type LoadRelevantAdminContextOptions = {
    * die pgvector-Treffer nicht „wegzieht“.
    */
   vectorQuery?: string;
+  /** Spec 05 §7.4 / Spec 08: organisations_id für Kommentarliteratur-RAG */
+  organisationKontextId?: string | null;
 };
+
+const ORG_KOMMENTAR_MATCH_COUNT = 5;
+const ORG_KOMMENTAR_MATCH_THRESHOLD = 0.48;
+const ORG_KOMMENTAR_MAX_TOKENS = 1200;
 
 export async function loadRelevantAdminContext(
   mergeQuery: string,
@@ -624,6 +630,87 @@ export async function loadRelevantAdminContext(
     const fb = url && key ? await loadFullAdminContextFallback(url, key) : "";
     return await mergeFilenameMatchedSections(mq, fb, sbUrl, sbKey);
   }
+}
+
+/**
+ * RAG: hochgeladene GOÄ-Kommentarliteratur (Organisation) — Spec 05 §7.4
+ */
+export async function loadRelevantOrganisationKommentarContext(
+  mergeQuery: string,
+  apiKey: string,
+  organisationId: string,
+  options?: LoadRelevantAdminContextOptions,
+): Promise<string> {
+  const mq = mergeQuery?.trim() ?? "";
+  if (!mq || !organisationId?.trim()) return "";
+  const vectorQ = (options?.vectorQuery?.trim() || mq).trim();
+  const sbUrl = Deno.env.get("SUPABASE_URL");
+  const sbKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!sbUrl || !sbKey) return "";
+  try {
+    const zExtracted = extractZiffernFromText(vectorQ);
+    const filterZiffern = zExtracted.length > 0 && zExtracted.length <= 48 ? zExtracted : null;
+    const embedding = await getQueryEmbedding(vectorQ, apiKey);
+    const rpcResp = await fetchWithTimeout(
+      `${sbUrl}/rest/v1/rpc/match_organisation_kommentar_chunks`,
+      {
+        method: "POST",
+        headers: {
+          apikey: sbKey,
+          Authorization: `Bearer ${sbKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          p_organisation_id: organisationId,
+          query_embedding: embedding,
+          match_count: ORG_KOMMENTAR_MATCH_COUNT,
+          match_threshold: ORG_KOMMENTAR_MATCH_THRESHOLD,
+          filter_ziffern: filterZiffern,
+        }),
+        timeoutMs: RPC_TIMEOUT_MS,
+      },
+    );
+    if (!rpcResp.ok) return "";
+    const chunks: unknown = await rpcResp.json();
+    if (!Array.isArray(chunks) || chunks.length === 0) return "";
+    const maxChars = ORG_KOMMENTAR_MAX_TOKENS * CHARS_PER_TOKEN;
+    let totalChars = 0;
+    const parts: string[] = [];
+    for (const c of chunks) {
+      const row = c as { content?: string; filename?: string; source_page?: number; section_path?: string };
+      const content = row.content;
+      if (typeof content !== "string" || !content) continue;
+      if (totalChars + content.length > maxChars) break;
+      const filename = row.filename ?? "Kommentar";
+      const locParts: string[] = [];
+      if (row.source_page != null) locParts.push(`S. ${row.source_page}`);
+      if (typeof row.section_path === "string" && row.section_path.trim().length > 0) {
+        locParts.push(row.section_path.trim());
+      }
+      const loc = locParts.length > 0 ? ` (${locParts.join(" · ")})` : "";
+      parts.push(`### ${filename}${loc}\n${content}`);
+      totalChars += content.length;
+    }
+    if (parts.length === 0) return "";
+    return "\n\n## WISSENSBASIS (GOÄ-Kommentar, Organisation)\n" + parts.join("\n\n");
+  } catch {
+    return "";
+  }
+}
+
+/** Admin-RAG plus organisationsspezifische Kommentarliteratur (wenn User-ID gesetzt). */
+export async function loadKontextAdminUndOrganisation(
+  mergeQuery: string,
+  apiKey: string,
+  options?: LoadRelevantAdminContextOptions,
+): Promise<string> {
+  const admin = await loadRelevantAdminContext(mergeQuery, apiKey, options);
+  const oid = options?.organisationKontextId?.trim();
+  if (!oid) return admin;
+  const org = await loadRelevantOrganisationKommentarContext(mergeQuery, apiKey, oid, options);
+  if (!org) return admin;
+  if (!admin) return org;
+  return admin + org;
 }
 
 async function loadFullAdminContextFallback(sbUrl: string, sbKey: string): Promise<string> {

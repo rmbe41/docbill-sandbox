@@ -1,10 +1,10 @@
 /**
  * Step 2 – Medizinisches NLP
  *
- * Analysiert den medizinischen Textinhalt aus dem geparsten Dokument.
- * Erkennt Diagnosen, Behandlungen und den klinischen Kontext.
+ * ParsedRechnung → LLM → MedizinischeAnalyse (JSON)
  *
- *   ParsedRechnung → LLM → MedizinischeAnalyse (JSON)
+ * Spec 8.2: Pseudonymisierung aller Texte an externe Modelle erfolgt zentral in `callLlm`
+ * (Request-Kontext `runWithPseudonymRequestContext`). Antwort wird dort re-identifiziert.
  */
 
 import { callLlm, extractJson, pickExtractionModel } from "./llm-client.ts";
@@ -75,17 +75,21 @@ function withAdminContextPrompt(base: string, adminContext?: string): string {
   return `${base}\n\n## ADMIN-KONTEXT (Praxis-/Klinik-Wissen):\n${a}`;
 }
 
+export type AnalysiereMedizinischOptions = {
+  pseudonymSessionId?: string;
+};
+
 export async function analysiereMedizinisch(
   rechnung: ParsedRechnung,
   apiKey: string,
   userModel: string,
   adminContext?: string,
   kontextWissenEnabled = true,
+  _opts?: AnalysiereMedizinischOptions,
 ): Promise<MedizinischeAnalyse> {
   const model = pickExtractionModel(userModel);
 
   const zusammenfassung = buildRechnungsSummary(rechnung);
-
   const basePrompt = kontextWissenEnabled ? NLP_SYSTEM_PROMPT : NLP_SYSTEM_PROMPT_NO_EMBEDDED_GOAE;
 
   const raw = await callLlm({

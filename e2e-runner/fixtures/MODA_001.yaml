@@ -1,0 +1,34 @@
+# MODA-ähnliche Blackbox: Parsing- + Analyse-Fragmente im SSE-Stream (Mock + Spec §2.2).
+fixture_id: "MODA_001"
+name: "Augenarzt-ähnlich (Mock) — 5 Positionen, Ziffern, 8 Kategorien"
+input:
+  type: "http_post"
+  path: "/functions/v1/goae-chat"
+  headers:
+    Content-Type: "application/json"
+    Authorization: "Bearer e2e-mock-token"
+  body:
+    mode: "C"
+    regelwerk: "GOAE"
+    messages:
+      - role: "user"
+        content: "Beispielfrage GOÄ 1240"
+    engine_type: "direct"
+expected:
+  output:
+    status_code: 200
+    text_contains:
+      - "docbill_parsing"
+      - "docbill_analyse"
+    response_time_max_ms: 60000
+  parsing:
+    positionen_count: 5
+    ziffern:
+      - "1240"
+      - "1256"
+      - "5855"
+      - "6"
+      - "75"
+  analyse:
+    kategorien_count: 8
+    disclaimer_contains: "DocBill ist eine KI"

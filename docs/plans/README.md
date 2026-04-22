@@ -21,7 +21,7 @@ Foundation → Modus C → Modus A → Modus B → Batch/PAD → Wissens-Managem
 ## PostHog: Event `health_check`
 
 - Wird von der Edge Function **`health`** bei jedem erfolgreichen Lauf gesendet (Ingest: `https://eu.i.posthog.com/i/v0/e/` bzw. optional `POSTHOG_INGEST_URL` / `POSTHOG_HOST`).
-- **In PostHog:** *Activity* / *Live events* oder *Data management* → nach Event-Name **`health_check`** filtern; Properties u. a. `overall`, `response_time_ms`, `source: supabase_edge_health`.
+- **In PostHog:** _Activity_ / _Live events_ oder _Data management_ → nach Event-Name **`health_check`** filtern; Properties u. a. `overall`, `response_time_ms`, `source: supabase_edge_health`.
 - Supabase Secrets: `POSTHOG_API_KEY` (Project API Key `phc_…`).
 
 ## Alerting (PostHog → Slack) — Checkliste

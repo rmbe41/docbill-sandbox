@@ -70,6 +70,146 @@ export type Database = {
           },
         ]
       }
+      batch_faelle: {
+        Row: {
+          id: string
+          batch_id: string
+          sort_order: number
+          label: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          batch_id: string
+          sort_order?: number
+          label?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          batch_id?: string
+          sort_order?: number
+          label?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "batch_faelle_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      batch_rechnungen: {
+        Row: {
+          id: string
+          batch_id: string
+          fall_id: string
+          sort_order: number
+          patient_id_label: string
+          betrag_euro: number
+          liste_status: string
+          hinweise_kurz: string | null
+          fachbereich: string | null
+          detail_json: Json
+          vorschlaege_angenommen: boolean
+          aenderungen_anzahl: number
+          optimierung_angewendet_euro: number
+        }
+        Insert: {
+          id?: string
+          batch_id: string
+          fall_id: string
+          sort_order?: number
+          patient_id_label: string
+          betrag_euro?: number
+          liste_status: string
+          hinweise_kurz?: string | null
+          fachbereich?: string | null
+          detail_json?: Json
+          vorschlaege_angenommen?: boolean
+          aenderungen_anzahl?: number
+          optimierung_angewendet_euro?: number
+        }
+        Update: {
+          id?: string
+          batch_id?: string
+          fall_id?: string
+          sort_order?: number
+          patient_id_label?: string
+          betrag_euro?: number
+          liste_status?: string
+          hinweise_kurz?: string | null
+          fachbereich?: string | null
+          detail_json?: Json
+          vorschlaege_angenommen?: boolean
+          aenderungen_anzahl?: number
+          optimierung_angewendet_euro?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "batch_rechnungen_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_rechnungen_fall_id_fkey"
+            columns: ["fall_id"]
+            isOneToOne: false
+            referencedRelation: "batch_faelle"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      batches: {
+        Row: {
+          id: string
+          user_id: string
+          organisation_id: string
+          name: string
+          created_at: string
+          updated_at: string
+          rechnungen_count: number
+          faelle_count: number
+          verarbeitet_count: number
+          status: string
+          zusammenfassung: Json
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          organisation_id: string
+          name: string
+          created_at?: string
+          updated_at?: string
+          rechnungen_count?: number
+          faelle_count?: number
+          verarbeitet_count?: number
+          status: string
+          zusammenfassung?: Json
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          organisation_id?: string
+          name?: string
+          created_at?: string
+          updated_at?: string
+          rechnungen_count?: number
+          faelle_count?: number
+          verarbeitet_count?: number
+          status?: string
+          zusammenfassung?: Json
+        }
+        Relationships: []
+      }
       admin_context_files: {
         Row: {
           id: string
@@ -97,6 +237,297 @@ export type Database = {
         }
         Relationships: []
       }
+      organisations: {
+        Row: {
+          id: string
+          name: string
+          typ: string
+          plan: string
+          settings: Json
+          sso_config: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          typ?: string
+          plan?: string
+          settings?: Json
+          sso_config?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          typ?: string
+          plan?: string
+          settings?: Json
+          sso_config?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      organisation_members: {
+        Row: {
+          organisation_id: string
+          user_id: string
+          role: string
+          fachgebiet: string | null
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          organisation_id: string
+          user_id: string
+          role?: string
+          fachgebiet?: string | null
+          is_active?: boolean
+          created_at?: string
+        }
+        Update: {
+          organisation_id?: string
+          user_id?: string
+          role?: string
+          fachgebiet?: string | null
+          is_active?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
+      organisation_invites: {
+        Row: {
+          id: string
+          organisation_id: string
+          email: string
+          role: string
+          token: string
+          expires_at: string
+          invited_by: string
+          created_at: string
+          accepted_at: string | null
+        }
+        Insert: {
+          id?: string
+          organisation_id: string
+          email: string
+          role?: string
+          token: string
+          expires_at: string
+          invited_by: string
+          created_at?: string
+          accepted_at?: string | null
+        }
+        Update: {
+          id?: string
+          organisation_id?: string
+          email?: string
+          role?: string
+          token?: string
+          expires_at?: string
+          invited_by?: string
+          created_at?: string
+          accepted_at?: string | null
+        }
+        Relationships: []
+      }
+      kb_crawl_runs: {
+        Row: {
+          id: string
+          source_name: string
+          status: string
+          started_at: string
+          finished_at: string | null
+          error_message: string | null
+          document_count: number
+          log: Json | null
+        }
+        Insert: {
+          id?: string
+          source_name?: string
+          status?: string
+          started_at?: string
+          finished_at?: string | null
+          error_message?: string | null
+          document_count?: number
+          log?: Json | null
+        }
+        Update: {
+          id?: string
+          source_name?: string
+          status?: string
+          started_at?: string
+          finished_at?: string | null
+          error_message?: string | null
+          document_count?: number
+          log?: Json | null
+        }
+        Relationships: []
+      }
+      kb_crawl_documents: {
+        Row: {
+          id: string
+          run_id: string
+          source_url: string
+          content_hash: string | null
+          text_extract: string | null
+          byte_length: number | null
+        }
+        Insert: {
+          id?: string
+          run_id: string
+          source_url: string
+          content_hash?: string | null
+          text_extract?: string | null
+          byte_length?: number | null
+        }
+        Update: {
+          id?: string
+          run_id?: string
+          source_url?: string
+          content_hash?: string | null
+          text_extract?: string | null
+          byte_length?: number | null
+        }
+        Relationships: []
+      }
+      kb_beschluesse_review: {
+        Row: {
+          id: string
+          external_key: string | null
+          titel: string | null
+          quelle: string | null
+          relevanz_payload: Json | null
+          aktion: string
+          run_id: string | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision: string | null
+        }
+        Insert: {
+          id?: string
+          external_key?: string | null
+          titel?: string | null
+          quelle?: string | null
+          relevanz_payload?: Json | null
+          aktion?: string
+          run_id?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision?: string | null
+        }
+        Update: {
+          id?: string
+          external_key?: string | null
+          titel?: string | null
+          quelle?: string | null
+          relevanz_payload?: Json | null
+          aktion?: string
+          run_id?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision?: string | null
+        }
+        Relationships: []
+      }
+      kb_relevanz_reports: {
+        Row: {
+          id: string
+          week_start: string
+          payload: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          week_start: string
+          payload: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          week_start?: string
+          payload?: Json
+          created_at?: string
+        }
+        Relationships: []
+      }
+      organisation_kommentar_files: {
+        Row: {
+          id: string
+          organisation_id: string
+          quelle: "brueck" | "hoffmann" | "lang_schaefer"
+          filename: string
+          content_text: string
+          storage_path: string | null
+          uploaded_by: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organisation_id: string
+          quelle: "brueck" | "hoffmann" | "lang_schaefer"
+          filename: string
+          content_text: string
+          storage_path?: string | null
+          uploaded_by: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          organisation_id?: string
+          quelle?: "brueck" | "hoffmann" | "lang_schaefer"
+          filename?: string
+          content_text?: string
+          storage_path?: string | null
+          uploaded_by?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      organisation_kommentar_chunks: {
+        Row: {
+          id: string
+          organisation_id: string
+          file_id: string
+          filename: string
+          chunk_index: number
+          content: string
+          ziffern: string[]
+          source_page: number | null
+          section_path: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organisation_id: string
+          file_id: string
+          filename: string
+          chunk_index: number
+          content: string
+          ziffern?: string[]
+          source_page?: number | null
+          section_path?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          organisation_id?: string
+          file_id?: string
+          filename?: string
+          chunk_index?: number
+          content?: string
+          ziffern?: string[]
+          source_page?: number | null
+          section_path?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       conversations: {
         Row: {
           archived_at: string | null
@@ -106,6 +537,7 @@ export type Database = {
           title: string
           updated_at: string
           user_id: string
+          organisation_id: string
           source_filename: string | null
         }
         Insert: {
@@ -116,6 +548,7 @@ export type Database = {
           title?: string
           updated_at?: string
           user_id: string
+          organisation_id: string
           source_filename?: string | null
         }
         Update: {
@@ -126,9 +559,18 @@ export type Database = {
           title?: string
           updated_at?: string
           user_id?: string
+          organisation_id?: string
           source_filename?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "conversations_organisation_id_fkey"
+            columns: ["organisation_id"]
+            isOneToOne: false
+            referencedRelation: "organisations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       global_settings: {
         Row: {
@@ -251,7 +693,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      list_organisation_member_directory: {
+        Args: Record<string, never>
+        Returns: {
+          user_id: string
+          role: string
+          email: string
+          created_at: string
+        }[]
+      }
+      accept_organisation_invite: {
+        Args: { p_token: string }
+        Returns: Json
+      }
+      ensure_user_organisation: {
+        Args: Record<string, never>
+        Returns: string
+      }
+      get_organisation_context: {
+        Args: Record<string, never>
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

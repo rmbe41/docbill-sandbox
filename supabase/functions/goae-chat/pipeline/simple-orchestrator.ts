@@ -24,6 +24,11 @@ import {
 } from "../model-resolver.ts";
 import { createPipelineStream } from "./sse-utils.ts";
 import type { PipelineInput, ParsedRechnung } from "./types.ts";
+import { getPseudonymRequestContext } from "../privacy/pseudonym-request-context.ts";
+import { pseudonymizeForLlmSession } from "../privacy/pseudonymize-orchestrator.ts";
+import { loadPseudonymMap } from "../privacy/pseudonym-redis.ts";
+import { reidentifyText } from "../privacy/pseudonymize-bridge.ts";
+import { completionTextFromJsonResponse } from "./direct-model.ts";
 
 const SIMPLE_PIPELINE_STEPS: { label: string }[] = [
   { label: "Dokument wird analysiert..." },
@@ -150,17 +155,39 @@ export async function runSimplePipeline(
       const userPrompt = buildSimplePrompt(parsedRechnung);
       const modelsToTry = buildFallbackModels(input.model);
       const reasoningConfig = getReasoningConfigForStream(input.model);
-      let lastError = "Textgenerierung fehlgeschlagen";
+      let lastError = "";
+
+      const pseudoCtx = getPseudonymRequestContext();
+      let systemForApi = systemContent;
+      let userForApi = userPrompt;
+      if (pseudoCtx) {
+        systemForApi = (
+          await pseudonymizeForLlmSession({
+            plaintext: systemContent,
+            sessionId: pseudoCtx.sessionId,
+            apiKey: pseudoCtx.apiKey,
+            model: pseudoCtx.model,
+          })
+        ).text;
+        userForApi = (
+          await pseudonymizeForLlmSession({
+            plaintext: userPrompt,
+            sessionId: pseudoCtx.sessionId,
+            apiKey: pseudoCtx.apiKey,
+            model: pseudoCtx.model,
+          })
+        ).text;
+      }
 
       for (let i = 0; i < modelsToTry.length; i++) {
         let response: Response;
         const reqBody: Record<string, unknown> = {
           model: modelsToTry[i],
           messages: [
-            { role: "system", content: systemContent },
-            { role: "user", content: userPrompt },
+            { role: "system", content: systemForApi },
+            { role: "user", content: userForApi },
           ],
-          stream: true,
+          stream: pseudoCtx ? false : true,
           temperature: 0.3,
           max_tokens: MAX_OUTPUT_TOKENS,
         };
@@ -187,8 +214,24 @@ export async function runSimplePipeline(
           continue;
         }
 
-        if (response.ok && response.body) {
-          const reader = response.body.getReader();
+        if (response.ok && (response.body || pseudoCtx)) {
+          if (pseudoCtx) {
+            let text = await completionTextFromJsonResponse(response);
+            const map = await loadPseudonymMap(pseudoCtx.sessionId);
+            if (map?.mappings.length) text = reidentifyText(text, map);
+            const chunkSize = 120;
+            for (let j = 0; j < text.length; j += chunkSize) {
+              await writer.write(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    choices: [{ delta: { content: text.slice(j, j + chunkSize) } }],
+                  })}\n\n`,
+                ),
+              );
+            }
+            return;
+          }
+          const reader = response.body!.getReader();
           while (true) {
             let result: ReadableStreamReadResult<Uint8Array>;
             let timeoutId: ReturnType<typeof setTimeout>;
@@ -225,7 +268,7 @@ export async function runSimplePipeline(
         }
       }
 
-      throw new Error(lastError);
+      throw new Error(lastError || "Textgenerierung fehlgeschlagen");
     },
     {
       getErrorCode: (errMsg) => {

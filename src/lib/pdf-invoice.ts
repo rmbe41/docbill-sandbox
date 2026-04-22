@@ -1,7 +1,9 @@
 /**
  * Shared PDF invoice generation for GOÄ-Rechnungen.
  * Used by InvoiceResult (Rechnungsprüfung) and ServiceBillingResult (Leistungen abrechnen).
+ * Footer: Spec 00 / 07 (einheitlicher KI-Hinweis).
  */
+import { DOCBILL_KI_DISCLAIMER } from "@/lib/rechnung/docbillDisclaimer";
 
 export interface PdfStammdaten {
   praxis?: { name?: string; adresse?: string; telefon?: string; email?: string; steuernummer?: string };
@@ -321,6 +323,21 @@ export async function generateInvoicePdf(
     doc.text(line, MARGIN, y);
     y += LINE_HEIGHT;
   }
+
+  y += 4;
+  const discLines = doc.splitTextToSize(DOCBILL_KI_DISCLAIMER, pw - 2 * MARGIN);
+  const discH = LINE_HEIGHT * discLines.length + 6;
+  y = maybeNewPage(doc, y, discH);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(FONT_PT - 1);
+  doc.setTextColor(GRAY_MUTED);
+  for (const line of discLines) {
+    y = maybeNewPage(doc, y, LINE_HEIGHT);
+    doc.text(line, MARGIN, y);
+    y += LINE_HEIGHT;
+  }
+  doc.setTextColor(0);
+  doc.setFontSize(FONT_PT);
 
   addPageFooters(doc);
   doc.save(buildFilename(stammdaten));

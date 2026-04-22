@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RotateCcw, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,7 +15,10 @@ export type BegruendungBeispielePickerProps = {
   className?: string;
   onTextChange: (text: string) => void;
   /** Drei neue Vorschläge (Rotation / neues Triplett); optional. */
-  onRegenerate?: () => void;
+  onRegenerate?: () => void | Promise<void>;
+  /** KI-Neuformulierung läuft — Button deaktivieren. */
+  regenerateLoading?: boolean;
+  readOnly?: boolean;
 };
 
 const DEFAULT_LABELS = ["Variante 1", "Variante 2", "Variante 3"];
@@ -29,7 +32,10 @@ export function BegruendungBeispielePicker({
   className,
   onTextChange,
   onRegenerate,
+  regenerateLoading = false,
+  readOnly = false,
 }: BegruendungBeispielePickerProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const list = useMemo(() => beispiele.filter((s) => s.trim().length > 0).slice(0, 3), [beispiele]);
   const listFingerprint = list.join("\u0000");
 
@@ -100,7 +106,8 @@ export function BegruendungBeispielePicker({
               chipClass,
               hasChoice && idx === selectedIdx ? "ring-2 ring-primary/50 bg-primary/10" : "opacity-90",
             )}
-            onClick={() => applyVariant(idx)}
+            disabled={readOnly}
+            onClick={() => (readOnly ? undefined : applyVariant(idx))}
           >
             {lab[idx] ?? `Variante ${idx + 1}`}
           </button>
@@ -109,9 +116,11 @@ export function BegruendungBeispielePicker({
       <div className="space-y-1">
         <Label className="text-[10px] text-muted-foreground">Text für die Akte (anpassbar)</Label>
         <Textarea
+          ref={textareaRef}
           value={draft}
           placeholder={placeholder}
-          onChange={(e) => handleDraft(e.target.value)}
+          readOnly={readOnly}
+          onChange={(e) => (readOnly ? undefined : handleDraft(e.target.value))}
           rows={6}
           className="text-xs leading-snug min-h-[120px] font-sans"
         />
@@ -122,11 +131,24 @@ export function BegruendungBeispielePicker({
           variant="ghost"
           size="sm"
           className="h-7 text-[11px] gap-1"
-          disabled={!hasChoice}
+          disabled={readOnly || !hasChoice}
           onClick={resetToSelected}
         >
           <RotateCcw className="w-3 h-3" />
           Zurücksetzen
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 text-[11px] gap-1"
+          disabled={readOnly}
+          onClick={() => {
+            textareaRef.current?.focus();
+            textareaRef.current?.select();
+          }}
+        >
+          Bearbeiten
         </Button>
         {onRegenerate ? (
           <Button
@@ -134,9 +156,14 @@ export function BegruendungBeispielePicker({
             variant="outline"
             size="sm"
             className="h-7 text-[11px] gap-1"
-            onClick={() => onRegenerate()}
+            disabled={readOnly || regenerateLoading}
+            onClick={() => void onRegenerate()}
           >
-            <Sparkles className="w-3 h-3" />
+            {regenerateLoading ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Sparkles className="w-3 h-3" />
+            )}
             Neu generieren
           </Button>
         ) : null}

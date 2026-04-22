@@ -1,5 +1,6 @@
 import { useState, useRef, type MouseEvent } from "react";
-import { Settings } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Layers, MessageCircle, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
@@ -43,6 +44,10 @@ const ConversationSidebar = ({
   collapsed: controlledCollapsed,
   onCollapsedChange,
 }: Props) => {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const isChat = pathname === "/";
+  const isBatches = pathname === "/batches" || pathname.startsWith("/batches/");
   const [internalCollapsed, setInternalCollapsed] = useState(true);
   const collapsed = controlledCollapsed ?? internalCollapsed;
   /** Nach Radix-Dropdown: pointerup kann auf dem Aside landen und sonst Ein-/Ausklappen triggern */
@@ -103,6 +108,58 @@ const ConversationSidebar = ({
         <div className="flex-1 min-h-0" />
 
         <div className="flex flex-col items-stretch gap-0.5 pb-2 pt-1">
+          <Button
+            type="button"
+            variant="ghost"
+            data-sidebar-interactive
+            aria-current={isChat ? "page" : undefined}
+            className="min-h-11 h-11 w-full flex items-center justify-start group shadow-none hover:!bg-transparent hover:!text-foreground px-0 cursor-pointer pointer-events-auto rounded-none"
+            onClick={() => {
+              navigate("/");
+              onClose();
+            }}
+            title="Chat"
+          >
+            <div className={ICON_SLOT_ROW}>
+              <MessageCircle className={cn(SETTINGS_ICON_CLASS, isChat && "!text-foreground")} />
+            </div>
+            <div className={cn(labelRail(collapsed), "min-h-11 flex items-center min-w-0")}>
+              <span
+                className={cn(
+                  "block truncate text-left pr-2 text-sm transition-colors group-hover:!text-foreground",
+                  isChat ? "text-foreground" : "text-muted-foreground/60",
+                )}
+              >
+                Chat
+              </span>
+            </div>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            data-sidebar-interactive
+            aria-current={isBatches ? "page" : undefined}
+            className="min-h-11 h-11 w-full flex items-center justify-start group shadow-none hover:!bg-transparent hover:!text-foreground px-0 cursor-pointer pointer-events-auto rounded-none"
+            onClick={() => {
+              navigate("/batches");
+              onClose();
+            }}
+            title="Stapel (Batches)"
+          >
+            <div className={ICON_SLOT_ROW}>
+              <Layers className={cn(SETTINGS_ICON_CLASS, isBatches && "!text-foreground")} />
+            </div>
+            <div className={cn(labelRail(collapsed), "min-h-11 flex items-center min-w-0")}>
+              <span
+                className={cn(
+                  "block truncate text-left pr-2 text-sm transition-colors group-hover:!text-foreground",
+                  isBatches ? "text-foreground" : "text-muted-foreground/60",
+                )}
+              >
+                Stapel
+              </span>
+            </div>
+          </Button>
           <Button
             type="button"
             variant="ghost"

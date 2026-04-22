@@ -23,6 +23,12 @@ interface FeedbackPayload {
   metadata?: {
     decisions?: Record<string, string>;
     inquiry_reason?: "A" | "B" | "C" | null;
+    /** Spec 02 — Vorschlag-Feedback */
+    vorschlag_id?: string;
+    feedback_kind?: "thumb" | "vorschlag";
+    aktion?: "accepted" | "rejected" | "modified";
+    fachgebiet?: string;
+    modified_to?: string;
   };
   timestamp?: string;
   rl_context?: RlFeedbackContext | null;

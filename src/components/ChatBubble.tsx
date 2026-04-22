@@ -18,6 +18,7 @@ import FileOverlay from "@/components/FileOverlay";
 import { useFeedback, type RlFeedbackContext } from "@/hooks/useFeedback";
 import { useToast } from "@/hooks/use-toast";
 import { FeedbackThanksBurst } from "@/components/FeedbackThanksBurst";
+import { DocbillKiDisclaimerFooter } from "@/components/DocbillKiDisclaimerFooter";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -31,6 +32,8 @@ import type {
 } from "@/lib/messageStructuredContent";
 import type { FrageAnswerStructured } from "@/lib/frageAnswerStructured";
 import { frageAnswerSuggestsExportFinalize } from "@/lib/frageAnswerStructured";
+import type { DocbillAnalyseV1 } from "@/lib/analyse/types";
+import { DocbillAnalysePanel } from "@/components/DocbillAnalysePanel";
 
 export type ChatMessage = {
   id: string;
@@ -53,6 +56,7 @@ export type ChatMessage = {
   engine3FaktorOverrides?: Record<string, number>;
   engine3BegruendungText?: Record<string, string>;
   serviceBegruendungText?: Record<string, string>;
+  docbillAnalyse?: DocbillAnalyseV1;
 };
 
 type ChatBubbleProps = {
@@ -72,6 +76,13 @@ type ChatBubbleProps = {
   onKurzantwortVorschlagComposer?: (text: string) => void;
   /** Fortsetzung nach engine3_segmentation_pending (Gruppen von Datei-Indizes). */
   onResumeEngine3WithCaseGroups?: (conversationId: string, caseGroups: number[][]) => void;
+  /** Optional: Steigerungsbegründung per KI neu erzeugen (Edge Function goae-chat). */
+  begruendungRegenerateContext?: {
+    supabaseKey: string;
+    model: string;
+    kontext_wissen: boolean;
+    pseudonym_session_id?: string;
+  };
 };
 
 const MAX_RL_MSG_CHARS = 4000;
@@ -86,7 +97,8 @@ function buildRlFeedbackContext(
     message.serviceBillingResult != null ||
     message.engine3Result != null ||
     (message.engine3Cases != null && message.engine3Cases.length > 0) ||
-    message.frageAnswer != null;
+    message.frageAnswer != null ||
+    message.docbillAnalyse != null;
   const structured_snapshot = hasStructured
     ? {
         ...(message.invoiceResult ? { invoiceResult: message.invoiceResult } : {}),
@@ -94,6 +106,7 @@ function buildRlFeedbackContext(
         ...(message.engine3Result ? { engine3Result: message.engine3Result } : {}),
         ...(message.engine3Cases?.length ? { engine3Cases: message.engine3Cases } : {}),
         ...(message.frageAnswer ? { frageAnswer: message.frageAnswer } : {}),
+        ...(message.docbillAnalyse ? { docbillAnalyse: message.docbillAnalyse } : {}),
       }
     : undefined;
 
@@ -130,6 +143,7 @@ function assistantMessageFeedbackBody(m: ChatMessage): string {
   if (m.engine3Result || (m.engine3Cases != null && m.engine3Cases.length > 0)) {
     return "[DocBill: Engine 3 strukturiert]";
   }
+  if (m.docbillAnalyse) return "[DocBill: Pflichtanalyse]";
   return "";
 }
 
@@ -366,6 +380,7 @@ const ChatBubble = ({
   feedbackPriorMessages,
   onKurzantwortVorschlagComposer,
   onResumeEngine3WithCaseGroups,
+  begruendungRegenerateContext,
 }: ChatBubbleProps) => {
   const isUser = message.role === "user";
   const { user: authUser } = useAuth();
@@ -480,13 +495,14 @@ const ChatBubble = ({
         setFeedbackState(rating === 1 ? "positive" : "negative");
         setFeedbackJustSaved(rating === 1 ? "up" : "down");
         setFeedbackCelebration(true);
-      } else {
+      } else if (result.ok === false) {
+        const err = result.error;
         toast({
           title: "Feedback nicht gespeichert",
           description:
-            result.error.length > 200
-              ? `${result.error.slice(0, 200)}…`
-              : `${result.error} Bei anhaltenden Problemen bitte später erneut versuchen oder den Support informieren.`,
+            err.length > 200
+              ? `${err.slice(0, 200)}…`
+              : `${err} Bei anhaltenden Problemen bitte später erneut versuchen oder den Support informieren.`,
           variant: "destructive",
         });
       }
@@ -610,8 +626,12 @@ const ChatBubble = ({
     message.engine3Result != null ||
     (message.engine3Cases != null && message.engine3Cases.length > 0) ||
     message.engine3SegmentationProposal != null ||
-    message.frageAnswer != null;
+    message.frageAnswer != null ||
+    message.docbillAnalyse != null;
   const showFeedback = !isUser && conversationId && message.id && hasAssistantSubstance;
+
+  /** Spec 07 §11: ein KI-Disclaimer am Ende der Assistant-Nachricht (Modus A/B/C, ein gesamter Turn). */
+  const showAssistantKiDisclaimer = !isUser && hasAssistantSubstance;
 
   // #region agent log
   useEffect(() => {
@@ -749,6 +769,7 @@ const ChatBubble = ({
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
           <div className="space-y-4">
+            {message.docbillAnalyse && <DocbillAnalysePanel data={message.docbillAnalyse} />}
             {message.invoiceResult && (
               <div className="space-y-3">
                 {invoiceReviewSourcePdf ? (
@@ -860,6 +881,7 @@ const ChatBubble = ({
                   initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
                   initialEngine3BegruendungText={message.engine3BegruendungText ?? null}
                   decisionKeyPrefix={`${activeMultiEngine3Case.caseId}:`}
+                  begruendungRegenerateContext={begruendungRegenerateContext}
                 />
               </div>
             )}
@@ -873,6 +895,7 @@ const ChatBubble = ({
                 initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
                 initialEngine3BegruendungText={message.engine3BegruendungText ?? null}
                 decisionKeyPrefix={`${message.engine3Cases[0].caseId}:`}
+                begruendungRegenerateContext={begruendungRegenerateContext}
               />
             )}
             {message.engine3Result && !message.engine3Cases?.length && (
@@ -884,6 +907,7 @@ const ChatBubble = ({
                 initialEngine3Decisions={message.suggestionDecisions?.engine3 ?? null}
                 initialEngine3FaktorOverrides={message.engine3FaktorOverrides ?? null}
                 initialEngine3BegruendungText={message.engine3BegruendungText ?? null}
+                begruendungRegenerateContext={begruendungRegenerateContext}
               />
             )}
             {message.frageAnswer && (
@@ -904,7 +928,8 @@ const ChatBubble = ({
                 message.invoiceResult ||
                   message.serviceBillingResult ||
                   message.engine3Result ||
-                  (message.engine3Cases != null && message.engine3Cases.length > 0),
+                  (message.engine3Cases != null && message.engine3Cases.length > 0) ||
+                  message.docbillAnalyse,
               );
 
               if (hasStructuredCard) {
@@ -919,6 +944,9 @@ const ChatBubble = ({
                 </div>
               );
             })()}
+            {showAssistantKiDisclaimer && (
+              <DocbillKiDisclaimerFooter className="not-prose" />
+            )}
           </div>
         )}
         </div>

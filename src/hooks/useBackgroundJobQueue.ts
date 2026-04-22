@@ -2,8 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ChatMessage } from "@/components/ChatBubble";
 import { dbRowToChatMessage } from "@/lib/dbMessageToChatMessage";
-import { fileToBase64 } from "@/lib/fileToBase64";
 import { executeGoaeChatRequest } from "@/lib/executeGoaeChatRequest";
+import {
+  filePayloadStoredToFile,
+  jobAttachmentObjectPath,
+  storageRefsToFilePayloads,
+  uploadFilesToJobUploads,
+  type JobStorageRef,
+} from "@/lib/uploads/jobUploads";
 import {
   buildAssistantStructuredContent,
   buildUserStructuredContent,
@@ -36,13 +42,30 @@ export const MAX_CONCURRENT_BACKGROUND_JOBS = 2;
 
 export type BackgroundJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
+export type BackgroundJobExecutionSnapshot = {
+  model: string;
+  engine_type: string;
+  extra_rules: string;
+  kurzantworten?: boolean;
+  kontext_wissen?: boolean;
+  pseudonym_session_id?: string;
+  regelwerk?: "GOAE" | "EBM";
+  mode?: "A" | "B" | "C";
+};
+
 export type BackgroundJobPayload = {
   fileNames?: string[];
+  /** Persistente Pfade im Bucket `job-uploads` (Cloud-Upload). */
+  storage_refs?: JobStorageRef[];
+  /** Eingefrorene Parameter für Server-Worker. */
+  execution?: BackgroundJobExecutionSnapshot;
   assistantPreview?: string;
   guidedWorkflow?: GuidedWorkflowKind;
   guidedPhase?: "collect";
   /** Fortsetzung nach Segmentierungs-Rückfrage (Rechnungsprüfung, mehrere PDFs). */
   engine3CaseGroups?: number[][];
+  /** Optional: Gesamtzahl Rechnungen (z. B. Batch) für Fortschritt „x von y“ wenn totalCases in SSE fehlt. */
+  batchRechnungTotal?: number;
 };
 
 export type BackgroundJobRow = {
@@ -65,6 +88,10 @@ export type ConversationRunInfo = {
   isRunning: boolean;
   pipelineStep: PipelineProgressPayload | null;
   analysisStartTime: number | null;
+  /** Spec 03 §5.3 — Dateinamen für Upload-/Parsing-Fortschritt */
+  progressFileNames?: string[];
+  /** Absicherung „Rechnung x von y“ wenn SSE kein totalCases sendet */
+  batchRechnungTotal?: number;
 };
 
 type TaskSpec = {
@@ -160,6 +187,7 @@ export function useBackgroundJobQueue({
         | "engine3SegmentationProposal"
         | "analysisTimeSeconds"
         | "frageAnswer"
+        | "docbillAnalyse"
       >
     >(),
   );
@@ -277,9 +305,17 @@ export function useBackgroundJobQueue({
       const conversationId = job.conversation_id;
       const payload = job.payload ?? {};
       const fileNames = payload.fileNames ?? [];
+      const jobPayload = payload as BackgroundJobPayload;
+      const storageRefs = jobPayload.storage_refs;
+      const hasStorageFiles = Boolean(storageRefs && storageRefs.length > 0);
+      const batchRechnungTotal =
+        typeof jobPayload.batchRechnungTotal === "number" && Number.isFinite(jobPayload.batchRechnungTotal)
+          ? jobPayload.batchRechnungTotal
+          : undefined;
       const needsFiles = fileNames.length > 0;
       const filePayloads = pendingFilePayloadsRef.current.get(job.id);
-      if (needsFiles && (!filePayloads || filePayloads.length === 0)) {
+      const haveInlineFiles = Boolean(filePayloads && filePayloads.length > 0);
+      if (needsFiles && !hasStorageFiles && !haveInlineFiles) {
         await updateJobRow(job.id, {
           status: "failed",
           finished_at: new Date().toISOString(),
@@ -293,6 +329,8 @@ export function useBackgroundJobQueue({
           isRunning: false,
           pipelineStep: null,
           analysisStartTime: null,
+          progressFileNames: undefined,
+          batchRechnungTotal: undefined,
         });
         toast({
           title: "Hintergrund-Aufgabe fehlgeschlagen",
@@ -308,15 +346,52 @@ export function useBackgroundJobQueue({
       pendingFilePayloadsRef.current.delete(job.id);
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      if (!supabaseUrl || !supabaseKey) {
+      if (!supabaseUrl) {
         await updateJobRow(job.id, {
           status: "failed",
           finished_at: new Date().toISOString(),
           error: "Backend nicht verbunden.",
         });
         liveAssistantByConvRef.current.delete(conversationId);
-        patchRunState(conversationId, { isRunning: false, pipelineStep: null, analysisStartTime: null });
+        patchRunState(conversationId, {
+          isRunning: false,
+          pipelineStep: null,
+          analysisStartTime: null,
+          progressFileNames: undefined,
+          batchRechnungTotal: undefined,
+        });
+        return;
+      }
+
+      let { data: sessionData } = await supabase.auth.getSession();
+      let accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        const { data: ref } = await supabase.auth.refreshSession();
+        accessToken = ref.session?.access_token;
+      }
+      if (!accessToken) {
+        const again = await supabase.auth.getSession();
+        accessToken = again.data.session?.access_token;
+      }
+      if (!accessToken) {
+        await updateJobRow(job.id, {
+          status: "failed",
+          finished_at: new Date().toISOString(),
+          error: "Sitzung abgelaufen. Bitte neu anmelden und erneut hochladen.",
+        });
+        liveAssistantByConvRef.current.delete(conversationId);
+        patchRunState(conversationId, {
+          isRunning: false,
+          pipelineStep: null,
+          analysisStartTime: null,
+          progressFileNames: undefined,
+          batchRechnungTotal: undefined,
+        });
+        toast({
+          title: "Anmeldung nötig",
+          description: "Für Analysen mit Cloud-Dateien bitte erneut anmelden.",
+          variant: "destructive",
+        });
         return;
       }
 
@@ -345,7 +420,13 @@ export function useBackgroundJobQueue({
       patchRunState(conversationId, {
         isRunning: true,
         analysisStartTime: startTs,
-        pipelineStep: null,
+        pipelineStep: {
+          step: 1,
+          totalSteps: 6,
+          label: "Dokument wird vorbereitet…",
+        },
+        progressFileNames: fileNames.length > 0 ? fileNames : undefined,
+        batchRechnungTotal,
       });
 
       const upsertAssistantUi = (
@@ -358,9 +439,12 @@ export function useBackgroundJobQueue({
         frageAnswer?: ChatMessage["frageAnswer"],
         engine3Cases?: ChatMessage["engine3Cases"],
         engine3SegmentationProposal?: ChatMessage["engine3SegmentationProposal"],
+        docbillAnalyse?: ChatMessage["docbillAnalyse"],
       ) => {
         const prevLive = liveAssistantByConvRef.current.get(conversationId);
         const mergedFrage = frageAnswer !== undefined ? frageAnswer : prevLive?.frageAnswer;
+        const mergedDocbill =
+          docbillAnalyse !== undefined ? docbillAnalyse : prevLive?.docbillAnalyse;
         const mergedInv = invoiceData !== undefined ? invoiceData : prevLive?.invoiceResult;
         const mergedSvc = serviceBillingData !== undefined ? serviceBillingData : prevLive?.serviceBillingResult;
         const mergedE3 = engine3Data !== undefined ? engine3Data : prevLive?.engine3Result;
@@ -378,6 +462,7 @@ export function useBackgroundJobQueue({
           engine3SegmentationProposal: mergedSeg,
           ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
           ...(mergedFrage !== undefined ? { frageAnswer: mergedFrage } : {}),
+          ...(mergedDocbill !== undefined ? { docbillAnalyse: mergedDocbill } : {}),
         });
         if (activeConversationIdRef.current !== conversationId) return;
         setMessages((prev) => {
@@ -400,6 +485,7 @@ export function useBackgroundJobQueue({
                         : m.engine3SegmentationProposal,
                     ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
                     ...(frageAnswer !== undefined ? { frageAnswer } : {}),
+                    ...(docbillAnalyse !== undefined ? { docbillAnalyse } : {}),
                     kurzantwortenVorschlagStatus: m.kurzantwortenVorschlagStatus,
                   }
                 : m,
@@ -418,6 +504,7 @@ export function useBackgroundJobQueue({
               engine3SegmentationProposal,
               ...(analysisTimeSeconds != null ? { analysisTimeSeconds } : {}),
               ...(frageAnswer !== undefined ? { frageAnswer } : {}),
+              ...(docbillAnalyse !== undefined ? { docbillAnalyse } : {}),
             },
           ];
         });
@@ -425,14 +512,19 @@ export function useBackgroundJobQueue({
 
       try {
         const extra_rules = [globalSettings.default_rules, userSettings.custom_rules].filter(Boolean).join("\n\n");
-        const jobPayload = (job.payload ?? {}) as BackgroundJobPayload;
         const result = await executeGoaeChatRequest({
-          supabaseKey,
+          supabaseKey: accessToken,
           apiMessages,
-          filePayloads: filePayloads && filePayloads.length > 0 ? filePayloads : undefined,
+          filePayloads: hasStorageFiles
+            ? undefined
+            : filePayloadsSnapshot.length > 0
+              ? filePayloadsSnapshot
+              : undefined,
+          storage_file_refs: hasStorageFiles ? storageRefs : undefined,
           model: effectiveModel,
           engine_type: userSettings.engine_type ?? globalSettings.default_engine,
           extra_rules,
+          pseudonym_session_id: conversationId,
           kurzantworten: userSettings.kurzantworten === true,
           kontext_wissen: userSettings.kontext_wissen === false ? false : undefined,
           lastEngine3Result,
@@ -467,7 +559,13 @@ export function useBackgroundJobQueue({
               }),
             }).catch(() => {});
             // #endregion
-            patchRunState(conversationId, { pipelineStep: p, isRunning: true, analysisStartTime: startTs });
+            patchRunState(conversationId, {
+              pipelineStep: p,
+              isRunning: true,
+              analysisStartTime: startTs,
+              progressFileNames: fileNames.length > 0 ? fileNames : undefined,
+              batchRechnungTotal,
+            });
           },
           onStreamState: (state) => {
             upsertAssistantUi(
@@ -480,6 +578,7 @@ export function useBackgroundJobQueue({
               state.frageStructured,
               state.engine3Cases,
               state.engine3SegmentationPending ?? undefined,
+              state.docbillAnalyse,
             );
           },
           onFreeModelsExhausted: onFreeModelsExhausted,
@@ -488,7 +587,7 @@ export function useBackgroundJobQueue({
         clearTimeout(timeoutId);
         abortByJobIdRef.current.delete(job.id);
 
-        if (!result.ok) {
+        if (result.ok === false) {
           if (result.error.kind === "http") {
             if (result.error.status === 429) {
               toast({ title: "Rate Limit", description: "Zu viele Anfragen.", variant: "destructive" });
@@ -527,7 +626,13 @@ export function useBackgroundJobQueue({
             progress_total: null,
           });
           liveAssistantByConvRef.current.delete(conversationId);
-          patchRunState(conversationId, { isRunning: false, pipelineStep: null, analysisStartTime: null });
+          patchRunState(conversationId, {
+            isRunning: false,
+            pipelineStep: null,
+            analysisStartTime: null,
+            progressFileNames: undefined,
+            batchRechnungTotal: undefined,
+          });
           return;
         }
 
@@ -542,6 +647,7 @@ export function useBackgroundJobQueue({
           state.frageStructured,
           state.engine3Cases,
           state.engine3SegmentationPending ?? undefined,
+          state.docbillAnalyse,
         );
         // #region agent log
         if (state.engine3Data != null && !state.assistantContent?.trim()) {
@@ -572,13 +678,15 @@ export function useBackgroundJobQueue({
           engine3SegmentationProposal: state.engine3SegmentationPending ?? undefined,
           analysisTimeSeconds,
           frageAnswer: state.frageStructured,
+          docbillAnalyse: state.docbillAnalyse,
         });
         const hasAssistantText =
           Boolean(state.assistantContent?.trim()) ||
           Boolean(state.frageStructured) ||
           Boolean(state.engine3Data) ||
           Boolean(engine3CasesStored?.length) ||
-          Boolean(state.engine3SegmentationPending);
+          Boolean(state.engine3SegmentationPending) ||
+          Boolean(state.docbillAnalyse);
         const contentToPersist =
           state.assistantContent?.trim()
             ? state.assistantContent
@@ -590,7 +698,9 @@ export function useBackgroundJobQueue({
                   ? "[DocBill: Engine 3 – strukturiertes Ergebnis]"
                   : state.engine3SegmentationPending
                     ? "[DocBill: Engine 3 – Zuordnung offen]"
-                    : "";
+                    : state.docbillAnalyse
+                      ? "[DocBill: Pflichtanalyse]"
+                      : "";
         if (hasAssistantText || assistantStructured) {
           const savedId = await saveMessage(
             conversationId,
@@ -609,12 +719,23 @@ export function useBackgroundJobQueue({
               state.frageStructured,
               state.engine3Cases,
               state.engine3SegmentationPending ?? undefined,
+              state.docbillAnalyse,
             );
           }
         }
 
-        if (state.engine3SegmentationPending && filePayloadsSnapshot.length > 0) {
-          pendingEngine3FilesByConversationRef.current.set(conversationId, filePayloadsSnapshot);
+        if (state.engine3SegmentationPending) {
+          let snap = filePayloadsSnapshot;
+          if (snap.length === 0 && hasStorageFiles && storageRefs && storageRefs.length > 0) {
+            try {
+              snap = await storageRefsToFilePayloads(storageRefs);
+            } catch (e) {
+              console.error("storageRefsToFilePayloads", e);
+            }
+          }
+          if (snap.length > 0) {
+            pendingEngine3FilesByConversationRef.current.set(conversationId, snap);
+          }
         }
         if (!state.engine3SegmentationPending && (engine3CasesStored?.length || state.engine3Data)) {
           pendingEngine3FilesByConversationRef.current.delete(conversationId);
@@ -627,7 +748,8 @@ export function useBackgroundJobQueue({
           (state.serviceBillingData ? "Leistungsvorschläge erstellt" : "") ||
           (engine3CasesStored ? "Engine 3: mehrere Vorgänge" : "") ||
           (state.engine3Data ? "Engine 3 abgeschlossen" : "") ||
-          (state.engine3SegmentationPending ? "Engine 3: Zuordnung offen" : "");
+          (state.engine3SegmentationPending ? "Engine 3: Zuordnung offen" : "") ||
+          (state.docbillAnalyse ? "Pflichtanalyse" : "");
 
         const sseFailed = assistantContentHasSseError(state.assistantContent);
         const hasDeliverable = sseAccumStateHasDeliverable(state);
@@ -654,7 +776,7 @@ export function useBackgroundJobQueue({
             progress_label: null,
             progress_step: null,
             progress_total: null,
-            payload: mergePayload(payload, { assistantPreview: preview }) as unknown as Record<string, unknown>,
+            payload: mergePayload(payload, { assistantPreview: preview }) as unknown as Json,
           })
           .eq("id", job.id);
 
@@ -726,7 +848,13 @@ export function useBackgroundJobQueue({
           progress_total: null,
         });
         liveAssistantByConvRef.current.delete(conversationId);
-        patchRunState(conversationId, { isRunning: false, pipelineStep: null, analysisStartTime: null });
+        patchRunState(conversationId, {
+          isRunning: false,
+          pipelineStep: null,
+          analysisStartTime: null,
+          progressFileNames: undefined,
+          batchRechnungTotal: undefined,
+        });
       }
     },
     [
@@ -841,7 +969,7 @@ export function useBackgroundJobQueue({
         }
 
         if (!convId) {
-          toast({ title: "Fehler", description: "Gespräch konnte nicht angelegt werden.", variant: "destructive" });
+          /* Fehler-Toast liefert createConversation (z. B. RLS, fehlende Organisation) */
           break;
         }
 
@@ -849,17 +977,92 @@ export function useBackgroundJobQueue({
           setActiveConversationId(convId);
         }
 
-        const filePayloads =
-          spec.files && spec.files.length > 0
-            ? await Promise.all(
-                spec.files.map(async (f) => ({
-                  name: f.name,
-                  type: f.type,
-                  data: await fileToBase64(f),
-                })),
-              )
-            : [];
-        const userStructured = buildUserStructuredContent(filePayloads);
+        sortCursor += 1;
+        const jobPayloadBase: BackgroundJobPayload = {
+          fileNames: spec.files?.map((f) => f.name) ?? [],
+          ...(spec.guided?.workflow && spec.guided?.phase
+            ? { guidedWorkflow: spec.guided.workflow, guidedPhase: spec.guided.phase }
+            : {}),
+        };
+
+        const { data: jobRow, error: insErr } = await supabase
+          .from("background_jobs")
+          .insert({
+            user_id: user.id,
+            conversation_id: convId,
+            status: "queued",
+            sort_order: sortCursor,
+            payload: jobPayloadBase as unknown as Json,
+          })
+          .select()
+          .single();
+
+        if (insErr || !jobRow) {
+          console.error(insErr);
+          toast({ title: "Fehler", description: "Aufgabe konnte nicht eingereiht werden.", variant: "destructive" });
+          break;
+        }
+
+        const jobId = jobRow.id as string;
+        let userStructured = null as ReturnType<typeof buildUserStructuredContent>;
+
+        if (spec.files && spec.files.length > 0) {
+          const paths = spec.files.map((f) => jobAttachmentObjectPath(user.id, jobId, f));
+          try {
+            await uploadFilesToJobUploads(paths, spec.files);
+          } catch (e) {
+            console.error(e);
+            await supabase
+              .from("background_jobs")
+              .update({
+                status: "failed",
+                finished_at: new Date().toISOString(),
+                error: "Dateiupload in den Cloud-Speicher fehlgeschlagen.",
+                progress_label: null,
+                progress_step: null,
+                progress_total: null,
+              })
+              .eq("id", jobId);
+            toast({
+              title: "Upload fehlgeschlagen",
+              description: "Die Dateien konnten nicht im Cloud-Speicher abgelegt werden.",
+              variant: "destructive",
+            });
+            break;
+          }
+          const storage_refs: JobStorageRef[] = paths.map((path, fi) => ({
+            path,
+            name: spec.files![fi].name,
+            content_type: spec.files![fi].type || "application/octet-stream",
+            size: spec.files![fi].size,
+          }));
+          const extra_rules_enqueue = [globalSettings.default_rules, userSettings.custom_rules]
+            .filter(Boolean)
+            .join("\n\n");
+          const execution: BackgroundJobExecutionSnapshot = {
+            model: effectiveModel,
+            engine_type: userSettings.engine_type ?? globalSettings.default_engine,
+            extra_rules: extra_rules_enqueue,
+            kurzantworten: userSettings.kurzantworten === true,
+            kontext_wissen: userSettings.kontext_wissen !== false,
+            pseudonym_session_id: convId,
+          };
+          const { error: payErr } = await supabase
+            .from("background_jobs")
+            .update({
+              payload: { ...jobPayloadBase, storage_refs, execution } as unknown as Json,
+            })
+            .eq("id", jobId);
+          if (payErr) console.error(payErr);
+          userStructured = buildUserStructuredContent(
+            storage_refs.map((r) => ({
+              name: r.name,
+              type: r.content_type,
+              storage_path: r.path,
+            })),
+          );
+        }
+
         const savedUserId = await saveMessage(
           convId,
           "user",
@@ -885,35 +1088,6 @@ export function useBackgroundJobQueue({
           await updateTitle(convId, listTitle);
         }
         if (spec.files?.[0]) await updateSourceFilename(convId, spec.files[0].name);
-
-        sortCursor += 1;
-        const jobPayload: BackgroundJobPayload = {
-          fileNames: spec.files?.map((f) => f.name) ?? [],
-          ...(spec.guided?.workflow && spec.guided?.phase
-            ? { guidedWorkflow: spec.guided.workflow, guidedPhase: spec.guided.phase }
-            : {}),
-        };
-
-        const { data: jobRow, error: insErr } = await supabase
-          .from("background_jobs")
-          .insert({
-            user_id: user.id,
-            conversation_id: convId,
-            status: "queued",
-            sort_order: sortCursor,
-            payload: jobPayload as unknown as Record<string, unknown>,
-          })
-          .select()
-          .single();
-
-        if (insErr || !jobRow) {
-          console.error(insErr);
-          toast({ title: "Fehler", description: "Aufgabe konnte nicht eingereiht werden.", variant: "destructive" });
-          break;
-        }
-
-        const jobId = jobRow.id as string;
-        if (filePayloads.length > 0) pendingFilePayloadsRef.current.set(jobId, filePayloads);
       }
 
       await fetchJobs();
@@ -935,6 +1109,9 @@ export function useBackgroundJobQueue({
       fetchJobs,
       fetchConversations,
       drainQueue,
+      effectiveModel,
+      userSettings,
+      globalSettings,
     ],
   );
 
@@ -961,7 +1138,13 @@ export function useBackgroundJobQueue({
           .eq("id", j.id);
       }
     }
-    patchRunState(aid, { isRunning: false, pipelineStep: null, analysisStartTime: null });
+    patchRunState(aid, {
+      isRunning: false,
+      pipelineStep: null,
+      analysisStartTime: null,
+      progressFileNames: undefined,
+      batchRechnungTotal: undefined,
+    });
     await fetchJobs();
   }, [fetchJobs, patchRunState]);
 
@@ -1040,6 +1223,11 @@ export function useBackgroundJobQueue({
         .maybeSingle();
       const sortCursor = ((maxRow?.sort_order as number | undefined) ?? 0) + 1;
 
+      const jobPayloadBase: BackgroundJobPayload = {
+        fileNames: files.map((f) => f.name),
+        engine3CaseGroups: caseGroups,
+      };
+
       const { data: jobRow, error: insErr } = await supabase
         .from("background_jobs")
         .insert({
@@ -1047,10 +1235,7 @@ export function useBackgroundJobQueue({
           conversation_id: conversationId,
           status: "queued",
           sort_order: sortCursor,
-          payload: {
-            fileNames: files.map((f) => f.name),
-            engine3CaseGroups: caseGroups,
-          } as unknown as Record<string, unknown>,
+          payload: jobPayloadBase as unknown as Json,
         })
         .select()
         .single();
@@ -1062,17 +1247,72 @@ export function useBackgroundJobQueue({
       }
 
       const jobId = jobRow.id as string;
-      pendingFilePayloadsRef.current.set(jobId, files);
+      const uploadable = files.map(filePayloadStoredToFile);
+      const paths = uploadable.map((f) => jobAttachmentObjectPath(user.id, jobId, f));
+      try {
+        await uploadFilesToJobUploads(paths, uploadable);
+      } catch (e) {
+        console.error(e);
+        await supabase
+          .from("background_jobs")
+          .update({
+            status: "failed",
+            finished_at: new Date().toISOString(),
+            error: "Dateiupload in den Cloud-Speicher fehlgeschlagen.",
+          })
+          .eq("id", jobId);
+        toast({
+          title: "Upload fehlgeschlagen",
+          description: "Die Dateien konnten nicht im Cloud-Speicher abgelegt werden.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const storage_refs: JobStorageRef[] = paths.map((path, fi) => ({
+        path,
+        name: uploadable[fi].name,
+        content_type: uploadable[fi].type || "application/octet-stream",
+        size: uploadable[fi].size,
+      }));
+      const extra_rules_e3 = [globalSettings.default_rules, userSettings.custom_rules].filter(Boolean).join("\n\n");
+      const execution: BackgroundJobExecutionSnapshot = {
+        model: effectiveModel,
+        engine_type: userSettings.engine_type ?? globalSettings.default_engine,
+        extra_rules: extra_rules_e3,
+        kurzantworten: userSettings.kurzantworten === true,
+        kontext_wissen: userSettings.kontext_wissen !== false,
+        pseudonym_session_id: conversationId,
+      };
+      await supabase
+        .from("background_jobs")
+        .update({
+          payload: { ...jobPayloadBase, storage_refs, execution } as unknown as Json,
+        })
+        .eq("id", jobId);
       await fetchJobs();
       void drainQueue();
     },
-    [user, toast, hasBlockingJobForConversation, fetchJobs, drainQueue],
+    [
+      user,
+      toast,
+      hasBlockingJobForConversation,
+      fetchJobs,
+      drainQueue,
+      effectiveModel,
+      userSettings,
+      globalSettings,
+    ],
   );
 
   const mergeMessagesWithLiveStream = useCallback(
     async (conversationId: string): Promise<ChatMessage[]> => {
       const db = await loadMessages(conversationId);
-      const base: ChatMessage[] = db.map((m) => dbRowToChatMessage(m));
+      const base: ChatMessage[] = db.map((m) =>
+        dbRowToChatMessage({
+          ...m,
+          structured_content: m.structured_content as Json | null | undefined,
+        }),
+      );
       const live = liveAssistantByConvRef.current.get(conversationId);
       if (
         !live ||
@@ -1082,7 +1322,8 @@ export function useBackgroundJobQueue({
           !live.engine3Result &&
           !live.engine3Cases?.length &&
           !live.engine3SegmentationProposal &&
-          !live.frageAnswer)
+          !live.frageAnswer &&
+          !live.docbillAnalyse)
       ) {
         return base;
       }
@@ -1098,6 +1339,7 @@ export function useBackgroundJobQueue({
         engine3SegmentationProposal: live.engine3SegmentationProposal,
         analysisTimeSeconds: live.analysisTimeSeconds,
         frageAnswer: live.frageAnswer,
+        docbillAnalyse: live.docbillAnalyse,
         kurzantwortenVorschlagStatus:
           last?.role === "assistant" ? last.kurzantwortenVorschlagStatus : undefined,
       };

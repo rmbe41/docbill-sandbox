@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "jsr:@supabase/supabase-js@2/cors";
 
 import { buildChatSelectiveCatalogMarkdown } from "./goae-catalog-json.ts";
+import { buildChatSelectiveEbmCatalogMarkdown } from "./ebm-catalog-json.ts";
 import { GOAE_PARAGRAPHEN } from "./goae-paragraphen.ts";
 import {
   GOAE_ABSCHNITTE,
@@ -24,7 +25,7 @@ import { classifyByHeuristics, classifyIntent } from "./intent-classifier.ts";
 import { inferWelcomeStickyWorkflow } from "./infer-welcome-sticky.ts";
 import { buildFallbackModels, isRetryableModelStatus, resolveModel, isFreeModel, getReasoningConfigForStream } from "./model-resolver.ts";
 import {
-  loadRelevantAdminContext,
+  loadKontextAdminUndOrganisation,
   buildPipelineQuery,
   buildFrageAdminRagQuery,
   enrichFrageRagQuery,
@@ -37,6 +38,81 @@ import {
   normalizeFrageAnswerParsed,
   type FrageAnswerStructured,
 } from "./frage-answer-format.ts";
+import {
+  buildAnalyseFragemodus,
+  buildAnalyseFromEbmPositions,
+  encodeDocbillAnalyseSse,
+  DOCBILL_KI_DISCLAIMER,
+  type DocbillAnalyseV1,
+} from "./analyse-envelope.ts";
+import { detectPadFormat, parsePadFile, UNKNOWN_PAD_MESSAGE } from "./pad/pad-parser.ts";
+import {
+  regenerateSteigerungsBegruendungOne,
+  type SteigerungBegruendungItem,
+} from "./pipeline/steigerungs-begruendung-llm.ts";
+import type { MedizinischeAnalyse } from "./pipeline/types.ts";
+import { getReferenceCatalogHealth } from "./reference-catalog-health.ts";
+import {
+  getPseudonymRequestContext,
+  runWithPseudonymRequestContext,
+} from "./privacy/pseudonym-request-context.ts";
+import { pseudonymizeOpenRouterMessages } from "./privacy/pseudonym-openrouter-messages.ts";
+import { loadPseudonymMap } from "./privacy/pseudonym-redis.ts";
+import { reidentifyText } from "./privacy/pseudonymize-bridge.ts";
+import { tryHydrateWorkerBackgroundJob } from "./worker-job-hydrate.ts";
+import { loadFilesFromStorageRefs, type StorageFileRef } from "./storage-job-files.ts";
+
+function normalizeRegelwerk(raw: unknown): "GOAE" | "EBM" {
+  const s = String(raw ?? "GOAE").trim().toUpperCase();
+  if (s === "EBM" || s === "GKV") return "EBM";
+  return "GOAE";
+}
+
+const REGELWERK_EBM_HINT = `
+
+### Regelwerk: EBM (GKV / KBV)
+Es gilt der **EBM** mit **GOPs** (fünfstellig) aus dem gelieferten Katalogblock. Keine GOÄ-Ziffern als Primärantwort, außer der Nutzer vergleicht oder fragt ausdrücklich nach GOÄ.
+`;
+
+function normalizeAnalyseModus(
+  raw: unknown,
+  intent: "rechnung_pruefen" | "leistungen_abrechnen" | "frage",
+): "A" | "B" | "C" {
+  const s = String(raw ?? "").trim().toUpperCase();
+  if (s === "A" || s === "B" || s === "C") return s;
+  if (intent === "leistungen_abrechnen") return "B";
+  if (intent === "rechnung_pruefen") return "A";
+  return "C";
+}
+
+function decodeBase64FileData(data: string): Uint8Array {
+  const b64 = data.includes(",") ? (data.split(",")[1] ?? data) : data;
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+function streamMarkdownWithDocbillAnalyse(analyse: DocbillAnalyseV1, markdown: string): ReadableStream {
+  const encoder = new TextEncoder();
+  const chunkSize = 120;
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(encodeDocbillAnalyseSse(analyse)));
+      for (let i = 0; i < markdown.length; i += chunkSize) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: markdown.slice(i, i + chunkSize) } }],
+            })}\n\n`,
+          ),
+        );
+      }
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // System-Prompt: reiner Frage-/Erklär-Modus (ohne Dokument-Upload, kein Rechnungsvorschlag)
@@ -131,10 +207,17 @@ ${formatBlock}
 Du bist ein allgemeiner Assistenz-Modus **ohne** mitgelieferten DocBill-GOÄ-Kontext. Antworte **auf Deutsch**.`;
 }
 
-function buildFrageGoaeKnowledgeBlock(
+function buildFrageRegelwerkKnowledgeBlock(
+  regelwerk: "GOAE" | "EBM",
   messages: { role: string; content: unknown }[],
   catalogMaxLines: number,
 ): string {
+  if (regelwerk === "EBM") {
+    const ebmMd = buildChatSelectiveEbmCatalogMarkdown(messages, catalogMaxLines);
+    return `DEIN EBM-WISSEN:
+
+${ebmMd}`;
+  }
   const goaeKatalogMarkdown = buildChatSelectiveCatalogMarkdown(messages, catalogMaxLines);
   return `DEIN GOÄ-WISSEN:
 
@@ -158,9 +241,14 @@ function buildFrageSystemContent(
   outputMode: "json" | "markdown_stream",
   catalogMaxLines = 100,
   kontextWissenEnabled = true,
+  regelwerk: "GOAE" | "EBM" = "GOAE",
 ): string {
   if (!kontextWissenEnabled) {
     let systemContent = buildFrageSystemPromptIntroNoKontext(outputMode);
+    if (regelwerk === "EBM") {
+      systemContent +=
+        "\n\n**Regelwerk EBM:** Ohne eingebetteten DocBill-EBM-Katalog keine konkreten GOP- oder Euro-Angaben aus der offiziellen Datei begründen.";
+    }
     if (extraRules?.trim()) {
       systemContent += `\n\n## ZUSÄTZLICHE REGELN (vom Administrator/Nutzer konfiguriert):\n${extraRules.trim()}`;
     }
@@ -170,9 +258,10 @@ function buildFrageSystemContent(
     role: m.role,
     content: m.content,
   }));
-  const intro = buildFrageSystemPromptIntro(outputMode);
+  let intro = buildFrageSystemPromptIntro(outputMode);
+  if (regelwerk === "EBM") intro += REGELWERK_EBM_HINT;
   const adminTrim = adminContext.trim();
-  const knowledge = buildFrageGoaeKnowledgeBlock(ambiguous, catalogMaxLines);
+  const knowledge = buildFrageRegelwerkKnowledgeBlock(regelwerk, ambiguous, catalogMaxLines);
   let systemContent = intro;
   if (adminTrim) {
     systemContent += `\n\n${adminTrim}`;
@@ -184,14 +273,25 @@ function buildFrageSystemContent(
   return systemContent;
 }
 
-function synthesizeFrageSseStream(structured: FrageAnswerStructured, markdown: string): ReadableStream {
+function synthesizeFrageSseStream(
+  structured: FrageAnswerStructured,
+  markdown: string,
+  analyseCtx: { mode: "A" | "B" | "C"; regelwerk: "GOAE" | "EBM" },
+): ReadableStream {
   const encoder = new TextEncoder();
   const chunkSize = 120;
+  const analyse = buildAnalyseFragemodus(
+    analyseCtx.mode,
+    analyseCtx.regelwerk,
+    structured.kurzantwort,
+    structured.vorschlaege,
+  );
   return new ReadableStream({
     start(controller) {
       controller.enqueue(
         encoder.encode(`data: ${JSON.stringify({ type: "frage_structured", data: structured })}\n\n`),
       );
+      controller.enqueue(encoder.encode(encodeDocbillAnalyseSse(analyse)));
       for (let i = 0; i < markdown.length; i += chunkSize) {
         controller.enqueue(
           encoder.encode(
@@ -214,9 +314,14 @@ async function tryFrageStructuredCompletion(
   reasoningConfig: ReturnType<typeof getReasoningConfigForStream>,
   maxTokens?: number,
 ): Promise<FrageAnswerStructured | null> {
+  const ctx = getPseudonymRequestContext();
+  const messagesForApi = ctx
+    ? await pseudonymizeOpenRouterMessages([...apiMessages], ctx)
+    : apiMessages;
+
   const body: Record<string, unknown> = {
     model: modelTry,
-    messages: apiMessages,
+    messages: messagesForApi,
     stream: false,
     response_format: { type: "json_object" },
   };
@@ -235,8 +340,13 @@ async function tryFrageStructuredCompletion(
   if (!response.ok) return null;
 
   const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data.choices?.[0]?.message?.content;
+  let content = data.choices?.[0]?.message?.content;
   if (typeof content !== "string") return null;
+
+  if (ctx) {
+    const map = await loadPseudonymMap(ctx.sessionId);
+    if (map?.mappings.length) content = reidentifyText(content, map);
+  }
 
   let parsed: Record<string, unknown>;
   try {
@@ -348,6 +458,8 @@ async function handleChatMode(
   guidedCollectWorkflow?: GuidedCollectWorkflow,
   catalogMaxLines = 100,
   kontextWissenEnabled = true,
+  regelwerk: "GOAE" | "EBM" = "GOAE",
+  analyseMode: "A" | "B" | "C" = "C",
 ): Promise<Response> {
   const collectExtra = guidedCollectWorkflow ? guidedCollectSystemExtra(guidedCollectWorkflow) : "";
   const systemJson =
@@ -358,6 +470,7 @@ async function handleChatMode(
       "json",
       catalogMaxLines,
       kontextWissenEnabled,
+      regelwerk,
     ) + collectExtra;
   const systemStream =
     buildFrageSystemContent(
@@ -367,6 +480,7 @@ async function handleChatMode(
       "markdown_stream",
       catalogMaxLines,
       kontextWissenEnabled,
+      regelwerk,
     ) + collectExtra;
 
   // #region agent log
@@ -415,17 +529,21 @@ async function handleChatMode(
         });
       }
       // #endregion
-      return new Response(synthesizeFrageSseStream(structured, md), {
+      return new Response(synthesizeFrageSseStream(structured, md, { mode: analyseMode, regelwerk }), {
         headers: { "Content-Type": "text/event-stream" },
       });
     }
   }
 
   for (let i = 0; i < modelsToTry.length; i++) {
+    const ctx = getPseudonymRequestContext();
+    const streamMessages = ctx
+      ? await pseudonymizeOpenRouterMessages([...apiMessagesStream], ctx)
+      : apiMessagesStream;
     const body: Record<string, unknown> = {
       model: modelsToTry[i],
-      messages: apiMessagesStream,
-      stream: true,
+      messages: streamMessages,
+      stream: ctx ? false : true,
     };
     if (reasoningConfig) body.reasoning = reasoningConfig;
     const response = await fetch(
@@ -441,6 +559,40 @@ async function handleChatMode(
     );
 
     if (response.ok) {
+      if (ctx) {
+        const data = (await response.json()) as { choices?: { message?: { content?: unknown } }[] };
+        let text = "";
+        const c = data.choices?.[0]?.message?.content;
+        if (typeof c === "string") text = c;
+        else if (Array.isArray(c)) {
+          text = c
+            .filter((p: { type?: string }) => p?.type === "text")
+            .map((p: { text?: string }) => p.text ?? "")
+            .join("\n");
+        }
+        const map = await loadPseudonymMap(ctx.sessionId);
+        if (map?.mappings.length) text = reidentifyText(text, map);
+        const encoder = new TextEncoder();
+        const chunkSize = 120;
+        const stream = new ReadableStream({
+          start(controller) {
+            for (let j = 0; j < text.length; j += chunkSize) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    choices: [{ delta: { content: text.slice(j, j + chunkSize) } }],
+                  })}\n\n`,
+                ),
+              );
+            }
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
       return new Response(response.body, {
         headers: { "Content-Type": "text/event-stream" },
       });
@@ -538,21 +690,23 @@ serve(async (req) => {
       "[DOCBILL_INSTRUMENTATION] hypothesisId=H_req_start location=goae-chat/serve message=inbound_request",
     );
     console.error("DOCBILL_INSTRUMENTATION_84BF6E goae-chat request");
-    const {
-      messages,
-      files,
-      model,
-      extra_rules,
-      engine_type,
-      last_invoice_result,
-      last_service_result,
-      last_engine3_result,
-      guided_workflow,
-      guided_phase,
-      kurzantworten: kurzantwortenRaw,
-      kontext_wissen: kontext_wissen_raw,
-      engine3_case_groups,
-    } = await req.json();
+    const catalogHealth = getReferenceCatalogHealth();
+    if (!catalogHealth.ok) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          msg: "reference_catalog_invalid",
+          errors: catalogHealth.errors,
+        }),
+      );
+      return new Response(
+        JSON.stringify({
+          error: "Referenzkataloge (GOÄ/EBM) sind beschädigt oder unvollständig.",
+        }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    const body = (await req.json()) as Record<string, unknown>;
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
     const keyExists = typeof OPENROUTER_API_KEY === "string";
@@ -571,13 +725,216 @@ serve(async (req) => {
       );
     }
 
+    const workerHydrated = await tryHydrateWorkerBackgroundJob(req, body);
+    const workerJobUserId = workerHydrated.ok ? workerHydrated.jobUserId : null;
+
+    const authHeader = req.headers.get("Authorization");
+    let organisationKontextId: string | null = null;
+    let authUid: string | null = null;
+    const sbUrlAuth = Deno.env.get("SUPABASE_URL");
+    const sbAnon = Deno.env.get("SUPABASE_ANON_KEY");
+    const sbService = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (workerJobUserId && sbUrlAuth && sbService) {
+      authUid = workerJobUserId;
+      const r = await fetch(
+        `${sbUrlAuth}/rest/v1/organisation_members?user_id=eq.${authUid}&select=organisation_id`,
+        { headers: { apikey: sbService, Authorization: `Bearer ${sbService}` } },
+      );
+      if (r.ok) {
+        const rows = (await r.json()) as { organisation_id?: string }[];
+        const first = Array.isArray(rows) ? rows[0] : null;
+        if (first?.organisation_id) organisationKontextId = first.organisation_id;
+      }
+    } else if (authHeader?.startsWith("Bearer ") && sbUrlAuth && sbAnon) {
+      const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+      const sbAuth = createClient(sbUrlAuth, sbAnon, { global: { headers: { Authorization: authHeader } } });
+      const { data: u } = await sbAuth.auth.getUser();
+      const uid = u.user?.id ?? null;
+      authUid = uid;
+      if (uid && sbService) {
+        const r = await fetch(
+          `${sbUrlAuth}/rest/v1/organisation_members?user_id=eq.${uid}&select=organisation_id`,
+          { headers: { apikey: sbService, Authorization: `Bearer ${sbService}` } },
+        );
+        if (r.ok) {
+          const rows = (await r.json()) as { organisation_id?: string }[];
+          const first = Array.isArray(rows) ? rows[0] : null;
+          if (first?.organisation_id) organisationKontextId = first.organisation_id;
+        }
+      }
+    }
+
+    const {
+      messages,
+      model,
+      extra_rules,
+      engine_type,
+      last_invoice_result,
+      last_service_result,
+      last_engine3_result,
+      guided_workflow,
+      guided_phase,
+      kurzantworten: kurzantwortenRaw,
+      kontext_wissen: kontext_wissen_raw,
+      engine3_case_groups,
+      regelwerk: regelwerk_raw,
+      mode: mode_raw,
+    } = body;
+
+    type FilePayload = { name: string; type: string; data: string };
+    const filesFromBody = body.files;
+    let effectiveFiles: FilePayload[] = Array.isArray(filesFromBody)
+      ? (filesFromBody as unknown[]).filter((x): x is FilePayload =>
+        x != null && typeof x === "object" && typeof (x as FilePayload).data === "string"
+      )
+      : [];
+
+    const storageRaw = body.storage_file_refs;
+    if (Array.isArray(storageRaw) && storageRaw.length > 0) {
+      if (!authUid || !sbUrlAuth || !sbService) {
+        return new Response(JSON.stringify({ error: "Anmeldung erforderlich für Cloud-Speicher-Dateien." }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      try {
+        const loaded = await loadFilesFromStorageRefs(
+          sbUrlAuth,
+          sbService,
+          storageRaw as StorageFileRef[],
+          `${authUid}/`,
+        );
+        effectiveFiles = [...effectiveFiles, ...loaded];
+      } catch {
+        return new Response(JSON.stringify({ error: "Download aus dem Cloud-Speicher fehlgeschlagen." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    const pseudonymSessionIdFromBody =
+      typeof body.pseudonym_session_id === "string" && body.pseudonym_session_id.trim().length > 0
+        ? body.pseudonym_session_id.trim()
+        : undefined;
+    const pseudoSid = pseudonymSessionIdFromBody ?? crypto.randomUUID();
+
+    return await runWithPseudonymRequestContext(
+      {
+        sessionId: pseudoSid,
+        apiKey: OPENROUTER_API_KEY.trim(),
+        model: resolveModel(model || "openrouter/free"),
+      },
+      async () => {
+    const steigerungRegenRaw = body.steigerung_begruendung_regenerate;
+    if (steigerungRegenRaw && typeof steigerungRegenRaw === "object" && !Array.isArray(steigerungRegenRaw)) {
+      const sr = steigerungRegenRaw as Record<string, unknown>;
+      const id = typeof sr.id === "string" ? sr.id.trim() : "";
+      const ziffer = typeof sr.ziffer === "string" ? sr.ziffer.trim() : "";
+      const bezeichnung = typeof sr.bezeichnung === "string" ? sr.bezeichnung.trim() : "";
+      const leistung = typeof sr.leistung === "string" ? sr.leistung.trim() : "";
+      const faktor = typeof sr.faktor === "number" && Number.isFinite(sr.faktor) ? sr.faktor : NaN;
+      const schwellenfaktor =
+        typeof sr.schwellenfaktor === "number" && Number.isFinite(sr.schwellenfaktor)
+          ? sr.schwellenfaktor
+          : NaN;
+      const hoechstfaktor =
+        typeof sr.hoechstfaktor === "number" && Number.isFinite(sr.hoechstfaktor) ? sr.hoechstfaktor : NaN;
+      const quelleBeschreibung =
+        typeof sr.quelle_beschreibung === "string" ? sr.quelle_beschreibung.trim() : undefined;
+      const previousText = typeof sr.previous_text === "string" ? sr.previous_text : undefined;
+      const kontextRegen = body.kontext_wissen !== false;
+
+      if (!id || !ziffer || !leistung || !Number.isFinite(faktor)) {
+        return new Response(JSON.stringify({ error: "Ungültige Anfrage (Steigerungsbegründung)." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const item: SteigerungBegruendungItem = {
+        id,
+        ziffer,
+        bezeichnung: bezeichnung || ziffer,
+        faktor,
+        schwellenfaktor: Number.isFinite(schwellenfaktor) ? schwellenfaktor : 2.3,
+        hoechstfaktor: Number.isFinite(hoechstfaktor) ? hoechstfaktor : 3.5,
+        leistung,
+        ...(quelleBeschreibung ? { quelleBeschreibung } : {}),
+      };
+      const analyse: MedizinischeAnalyse = {
+        diagnosen: [],
+        behandlungen: [],
+        klinischerKontext: typeof sr.klinischer_kontext === "string" ? sr.klinischer_kontext : "",
+        fachgebiet: typeof sr.fachgebiet === "string" ? sr.fachgebiet.trim() : "",
+      };
+      const regenModel = typeof body.model === "string" && body.model.trim() ? body.model.trim() : "openrouter/free";
+      const text = await regenerateSteigerungsBegruendungOne(item, analyse, OPENROUTER_API_KEY, regenModel, {
+        previousText: previousText ?? undefined,
+        kontextWissenEnabled: kontextRegen,
+      });
+      if (!text) {
+        return new Response(JSON.stringify({ error: "Keine Begründung erhalten." }), {
+          status: 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ begruendung: text }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const requestedModel = model || "openrouter/free";
     const resolvedModel = resolveModel(requestedModel);
-    const hasFiles = files && files.length > 0;
+    const hasFiles = effectiveFiles.length > 0;
     const kurzantworten = kurzantwortenRaw === true;
     /** Default an (alte Clients / Feld fehlt). */
     const kontextWissenEnabled = kontext_wissen_raw !== false;
+    const regelwerk = normalizeRegelwerk(regelwerk_raw);
     const userMessage = (messages?.[messages.length - 1]?.content as string) || "";
+
+    if (hasFiles && effectiveFiles[0] && typeof effectiveFiles[0].data === "string") {
+      try {
+        const buf = decodeBase64FileData(effectiveFiles[0].data);
+        const padFmt = detectPadFormat(buf);
+        if (padFmt) {
+          const parsedPad = parsePadFile(buf, padFmt);
+          if (parsedPad.positionen.length === 0) {
+            return new Response(JSON.stringify({ error: UNKNOWN_PAD_MESSAGE }), {
+              status: 400,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          const modePad = normalizeAnalyseModus(mode_raw, "rechnung_pruefen");
+          const analysePad = buildAnalyseFromEbmPositions({
+            mode: modePad,
+            gops: parsedPad.positionen.map((p) => ({
+              gop: p.ziffer,
+              einzelbetrag: p.einzelbetrag,
+            })),
+          });
+          const md =
+            `**PAD (${parsedPad.format})** — ${parsedPad.positionen.length} Position(en) erkannt.\n\n` +
+            DOCBILL_KI_DISCLAIMER +
+            "\n\n";
+          const padResp = new Response(streamMarkdownWithDocbillAnalyse(analysePad, md), {
+            headers: { "Content-Type": "text/event-stream" },
+          });
+          const padHeaders = new Headers(padResp.headers);
+          for (const [key, value] of Object.entries(corsHeaders)) padHeaders.set(key, value);
+          return new Response(padResp.body, { status: padResp.status, headers: padHeaders });
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("nicht unterstützt") || msg === UNKNOWN_PAD_MESSAGE) {
+          return new Response(JSON.stringify({ error: UNKNOWN_PAD_MESSAGE }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
 
     const lastResult: LastResultContext | undefined =
       last_invoice_result || last_service_result || last_engine3_result
@@ -608,9 +965,12 @@ serve(async (req) => {
           );
           if (structured) {
             const md = frageAnswerToMarkdown(structured);
-            const synth = new Response(synthesizeFrageSseStream(structured, md), {
-              headers: { "Content-Type": "text/event-stream" },
-            });
+            const synth = new Response(
+              synthesizeFrageSseStream(structured, md, { mode: "C", regelwerk }),
+              {
+                headers: { "Content-Type": "text/event-stream" },
+              },
+            );
             const h = new Headers(synth.headers);
             for (const [key, value] of Object.entries(corsHeaders)) h.set(key, value);
             return new Response(synth.body, { status: synth.status, headers: h });
@@ -620,7 +980,7 @@ serve(async (req) => {
       const directResp = await runDirectModelStream(
         {
           messages: msgs,
-          files: hasFiles ? files : undefined,
+          files: hasFiles ? effectiveFiles : undefined,
           model: resolvedModel,
           extraRules: extra_rules,
           preferShortMarkdown: kurzantworten,
@@ -642,7 +1002,10 @@ serve(async (req) => {
       const fullQuery = buildPipelineQuery(userMessage, undefined, lastResult);
       const mergeQuery = enrichFrageRagQuery(buildFrageAdminRagQuery(messages, userMessage, fullQuery));
       const vectorQuery = enrichFrageRagQuery(userMessage.trim() || mergeQuery);
-      const adminContext = await loadRelevantAdminContext(mergeQuery, OPENROUTER_API_KEY, { vectorQuery });
+      const adminContext = await loadKontextAdminUndOrganisation(mergeQuery, OPENROUTER_API_KEY, {
+        vectorQuery,
+        organisationKontextId: kontextWissenEnabled ? organisationKontextId : null,
+      });
       const msgs = (messages ?? []) as { role: string; content: string }[];
       const userTail = msgs.map((m) => ({ role: m.role, content: m.content }));
       if (kurzantworten && !hasFiles) {
@@ -665,9 +1028,12 @@ serve(async (req) => {
           );
           if (structured) {
             const md = frageAnswerToMarkdown(structured);
-            const synth = new Response(synthesizeFrageSseStream(structured, md), {
-              headers: { "Content-Type": "text/event-stream" },
-            });
+            const synth = new Response(
+              synthesizeFrageSseStream(structured, md, { mode: "C", regelwerk }),
+              {
+                headers: { "Content-Type": "text/event-stream" },
+              },
+            );
             const h = new Headers(synth.headers);
             for (const [key, value] of Object.entries(corsHeaders)) h.set(key, value);
             return new Response(synth.body, { status: synth.status, headers: h });
@@ -677,7 +1043,7 @@ serve(async (req) => {
       const directLocalResp = await runDirectLocalModelStream(
         {
           messages: msgs,
-          files: hasFiles ? files : undefined,
+          files: hasFiles ? effectiveFiles : undefined,
           model: resolvedModel,
           extraRules: extra_rules,
           adminContext,
@@ -775,7 +1141,10 @@ serve(async (req) => {
         }).catch(() => {});
       }
       // #endregion
-      return loadRelevantAdminContext(mergeQuery, OPENROUTER_API_KEY, { vectorQuery });
+      return loadKontextAdminUndOrganisation(mergeQuery, OPENROUTER_API_KEY, {
+        vectorQuery,
+        organisationKontextId: kontextWissenEnabled ? organisationKontextId : null,
+      });
     };
 
     const guidedWorkflowNorm: GuidedCollectWorkflow | undefined =
@@ -797,6 +1166,12 @@ serve(async (req) => {
       assistantMsgCount === 0
     ) {
       const adminContext = await getAdminContext();
+      const collectAnalyseMode =
+        guidedWorkflowNorm === "leistungen_abrechnen"
+          ? "B"
+          : guidedWorkflowNorm === "rechnung_pruefen"
+            ? "A"
+            : "C";
       const collectResponse = await handleChatMode(
         messages as { role: string; content: string }[],
         resolvedModel,
@@ -806,6 +1181,8 @@ serve(async (req) => {
         guidedWorkflowNorm,
         100,
         kontextWissenEnabled,
+        regelwerk,
+        collectAnalyseMode,
       );
       const collectHeaders = new Headers(collectResponse.headers);
       for (const [key, value] of Object.entries(corsHeaders)) {
@@ -862,6 +1239,8 @@ serve(async (req) => {
       });
       if (h === "frage" && welcomeSticky !== "leistungen_abrechnen") intent = "frage";
     }
+
+    const analyseMode = normalizeAnalyseModus(mode_raw, intent);
 
     // #region agent log
     debugCcb4cf("H2", "goae-chat/index.ts:intentFinal", "routing intent", {
@@ -962,7 +1341,7 @@ serve(async (req) => {
       response = await runEngine3AsStream(
         {
           modus: "leistungen_abrechnen",
-          files: hasFiles ? files : undefined,
+          files: hasFiles ? effectiveFiles : undefined,
           userMessage,
           conversationHistory: messages,
           model: resolvedModel,
@@ -970,6 +1349,10 @@ serve(async (req) => {
           lastResult,
           lastEngine3Result: last_engine3_result,
           kontextWissenEnabled,
+          organisationKontextId,
+          mode: analyseMode,
+          regelwerk,
+          pseudonymSessionId: pseudoSid,
         },
         OPENROUTER_API_KEY,
       );
@@ -977,7 +1360,7 @@ serve(async (req) => {
       response = await runEngine3AsStream(
         {
           modus: "rechnung_pruefung",
-          files,
+          files: effectiveFiles,
           userMessage,
           conversationHistory: messages,
           model: resolvedModel,
@@ -985,7 +1368,11 @@ serve(async (req) => {
           lastResult,
           lastEngine3Result: last_engine3_result,
           kontextWissenEnabled,
+          organisationKontextId,
+          mode: analyseMode,
+          regelwerk,
           ...(engine3CaseGroupsParsed ? { engine3CaseGroups: engine3CaseGroupsParsed } : {}),
+          pseudonymSessionId: pseudoSid,
         },
         OPENROUTER_API_KEY,
       );
@@ -996,17 +1383,22 @@ serve(async (req) => {
       const ragQueryBilling = userMessage.trim() ||
         buildPipelineQuery(userMessage, undefined, lastResult);
       const adminContextBilling = kontextWissenEnabled
-        ? await loadRelevantAdminContext(ragQueryBilling, OPENROUTER_API_KEY)
+        ? await loadKontextAdminUndOrganisation(ragQueryBilling, OPENROUTER_API_KEY, {
+            organisationKontextId,
+          })
         : "";
       response = await runServiceBillingAsStream(
         {
-          files: hasFiles ? files : undefined,
+          files: hasFiles ? effectiveFiles : undefined,
           userMessage,
           model: resolvedModel,
           extraRules: extra_rules,
           optimizeFor: extrahiereOptimizeFor(userMessage),
           adminContext: adminContextBilling,
           kontextWissenEnabled,
+          mode: analyseMode,
+          regelwerk,
+          pseudonymSessionId: pseudoSid,
         },
         OPENROUTER_API_KEY,
       );
@@ -1018,7 +1410,7 @@ serve(async (req) => {
         // ═══════════════════════════════════════════════════════
         response = await runSimplePipeline(
           {
-            files,
+            files: effectiveFiles,
             userMessage,
             conversationHistory: messages,
             model: resolvedModel,
@@ -1036,12 +1428,15 @@ serve(async (req) => {
         // ═══════════════════════════════════════════════════════
         response = await runPipeline(
           {
-            files,
+            files: effectiveFiles,
             userMessage,
             conversationHistory: messages,
             model: resolvedModel,
             extraRules: extra_rules,
             kontextWissenEnabled,
+            mode: analyseMode,
+            regelwerk,
+            pseudonymSessionId: pseudoSid,
           },
           getAdminContext,
         );
@@ -1075,6 +1470,8 @@ serve(async (req) => {
         undefined,
         useEngine3 ? 200 : 100,
         kontextWissenEnabled,
+        regelwerk,
+        analyseMode,
       );
     }
 
@@ -1088,6 +1485,8 @@ serve(async (req) => {
       status: response.status,
       headers,
     });
+      },
+    );
   } catch (e) {
     console.error("goae-chat error:", e);
     return new Response(

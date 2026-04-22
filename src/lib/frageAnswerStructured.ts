@@ -77,11 +77,15 @@ export function normalizeFrageAnswerParsed(raw: Record<string, unknown>): FrageA
   const grenzStr =
     typeof grenzRaw === "string" ? stripFrageListKorrektZusatzLabels(grenzRaw.trim()) : "";
 
-  let quellen = raw.quellen;
-  if (typeof quellen === "string") quellen = [quellen];
-  if (!Array.isArray(quellen)) quellen = [];
+  const quellenRaw = raw.quellen;
+  const quellenArr: unknown[] =
+    typeof quellenRaw === "string"
+      ? [quellenRaw]
+      : Array.isArray(quellenRaw)
+        ? quellenRaw
+        : [];
   const quellenStr = filterExplicitQuellenEntries(
-    quellen.filter((x): x is string => typeof x === "string"),
+    quellenArr.filter((x): x is string => typeof x === "string"),
   );
 
   const vorschlaege = normalizeVorschlaegeParsed(raw.vorschlaege);

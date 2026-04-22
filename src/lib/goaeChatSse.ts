@@ -2,6 +2,7 @@ import type { InvoiceResultData } from "@/components/InvoiceResult";
 import type { ServiceBillingResultData } from "@/components/ServiceBillingResult";
 import { parseEngine3ResultData, type Engine3ResultData } from "@/lib/engine3Result";
 import { normalizeFrageAnswerParsed, type FrageAnswerStructured } from "@/lib/frageAnswerStructured";
+import type { DocbillAnalyseV1 } from "@/lib/analyse/types";
 import type { Engine3CaseStored, Engine3SegmentationProposalStored } from "@/lib/messageStructuredContent";
 
 export type PipelineProgressPayload = {
@@ -10,6 +11,8 @@ export type PipelineProgressPayload = {
   label: string;
   caseIndex?: number;
   totalCases?: number;
+  /** Laufende Prüf-/Analysekategorie (wenn die Pipeline sie mitsendet) */
+  kategorieLabel?: string;
 };
 
 export type SseAccumState = {
@@ -21,6 +24,8 @@ export type SseAccumState = {
   engine3Cases?: Engine3CaseStored[];
   engine3SegmentationPending?: Engine3SegmentationProposalStored | null;
   frageStructured?: FrageAnswerStructured;
+  /** Spec 02 — acht Prüfkategorien u. a. */
+  docbillAnalyse?: DocbillAnalyseV1;
 };
 
 export type SseHandlerContext = {
@@ -65,6 +70,9 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
     const label = (parsed.label as string) ?? "";
     const caseIndex = typeof parsed.caseIndex === "number" ? parsed.caseIndex : undefined;
     const totalCases = typeof parsed.totalCases === "number" ? parsed.totalCases : undefined;
+    const rawKat = parsed.kategorieLabel ?? parsed.kategorie;
+    const kategorieLabel =
+      typeof rawKat === "string" && rawKat.trim() ? rawKat.trim() : undefined;
     // #region agent log
     fetch("http://127.0.0.1:7350/ingest/dc9c2cfd-e812-42c5-8db7-14893d1ca961", {
       method: "POST",
@@ -79,7 +87,7 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
       }),
     }).catch(() => {});
     // #endregion
-    ctx.onProgress({ step, totalSteps: total, label, caseIndex, totalCases });
+    ctx.onProgress({ step, totalSteps: total, label, caseIndex, totalCases, kategorieLabel });
     return true;
   }
 
@@ -283,6 +291,15 @@ export function handleGoaeSseDataLine(jsonStr: string, ctx: SseHandlerContext): 
     return true;
   }
 
+  if (type === "docbill_analyse") {
+    const raw = parsed.data as DocbillAnalyseV1 | undefined;
+    if (raw && typeof raw === "object" && raw.version === 1 && Array.isArray(raw.kategorien)) {
+      ctx.state.docbillAnalyse = raw;
+      ctx.onDelta();
+    }
+    return true;
+  }
+
   if (parsed.error) {
     const errMsg = (parsed.error as { message?: string })?.message ?? parsed.error;
     ctx.state.assistantContent += `\n\n❌ **Stream-Fehler:** ${typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg)}`;
@@ -335,6 +352,7 @@ export function sseAccumStateHasDeliverable(state: SseAccumState): boolean {
   if (state.engine3Data != null) return true;
   if (state.engine3Cases != null && state.engine3Cases.length > 0) return true;
   if (state.engine3SegmentationPending != null) return true;
+  if (state.docbillAnalyse != null) return true;
   return false;
 }
 

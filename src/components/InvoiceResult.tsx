@@ -1,6 +1,23 @@
 import { cn } from "@/lib/utils";
-import { CheckIcon, X, Download } from "lucide-react";
+import { CheckIcon, X, Download, FileSpreadsheet, FileType } from "lucide-react";
 import { generateInvoicePdf, type PdfStammdaten } from "@/lib/pdf-invoice";
+import { downloadTextFile } from "@/lib/export";
+import {
+  buildRechnungsentwurfFromInvoice,
+  pseudonymIdFuerEinzelfall,
+  type InvoiceEntwurfRowInput,
+} from "@/lib/rechnung/buildRechnungsentwurfFromInvoice";
+import {
+  generateRechnungsentwurfPdf,
+  rechnungsentwurfToCsv,
+  rechnungsentwurfToPadBlock,
+} from "@/lib/rechnung/rechnungsentwurfExport";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SummaryCard } from "@/components/SummaryCard";
 import { usePraxisStammdaten } from "@/hooks/usePraxisStammdaten";
 import {
@@ -15,7 +32,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
+import { Fragment, useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 
 // ── Types matching pipeline output ──
 
@@ -758,7 +775,6 @@ function VorschlaegePanel({
                 <tr>
                   <th className="invoice-th w-[5.5rem]">Typ</th>
                   <th className="invoice-th w-16">GOÄ</th>
-                  <th className="invoice-th min-w-[180px]">Hinweis</th>
                   <th className="invoice-th min-w-[140px]">Vorschau</th>
                   <th className="invoice-th min-w-[140px]">Aufgaben</th>
                 </tr>
@@ -768,27 +784,33 @@ function VorschlaegePanel({
                   const s = suggestionsById.get(row.suggestionId);
                   const dec = s ? (decisions[s.id] ?? "pending") : "pending";
                   return (
-                    <tr key={row.suggestionId}>
-                      <td className="invoice-td align-top">
-                        <span className={pruefRowBadgeClass(row)}>{pruefRowNutzerLabel(row)}</span>
-                      </td>
-                      <td className="invoice-td align-top font-mono font-semibold">{row.ziffer}</td>
-                      <td className="invoice-td align-top text-xs leading-relaxed max-w-[360px]">
-                        <p className="text-foreground">{row.nachricht}</p>
-                      </td>
-                      <td className="invoice-td align-top">
-                        <PruefPreviewCell row={row} s={s} decision={dec} />
-                      </td>
-                      <td className="invoice-td align-top">
-                        <PruefDecisionCell
-                          s={s}
-                          decision={dec}
-                          rowBegruendung={s?.pos?.begruendung}
-                          onDecision={onDecision}
-                          pruefRow={row}
-                        />
-                      </td>
-                    </tr>
+                    <Fragment key={row.suggestionId}>
+                      <tr>
+                        <td className="invoice-td align-top">
+                          <span className={pruefRowBadgeClass(row)}>{pruefRowNutzerLabel(row)}</span>
+                        </td>
+                        <td className="invoice-td align-top font-mono font-semibold">{row.ziffer}</td>
+                        <td className="invoice-td align-top">
+                          <PruefPreviewCell row={row} s={s} decision={dec} />
+                        </td>
+                        <td className="invoice-td align-top">
+                          <PruefDecisionCell
+                            s={s}
+                            decision={dec}
+                            rowBegruendung={s?.pos?.begruendung}
+                            onDecision={onDecision}
+                            pruefRow={row}
+                          />
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} className="invoice-td pt-0 pb-2">
+                          <div className="rounded-lg border border-border/60 bg-muted/15 dark:bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-foreground">
+                            {row.nachricht}
+                          </div>
+                        </td>
+                      </tr>
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -921,7 +943,10 @@ function UnifiedPositionCard({
         </div>
       </div>
       {row.begruendung && (
-        <p className={cn("text-xs text-muted-foreground", hasStrikeSuggestion && "line-through")}>{row.begruendung}</p>
+        <div className="rounded-lg border border-border/60 bg-muted/15 dark:bg-muted/20 px-2.5 py-2 text-xs text-foreground/90">
+          <p className="text-[10px] uppercase font-medium text-muted-foreground mb-0.5">Begründung / Hinweis</p>
+          <p className={cn("leading-relaxed", hasStrikeSuggestion && "line-through")}>{row.begruendung}</p>
+        </div>
       )}
       {rowSuggestions.length > 0 && (
         <div className="text-xs space-y-1 rounded-md border border-border/50 bg-background/50 px-2 py-1.5">
@@ -978,16 +1003,18 @@ function UnifiedPositionRow({
   row,
   suggestions,
   decisions,
-  hasBegruendungColumn,
   hasAenderungColumn,
   hasVorschauZahlenColumn,
+  begruendungSubrowColSpan,
+  showBegruendungSubrow,
 }: {
   row: PreviewRow;
   suggestions: FlatSuggestion[];
   decisions: Record<string, SuggestionDecision>;
-  hasBegruendungColumn: boolean;
   hasAenderungColumn: boolean;
   hasVorschauZahlenColumn: boolean;
+  begruendungSubrowColSpan: number;
+  showBegruendungSubrow: boolean;
 }) {
   const rowSuggestions = getSuggestionsForPreviewRow(row, suggestions);
   const hasSuggestions = rowSuggestions.length > 0;
@@ -997,8 +1024,10 @@ function UnifiedPositionRow({
     (s) => s.pruefung?.typ === "ausschluss" && (decisions[s.id] ?? "pending") === "pending",
   );
   const typ = previewRowTypDisplay(row);
+  const begr = row.begruendung?.trim();
 
   return (
+    <>
     <tr
       className={cn(
         "transition-colors",
@@ -1022,9 +1051,6 @@ function UnifiedPositionRow({
       </td>
       <td className={cn("invoice-td text-right font-mono", hasStrikeSuggestion && "line-through")}>{row.faktor.toFixed(1).replace(".", ",")}×</td>
       <td className={cn("invoice-td text-right font-mono", hasStrikeSuggestion && "line-through")}>{formatEuro(row.betrag)}</td>
-      {hasBegruendungColumn && (
-        <td className={cn("invoice-td text-xs text-muted-foreground max-w-[200px]", hasStrikeSuggestion && "line-through")}>{row.begruendung ?? "—"}</td>
-      )}
       {hasAenderungColumn && (
         <td className="invoice-td text-xs align-top max-w-[160px]">
           {hasSuggestions ? (
@@ -1080,6 +1106,23 @@ function UnifiedPositionRow({
       </td>
       )}
     </tr>
+    {showBegruendungSubrow && begr ? (
+      <tr
+        className={cn(
+          "transition-colors",
+          anyPending && "bg-amber-50/30 dark:bg-amber-950/20",
+          anyAccepted && !anyPending && "bg-emerald-50/20 dark:bg-emerald-950/10",
+        )}
+      >
+        <td colSpan={begruendungSubrowColSpan} className="invoice-td pt-0 pb-2">
+          <div className="rounded-lg border border-border/60 bg-muted/15 dark:bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground max-w-[90vw]">
+            <p className="text-[10px] uppercase font-medium text-muted-foreground mb-1">Begründung / Hinweis</p>
+            <p className="text-foreground/90 leading-relaxed whitespace-pre-wrap">{row.begruendung}</p>
+          </div>
+        </td>
+      </tr>
+    ) : null}
+    </>
   );
 }
 
@@ -1087,6 +1130,22 @@ function UnifiedPositionRow({
 
 function formatEuro(n: number): string {
   return n.toFixed(2).replace(".", ",") + " €";
+}
+
+function previewRowsToEntwurfInput(rows: PreviewRow[]): InvoiceEntwurfRowInput[] {
+  return rows.map((p) => ({
+    nr: p.nr,
+    ziffer: p.ziffer,
+    bezeichnung: p.bezeichnung,
+    faktor: p.faktor,
+    betrag: p.betrag,
+    ...(p.begruendung && { begruendung: p.begruendung }),
+    ...(p.sourcePosNr != null && { sourcePosNr: p.sourcePosNr }),
+    ...(p.pruefStatus && { pruefStatus: p.pruefStatus }),
+    ...(p.ausschlussVorschlagSeite && { ausschlussVorschlagSeite: p.ausschlussVorschlagSeite }),
+    ...(p.sourceOptSuggestionId && { sourceOptSuggestionId: p.sourceOptSuggestionId }),
+    ...(p.isPendingOpt && { isPendingOpt: p.isPendingOpt }),
+  }));
 }
 
 // ── Main Component ──
@@ -1343,6 +1402,39 @@ export default function InvoiceResult({
     onExportSuccess,
   ]);
 
+  const handleRechnungsentwurf04Export = useCallback(
+    async (kind: "csv" | "pad" | "pdf") => {
+      const rows = previewRowsToEntwurfInput(exportPositions);
+      const entwurf = buildRechnungsentwurfFromInvoice({
+        data,
+        exportRows: rows,
+        gesamtbetrag: previewSum,
+        pseudonymId: pseudonymIdFuerEinzelfall(rechnungsnummer),
+        entwurfId: messageId ?? `invoice-${Date.now()}`,
+        status: "exportiert",
+        regelwerk: "GOAE",
+      });
+      const slug = (rechnungsnummer || "rechnung").replace(/[/\\?*:|"]/g, "-").slice(0, 32);
+      if (kind === "csv") {
+        downloadTextFile(
+          `rechnungsentwurf-04-${slug}.csv`,
+          rechnungsentwurfToCsv(entwurf),
+          "text/csv;charset=utf-8",
+        );
+      } else if (kind === "pad") {
+        downloadTextFile(
+          `rechnungsentwurf-04-${slug}.pad`,
+          rechnungsentwurfToPadBlock(entwurf),
+          "text/plain;charset=utf-8",
+        );
+      } else {
+        await generateRechnungsentwurfPdf(entwurf, "Rechnungsentwurf (Spec 04)");
+      }
+      onExportSuccess?.();
+    },
+    [data, exportPositions, previewSum, rechnungsnummer, messageId, onExportSuccess],
+  );
+
   return (
     <div className="invoice-result space-y-6">
       {/* ── Überblick ── */}
@@ -1398,6 +1490,41 @@ export default function InvoiceResult({
                   <Download className="w-4 h-4" />
                   PDF exportieren
                 </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-border bg-background hover:bg-muted/60 transition-colors"
+                      title="Rechnungsentwurf (Spec 04) als CSV, PAD oder PDF"
+                    >
+                      <FileSpreadsheet className="w-4 h-4" />
+                      Rechnungsentwurf (04)
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    <DropdownMenuItem
+                      className="cursor-pointer"
+                      onSelect={() => void handleRechnungsentwurf04Export("csv")}
+                    >
+                      <FileSpreadsheet className="w-4 h-4 mr-2 opacity-80" />
+                      CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="cursor-pointer"
+                      onSelect={() => void handleRechnungsentwurf04Export("pad")}
+                    >
+                      <FileType className="w-4 h-4 mr-2 opacity-80" />
+                      PAD-Text
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="cursor-pointer"
+                      onSelect={() => void handleRechnungsentwurf04Export("pdf")}
+                    >
+                      <Download className="w-4 h-4 mr-2 opacity-80" />
+                      PDF
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {suggestions.length > 0 && pendingCount > 0 && (
                   <button
                     type="button"
@@ -1443,9 +1570,6 @@ export default function InvoiceResult({
                     <th className="invoice-th min-w-[14rem]">Leistung</th>
                     <th className="invoice-th text-right w-16">Faktor</th>
                     <th className="invoice-th text-right w-20">Betrag</th>
-                    {unifiedRows.some((p) => p.begruendung) && (
-                      <th className="invoice-th">Hinweis</th>
-                    )}
                     {hasAenderungColumn && (
                       <th className="invoice-th min-w-[7rem]">Änderung</th>
                     )}
@@ -1455,17 +1579,21 @@ export default function InvoiceResult({
                   </tr>
                 </thead>
                 <tbody>
-                  {unifiedRows.map((row) => (
+                  {unifiedRows.map((row) => {
+                    const posFullColSpan = 6 + (hasAenderungColumn ? 1 : 0) + (suggestions.length > 0 ? 1 : 0);
+                    return (
                     <UnifiedPositionRow
                       key={row.isPendingOpt && row.pendingOptSuggestion ? row.pendingOptSuggestion.id : `row-${row.nr}-${row.ziffer}`}
                       row={row}
                       suggestions={suggestions}
                       decisions={decisions}
-                      hasBegruendungColumn={unifiedRows.some((p) => p.begruendung)}
                       hasAenderungColumn={hasAenderungColumn}
                       hasVorschauZahlenColumn={suggestions.length > 0}
+                      begruendungSubrowColSpan={posFullColSpan}
+                      showBegruendungSubrow={Boolean(row.begruendung?.trim())}
                     />
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1551,6 +1679,7 @@ export default function InvoiceResult({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }

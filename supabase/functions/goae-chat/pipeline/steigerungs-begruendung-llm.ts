@@ -165,3 +165,60 @@ export async function enrichSteigerungsBegruendungenBatch(
 
   return out;
 }
+
+/**
+ * Einzelne Steigerungsbegründung neu erzeugen (z. B. UI „Neu generieren“, wenn keine drei Rotations-Varianten existieren).
+ */
+export async function regenerateSteigerungsBegruendungOne(
+  item: SteigerungBegruendungItem,
+  analyse: MedizinischeAnalyse,
+  apiKey: string,
+  userModel: string,
+  opts?: {
+    adminContext?: string;
+    kontextWissenEnabled?: boolean;
+    /** Bereits angezeigter Text — soll inhaltlich variiert werden */
+    previousText?: string;
+  },
+): Promise<string | null> {
+  const model = pickExtractionModel(userModel);
+  const kontextOk = opts?.kontextWissenEnabled !== false;
+  const systemPrompt = withAdminContext(
+    buildSystemPrompt(kontextOk),
+    kontextOk ? opts?.adminContext : undefined,
+  );
+  const base = buildUserPayload([item], analyse);
+  const avoid = opts?.previousText?.trim();
+  const variation = avoid
+    ? `\n\n## Variation\nEs gibt bereits folgenden Begründungstext. Liefere **eine neue, inhaltlich andere** Formulierung (anderer Fokus oder Struktur), ohne minimalen Synonymtausch und ohne denselben Einstiegssatz:\n\n${avoid.slice(0, 1200)}`
+    : `\n\n## Variation\nLiefere **eine** klare Steigerungsbegründung wie in der Aufgabe beschrieben.`;
+
+  let raw = "";
+  try {
+    raw = await callLlm({
+      apiKey,
+      model,
+      systemPrompt,
+      userContent: [{ type: "text", text: `${base}${variation}` }],
+      jsonMode: true,
+      temperature: 0.38,
+      maxTokens: 4096,
+    });
+  } catch {
+    return null;
+  }
+
+  let parsed: LlmItems;
+  try {
+    parsed = extractJson<LlmItems>(raw);
+  } catch {
+    return null;
+  }
+  const list = parsed.items;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const row = list[0];
+  const id = typeof row?.id === "string" ? row.id.trim() : "";
+  const b = typeof row?.begruendung === "string" ? normalizeBegruendung(row.begruendung) : "";
+  if (!id || b.length < BEG_MIN_LEN) return null;
+  return b.length > BEG_MAX_LEN + 80 ? b.slice(0, BEG_MAX_LEN).trim() + "…" : b;
+}

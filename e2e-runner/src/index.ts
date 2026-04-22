@@ -11,11 +11,127 @@ import type { E2EReport, FixtureFile, FixtureResult } from "./types.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Lauf-Nummer für Artefakte (CI: z. B. CYCLE_NUMBER oder GITHUB_RUN_NUMBER). */
+const REPORT_CYCLE = Math.max(
+  1,
+  Number.parseInt(process.env.CYCLE_NUMBER ?? process.env.CI_CYCLE ?? "1", 10) || 1,
+);
+
+function parseSseJsonPayloads(body: string): unknown[] {
+  const out: unknown[] = [];
+  for (const line of body.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("data:")) continue;
+    const json = t.slice(5).trim();
+    if (!json || json === "[DONE]") continue;
+    try {
+      out.push(JSON.parse(json) as unknown);
+    } catch {
+      /* non-JSON line */
+    }
+  }
+  return out;
+}
+
+function findSseDataByType(payloads: unknown[], type: string): unknown {
+  for (const p of payloads) {
+    if (p && typeof p === "object" && (p as { type?: string }).type === type) {
+      return (p as { data?: unknown }).data;
+    }
+  }
+  return undefined;
+}
+
+function matchParsingExpected(
+  body: string,
+  spec: Record<string, unknown>,
+): { ok: boolean; diff?: string } {
+  const payloads = parseSseJsonPayloads(body);
+  const data = findSseDataByType(payloads, "docbill_parsing");
+  if (data == null) {
+    return { ok: false, diff: "parsing: no docbill_parsing event in SSE body" };
+  }
+  if (typeof data !== "object" || !data) {
+    return { ok: false, diff: "parsing: invalid data" };
+  }
+  const d = data as Record<string, unknown>;
+  if (spec.positionen_count !== undefined) {
+    const n = d.positionen_count;
+    if (typeof n !== "number" || n !== spec.positionen_count) {
+      return {
+        ok: false,
+        diff: `parsing.positionen_count: expected ${String(spec.positionen_count)}, got ${String(n)}`,
+      };
+    }
+  }
+  if (spec.ziffern !== undefined) {
+    const z = d.ziffern;
+    const want = spec.ziffern;
+    if (!Array.isArray(z) || !Array.isArray(want)) {
+      return { ok: false, diff: "parsing.ziffern: not an array" };
+    }
+    if (z.length !== want.length) {
+      return {
+        ok: false,
+        diff: `parsing.ziffern length: expected ${want.length}, got ${z.length}`,
+      };
+    }
+    for (let i = 0; i < want.length; i++) {
+      if (z[i] !== want[i]) {
+        return {
+          ok: false,
+          diff: `parsing.ziffern[${i}]: expected ${String(want[i])}, got ${String(z[i])}`,
+        };
+      }
+    }
+  }
+  return { ok: true };
+}
+
+function matchAnalyseExpected(
+  body: string,
+  spec: Record<string, unknown>,
+): { ok: boolean; diff?: string } {
+  const payloads = parseSseJsonPayloads(body);
+  const data = findSseDataByType(payloads, "docbill_analyse");
+  if (data == null) {
+    return { ok: false, diff: "analyse: no docbill_analyse event in SSE body" };
+  }
+  if (typeof data !== "object" || !data) {
+    return { ok: false, diff: "analyse: invalid data" };
+  }
+  const d = data as Record<string, unknown>;
+  if (spec.kategorien_count !== undefined) {
+    const k = d.kategorien;
+    const want = spec.kategorien_count;
+    if (typeof want !== "number" || !Array.isArray(k) || k.length !== want) {
+      return {
+        ok: false,
+        diff: `analyse.kategorien_count: expected ${String(want)}, got ${Array.isArray(k) ? k.length : "n/a"}`,
+      };
+    }
+  }
+  if (spec.disclaimer_contains !== undefined) {
+    const sub = String(spec.disclaimer_contains);
+    const disc = d.disclaimer;
+    if (typeof disc !== "string" || !disc.includes(sub)) {
+      return { ok: false, diff: "analyse: disclaimer missing expected substring" };
+    }
+  }
+  return { ok: true };
+}
+
 function getNested(obj: unknown, dotted: string): unknown {
   return dotted.split(".").reduce((acc: unknown, key) => {
     if (acc === null || acc === undefined || typeof acc !== "object") return undefined;
     return (acc as Record<string, unknown>)[key];
   }, obj);
+}
+
+function serializeFixtureBody(body: FixtureFile["input"]["body"]): string | undefined {
+  if (body === undefined) return undefined;
+  if (typeof body === "string") return body;
+  return JSON.stringify(body);
 }
 
 async function runHttpFixture(
@@ -34,10 +150,11 @@ async function runHttpFixture(
   const started = performance.now();
 
   try {
+    const postBody = method === "POST" ? (serializeFixtureBody(input.body) ?? "{}") : undefined;
     const res = await fetch(url, {
       method,
       headers: input.headers ?? {},
-      body: method === "POST" ? (input.body ?? "{}") : undefined,
+      body: postBody,
     });
     const duration_ms = Math.round(performance.now() - started);
     const exp = fx.expected.output ?? {};
@@ -59,9 +176,27 @@ async function runHttpFixture(
       };
     }
 
+    const rawText = await res.text();
     const jsonPath = exp.json_path as Record<string, unknown> | undefined;
-    if (jsonPath && res.headers.get("content-type")?.includes("json")) {
-      const body = await res.json();
+    if (jsonPath) {
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("json")) {
+        return {
+          ok: false,
+          diff: `json_path: expected JSON content-type, got ${ct.slice(0, 80)}`,
+          duration_ms,
+        };
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(rawText) as unknown;
+      } catch {
+        return {
+          ok: false,
+          diff: "json_path: response body is not valid JSON",
+          duration_ms,
+        };
+      }
       for (const [k, v] of Object.entries(jsonPath)) {
         const actual = getNested(body, k);
         if (actual !== v) {
@@ -71,6 +206,34 @@ async function runHttpFixture(
             duration_ms,
           };
         }
+      }
+    }
+
+    const textContains = exp.text_contains as string[] | undefined;
+    if (textContains && textContains.length > 0) {
+      for (const s of textContains) {
+        if (!rawText.includes(s)) {
+          return {
+            ok: false,
+            diff: `text_contains: missing substring ${JSON.stringify(s)}`,
+            duration_ms,
+          };
+        }
+      }
+    }
+
+    const expParsing = fx.expected.parsing;
+    if (expParsing && Object.keys(expParsing).length > 0) {
+      const m = matchParsingExpected(rawText, expParsing);
+      if (!m.ok) {
+        return { ok: false, diff: m.diff, duration_ms };
+      }
+    }
+    const expAnalyse = fx.expected.analyse;
+    if (expAnalyse && Object.keys(expAnalyse).length > 0) {
+      const m = matchAnalyseExpected(rawText, expAnalyse);
+      if (!m.ok) {
+        return { ok: false, diff: m.diff, duration_ms };
       }
     }
 
@@ -142,7 +305,7 @@ async function main(): Promise<void> {
   for (const fx of ordered) {
     if (fx.input.type === "runner_meta") {
       const reportSoFar: E2EReport = {
-        cycle: 1,
+        cycle: REPORT_CYCLE,
         timestamp: new Date().toISOString(),
         fixtures: results,
         exit_code: 0,
@@ -184,7 +347,7 @@ async function main(): Promise<void> {
   }
 
   const report: E2EReport = {
-    cycle: 1,
+    cycle: REPORT_CYCLE,
     timestamp: new Date().toISOString(),
     fixtures: results,
     exit_code: allPass ? 0 : 1,

@@ -18,7 +18,9 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { DEFAULT_GLOBAL_GUARDRAILS_RULES } from "@/data/default-global-rules";
 import { AVAILABLE_MODELS, MODEL_TAG_LABELS, MODEL_TAG_TOOLTIPS, type ModelTag } from "@/data/models";
-import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Loader2, Building2, ChevronDown, Keyboard } from "lucide-react";
+import { Globe, User, Cpu, Type, Moon, Sun, Upload, Trash2, FileText, Plus, CreditCard, Database, Loader2, Building2, ChevronDown, Keyboard, BookOpen, Users } from "lucide-react";
+import { WissensbasisSettingsSection } from "@/components/WissensbasisSettingsSection";
+import { OrganisationSettingsSections } from "@/components/OrganisationSettingsSections";
 import { KeyboardShortcutsReference } from "@/components/KeyboardShortcutsReference";
 import { KeyboardShortcutPrefsEditor } from "@/components/KeyboardShortcutPrefsEditor";
 import { useKeyboardShortcutPrefs } from "@/hooks/useKeyboardShortcutPrefs";
@@ -139,7 +141,9 @@ async function extractTextFromPdf(file: File): Promise<string> {
     for (let i = 1; i <= numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map((item: { str?: string }) => item.str ?? "").join(" ");
+      const pageText = content.items
+        .map((item) => ("str" in item && typeof item.str === "string" ? item.str : ""))
+        .join(" ");
       texts.push(pageText);
     }
     const combined = texts.join("\n\n");
@@ -239,7 +243,7 @@ const SettingsContent = ({
   /** Pro Mount: aus In-App-Chat kommt Hydration → kein Vollbild-Loader bei Sync. */
   const skipBlockingLoaderRef = useRef(!!chatSettingsHydration);
 
-  const [activeTab, setActiveTab] = useState<"user" | "global" | "praxis">(() =>
+  const [activeTab, setActiveTab] = useState<"user" | "global" | "praxis" | "wissensbasis" | "organisation">(() =>
     initialTab === "display" ? "user" : initialTab ?? "user",
   );
 
@@ -717,7 +721,7 @@ const SettingsContent = ({
         );
       });
 
-      if (!result.ok) {
+      if (result.ok === false) {
         setUploadProgress((p) =>
           !p ? p : { ...p, steps: markActiveStepAsError(p.steps) },
         );
@@ -1027,6 +1031,8 @@ const SettingsContent = ({
   const tabs = [
     ...(isAdmin ? [{ key: "global" as const, label: "Admin", icon: Globe }] : []),
     { key: "user" as const, label: "Meine Einstellungen", icon: User },
+    { key: "organisation" as const, label: "Organisation", icon: Users },
+    { key: "wissensbasis" as const, label: "Wissensbasis", icon: BookOpen },
     { key: "praxis" as const, label: "Praxis & Bank", icon: Building2 },
   ];
 
@@ -1329,6 +1335,14 @@ const SettingsContent = ({
             Praxisdaten speichern
           </Button>
         </div>
+      )}
+
+      {activeTab === "organisation" && user && (
+        <OrganisationSettingsSections user={user} />
+      )}
+
+      {activeTab === "wissensbasis" && user && (
+        <WissensbasisSettingsSection user={user} extractPdfText={extractTextFromPdf} />
       )}
 
       {(activeTab === "user" || activeTab === "global") && (

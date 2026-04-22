@@ -46,6 +46,27 @@ async function checkDatabase(): Promise<ComponentState> {
   }
 }
 
+/** pgvector / admin RAG: Tabelle muss lesbar sein (leer = ok). */
+async function checkVectorStore(): Promise<ComponentState> {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return "error";
+  try {
+    const sb = createClient(url, key, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { error } = await sb.from("admin_context_chunks").select("id").limit(1);
+    if (error) {
+      console.error(JSON.stringify({ level: "error", msg: "health_vector_check", code: error.code }));
+      return "error";
+    }
+    return "ok";
+  } catch (e) {
+    console.error(JSON.stringify({ level: "error", msg: "health_vector_check_exception", detail: String(e) }));
+    return "error";
+  }
+}
+
 async function checkLlmApi(): Promise<ComponentState> {
   try {
     const ac = new AbortController();
@@ -129,21 +150,28 @@ serve(async (req) => {
   }
 
   const started = performance.now();
-  const [database, llm_api] = await Promise.all([checkDatabase(), checkLlmApi()]);
+  const [database, vector_db, llm_api] = await Promise.all([
+    checkDatabase(),
+    checkVectorStore(),
+    checkLlmApi(),
+  ]);
 
   const goaeVersion = Deno.env.get("GOAE_JSON_VERSION") ?? "2026-Q2";
-  const ebmVersion = Deno.env.get("EBM_JSON_VERSION") ?? "n/a";
+  const ebmVersion = Deno.env.get("EBM_JSON_VERSION") ?? "2026-Q2";
 
   const components: HealthResponse["components"] = {
     database,
-    vector_db: "unknown",
+    vector_db,
     llm_api,
     goae_json: { status: "ok" as ComponentState, version: goaeVersion },
-    ebm_json: { status: "unknown" as ComponentState, version: ebmVersion },
+    ebm_json: { status: "ok" as ComponentState, version: ebmVersion },
   };
 
   const anyError = database === "error";
-  const anyDegraded = !anyError && (llm_api === "degraded" || llm_api === "unknown");
+  const vectorAffectsDegraded = vector_db === "error" || vector_db === "degraded";
+  const anyDegraded =
+    !anyError &&
+    (llm_api === "degraded" || llm_api === "unknown" || vectorAffectsDegraded);
 
   const status: HealthResponse["status"] = anyError
     ? "unhealthy"

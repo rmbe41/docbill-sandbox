@@ -1,5 +1,6 @@
-import { LogOut, User } from "lucide-react";
+import { LogOut, User as UserIcon, Layers, MessageCircle } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -55,6 +56,7 @@ type Props = {
 };
 
 const UserProfileMenu = ({ collapsed, onAfterNavigate, onOpenProfile }: Props) => {
+  const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const avatarUrl = user?.user_metadata?.avatar_url as string | undefined;
 
@@ -114,8 +116,16 @@ const UserProfileMenu = ({ collapsed, onAfterNavigate, onOpenProfile }: Props) =
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={wrap(() => onOpenProfile())}>
-          <User className="w-4 h-4 mr-2" />
+          <UserIcon className="w-4 h-4 mr-2" />
           Profil & Konto
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={wrap(() => navigate("/"))}>
+          <MessageCircle className="w-4 h-4 mr-2" />
+          Chat
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={wrap(() => navigate("/batches"))}>
+          <Layers className="w-4 h-4 mr-2" />
+          Stapel (Batches)
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={wrap(() => void signOut())} className="text-destructive">

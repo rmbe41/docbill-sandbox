@@ -216,7 +216,6 @@ function ServiceBillingPositionsTable({
             <th className="invoice-th w-20">GOÄ-Nr</th>
             <th className="invoice-th min-w-[14rem]">Leistung</th>
             <th className="invoice-th text-right w-16">Faktor</th>
-            <th className="invoice-th min-w-[8rem]">Hinweis</th>
             <th className="invoice-th text-right w-24">Betrag</th>
             <th className="invoice-th w-36">Aktion</th>
           </tr>
@@ -230,6 +229,7 @@ function ServiceBillingPositionsTable({
             const unterzeile = leistungUnterzeile(v);
             const rot = begrRotation[key] ?? 0;
             const beispiele = begruendungTripleFuerPosition(v, rot);
+            const hinweis = hinweisZelleInhalt(v);
             return (
               <Fragment key={key}>
               <tr
@@ -256,13 +256,6 @@ function ServiceBillingPositionsTable({
                 </td>
                 <td className="invoice-td text-right font-mono align-top whitespace-nowrap">
                   {formatFaktorDisplay(v.faktor)}×
-                </td>
-                <td className="invoice-td text-xs text-muted-foreground align-top max-w-[14rem]">
-                  <div className="space-y-1">
-                    {hinweisZelleInhalt(v) ?? (
-                      <span className="text-muted-foreground/80">—</span>
-                    )}
-                  </div>
                 </td>
                 <td className="invoice-td text-right font-mono font-semibold align-top whitespace-nowrap">
                   {formatEuro(v.betrag)}
@@ -298,9 +291,29 @@ function ServiceBillingPositionsTable({
                   </div>
                 </td>
               </tr>
+              {hinweis != null && (
+                <tr
+                  className={cn(
+                    isAccepted && "bg-emerald-50/25 dark:bg-emerald-950/10",
+                    isPending && "bg-amber-50/25 dark:bg-amber-950/10",
+                    decision === "rejected" && "opacity-75",
+                  )}
+                >
+                  <td colSpan={5} className="invoice-td pt-0 pb-2 border-b-0">
+                    <div
+                      className={cn(
+                        "rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-xs",
+                        isFaktorUeberSchwelle(v.ziffer, v.faktor) && "border-amber-500/30 bg-amber-500/[0.06]",
+                      )}
+                    >
+                      {hinweis}
+                    </div>
+                  </td>
+                </tr>
+              )}
               {beispiele.length > 0 ? (
                 <tr className={cn(isAccepted && "bg-emerald-50/25 dark:bg-emerald-950/10")}>
-                  <td colSpan={6} className="invoice-td pt-0 pb-3 border-t-0">
+                  <td colSpan={5} className="invoice-td pt-0 pb-3 border-t-0">
                     <div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5">
                       <p className="text-[10px] font-medium text-muted-foreground mb-2">
                         Begründung für die Akte (Variante wählen oder anpassen)
@@ -373,8 +386,8 @@ const ServiceBillingResult = ({
       const base = initialServiceBegruendungText ?? {};
       const patch: ServiceBegruendungTextPatch = {};
       for (const k of knownServiceKeys) {
-        const inLocal = Object.hasOwn(begrOverrides, k);
-        const inBase = Object.hasOwn(base, k);
+        const inLocal = Object.prototype.hasOwnProperty.call(begrOverrides, k);
+        const inBase = Object.prototype.hasOwnProperty.call(base, k);
         const localVal = begrOverrides[k];
         const baseVal = base[k];
         if (inLocal) {
@@ -721,6 +734,7 @@ const ServiceBillingResult = ({
           <span className="font-medium">Kontext:</span> {data.klinischerKontext}
         </p>
       )}
+
     </div>
   );
 };

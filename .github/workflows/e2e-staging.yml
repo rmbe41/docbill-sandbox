@@ -1,0 +1,49 @@
+# E2E gegen deployte Supabase (kein Mock). Braucht Repo-Secret E2E_STAGING_BASE_URL (z. B. https://xxx.supabase.co).
+# Ohne Secret: Job beendet erfolgreich mit Hinweis (kein Fail).
+name: E2E Staging
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "25 2 * * *"
+
+jobs:
+  e2e-staging:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (e2e-runner + review-agent)
+        run: npm run typecheck:ci
+
+      - name: E2E (staging, no mock)
+        env:
+          CYCLE_NUMBER: ${{ github.run_number }}
+          E2E_USE_MOCK: "0"
+          E2E_BASE_URL: ${{ secrets.E2E_STAGING_BASE_URL }}
+          E2E_ANON_JWT: ${{ secrets.E2E_STAGING_ANON_JWT }}
+        run: |
+          if [ -z "${E2E_BASE_URL:-}" ]; then
+            echo "E2E_STAGING_BASE_URL nicht gesetzt — Staging-E2E übersprungen."
+            exit 0
+          fi
+          npm run e2e
+
+      - name: Upload E2E report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-staging-report
+          path: e2e-report.json
+          if-no-files-found: ignore

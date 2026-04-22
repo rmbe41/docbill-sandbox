@@ -47,6 +47,30 @@ REGELN:
 - ziffer als String, faktor und betrag numerisch (Punkt als Dezimaltrenner)
 - Wirklich keine Positionen erkennbar: "positionen": []`;
 
+const POSITIONEN_EBM_FROM_RAWTEXT_PROMPT = `Du extrahierst alle GKV-Abrechnungspositionen (EBM) aus dem gegebenen Rohtext (Honorar, GOÄ-ähnliches Layout oder Abrechnungsbeleg).
+
+Antworte AUSSCHLIESSLICH mit JSON:
+{
+  "positionen": [
+    {
+      "nr": 1,
+      "ziffer": "01100",
+      "bezeichnung": "Kurzbezeichnung",
+      "faktor": 1.0,
+      "betrag": 24.97,
+      "datum": "2025-01-15 oder weglassen",
+      "begruendung": null,
+      "anzahl": 1
+    }
+  ]
+}
+
+REGELN:
+- "ziffer" = 5-stellige GOP (String, z. B. "01100")
+- "faktor" = bei EBM in der Regel 1,0, sofern die Rechnung keinen Faktor ausweist
+- "betrag" = Euro der Zeile (Punkt als Dezimaltrenner)
+- Wirklich keine EBM-Positionen erkennbar: "positionen": []`;
+
 /**
  * Vision/PDF-Parser liefert oft rawText, aber leeres positionen-Array. Zweiter Aufruf nur mit Text
  * (gleiches Nutzer-Modell, keine Multimodal-Fallbacks) behebt das ohne andere Modelle.
@@ -55,6 +79,7 @@ async function tryFillPositionenFromRawText(
   parsed: ParsedRechnung,
   apiKey: string,
   model: string,
+  regelwerk: "GOAE" | "EBM" = "GOAE",
 ): Promise<ParsedRechnung> {
   if (parsed.positionen.length > 0) return parsed;
   const raw = (parsed.rawText || "").trim();
@@ -67,7 +92,7 @@ async function tryFillPositionenFromRawText(
     const rawLlm = await callLlm({
       apiKey,
       model,
-      systemPrompt: POSITIONEN_FROM_RAWTEXT_PROMPT,
+      systemPrompt: regelwerk === "EBM" ? POSITIONEN_EBM_FROM_RAWTEXT_PROMPT : POSITIONEN_FROM_RAWTEXT_PROMPT,
       userContent: [
         {
           type: "text",
@@ -138,6 +163,40 @@ REGELN:
 - "stammdaten": Extrahiere ALLE Stammdaten aus der Rechnung – Praxis (Name, Adresse, Telefon, E-Mail, Steuernummer), Patient (Name, Adresse, Geburtsdatum), Bankverbindung (IBAN, BIC, Bankname, Kontoinhaber), Rechnungsnummer, Rechnungsdatum. Fehlende Felder als null oder weglassen.
 - Bei unleserlichen Stellen: bestmögliche Interpretation, im freitext vermerken`;
 
+const PARSER_SYSTEM_PROMPT_EBM = `Du bist ein Dokumentenparser für ärztliche bzw. vertragsärztliche Abrechnungsbelege nach dem **EBM** (GKV, GOPs fünf Stellen).
+
+AUFGABE: Extrahiere ALLE strukturierten Daten – inklusive Stammdaten für den Rechnungsexport.
+
+Antworte AUSSCHLIESSLICH mit einem JSON-Objekt in diesem Format:
+
+{
+  "positionen": [
+    {
+      "nr": 1,
+      "ziffer": "01100",
+      "bezeichnung": "Unvorhergesehene Inanspruchnahme …",
+      "faktor": 1.0,
+      "betrag": 24.97,
+      "datum": "2025-01-15",
+      "begruendung": null,
+      "anzahl": 1
+    }
+  ],
+  "diagnosen": ["…"],
+  "datum": "2025-01-15",
+  "freitext": "…",
+  "rawText": "der komplette Text des Dokuments",
+  "stammdaten": { "praxis": { "name": null, "adresse": null, "telefon": null, "email": null, "steuernummer": null }, "patient": { "name": null, "adresse": null, "geburtsdatum": null }, "bank": { "iban": null, "bic": null, "bankName": null, "kontoinhaber": null }, "rechnungsnummer": null, "rechnungsdatum": null }
+}
+
+REGELN:
+- "ziffer": fünf stellige **GOP** (String, z. B. "01100", "12345")
+- "faktor": bei EBM meist 1,0, außer der Beleg nennt ausdrücklich etwas anderes
+- "betrag": Euro (Dezimalpunkt)
+- "anzahl": Standard 1, falls nicht anders ersichtlich
+- "rawText" und "stammdaten" wie bei GOÄ-Parsing
+- Keine GOÄ-Dreisteller als ziffer verwenden, wenn es sich um eine GKV-EBM-Abrechnung handelt.`;
+
 /** Mehrere Dateien: Honorarrechnung vs. Akte/Befund trennen (Rechnungsprüfung). */
 const MULTI_DOC_INVOICE_REVIEW_PROMPT = `Du bist ein Dokumentenparser für die **Rechnungsprüfung**, wenn **mehrere Dateien** vorliegen.
 
@@ -179,8 +238,18 @@ REGELN:
 - **rawText**: darf beide Quellen enthalten; **klinischeDokumentation** soll den klinischen Teil für die spätere GOÄ-Bewertung tragfähig wiedergeben.
 - Bei unleserlichen Stellen: bestmögliche Interpretation, im freitext vermerken.`;
 
+const MULTI_DOC_INVOICE_REVIEW_EBM = `Du bist ein Dokumentenparser für die **Rechnungsprüfung** (EBM / GKV), wenn **mehrere Dateien** vorliegen.
+
+Typische Kombination: **Abrechnungsbeleg** (GOP, Euro) und optional **Akte/Befund/Arztbrief**.
+
+Antworte mit dem gleichen JSON-Schema wie im Einzeldatei-EBM-Parser, plus **klinischeDokumentation** (nur Nicht-Rechnung).
+
+**positionen**: nur fünf stellige GOPs; Faktor meist 1,0. **rawText** darf beide Quellen tragen.`;
+
 export type ParseDokumentExtraOptions = {
   multiDocumentInvoiceReview?: boolean;
+  /** EBM: GOP statt GOÄ; Prompts PARSER_SYSTEM_PROMPT_EBM. */
+  regelwerk?: "GOAE" | "EBM";
 };
 
 export async function parseDokument(
@@ -192,6 +261,10 @@ export async function parseDokument(
 ): Promise<ParsedRechnung> {
   const model = modelOverride ?? pickExtractionModel(userModel);
   const multiReview = !!parseOpts?.multiDocumentInvoiceReview && files.length >= 2;
+  const ebm = parseOpts?.regelwerk === "EBM";
+  const systemParser = multiReview
+    ? (ebm ? MULTI_DOC_INVOICE_REVIEW_EBM : MULTI_DOC_INVOICE_REVIEW_PROMPT)
+    : (ebm ? PARSER_SYSTEM_PROMPT_EBM : PARSER_SYSTEM_PROMPT);
 
   const contentParts: unknown[] = [
     {
@@ -229,7 +302,7 @@ export async function parseDokument(
   const raw = await callLlm({
     apiKey,
     model,
-    systemPrompt: multiReview ? MULTI_DOC_INVOICE_REVIEW_PROMPT : PARSER_SYSTEM_PROMPT,
+    systemPrompt: systemParser,
     userContent: contentParts,
     jsonMode: true,
     temperature: 0.05,
@@ -358,7 +431,12 @@ export async function parseDokumentWithRetry(
     try {
       let parsed = await parseDokument(files, apiKey, userModel, model, parseOpts);
       if (!isPlausibleParseResult(parsed, hasFiles)) {
-        parsed = await tryFillPositionenFromRawText(parsed, apiKey, model);
+        parsed = await tryFillPositionenFromRawText(
+          parsed,
+          apiKey,
+          model,
+          parseOpts?.regelwerk === "EBM" ? "EBM" : "GOAE",
+        );
       }
       if (isPlausibleParseResult(parsed, hasFiles)) {
         return parsed;

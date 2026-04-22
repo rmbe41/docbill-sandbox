@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, ChevronDown, ChevronUp, Download, X } from "lucide-react";
+import { CheckIcon, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +17,9 @@ import { cn } from "@/lib/utils";
 import { filterExplicitQuellenEntries } from "@/lib/quellenMetaFilter";
 import type { Engine3ResultData, Engine3Position, Engine3Hinweis } from "@/lib/engine3Result";
 import { usePraxisStammdaten } from "@/hooks/usePraxisStammdaten";
+import { useToast } from "@/hooks/use-toast";
+import { goaeByZiffer } from "@/data/goae-catalog";
+import { fetchSteigerungBegruendungRegenerate } from "@/lib/fetchSteigerungBegruendungRegenerate";
 import { engine3ReviewRowId } from "@/lib/docbillUseCases";
 import { billingRowsToTsv, downloadTextFile, type BillingExportRow } from "@/lib/export";
 import type {
@@ -26,16 +28,14 @@ import type {
   MessageStructuredContentV1,
 } from "@/lib/messageStructuredContent";
 import { BegruendungBeispielePicker } from "@/components/BegruendungBeispielePicker";
-import { goaeByZiffer } from "@/data/goae-catalog";
+import { GoaeFaktorBegruendungPanel } from "@/components/GoaeFaktorBegruendungPanel";
 import { calculateAmountOrScaled, goaeFaktorLimits } from "@/lib/goae-validator";
-import { buildHoechstfaktorHinweisText, isFaktorUeberSchwelle } from "@/lib/format-goae-hinweis";
 import { getBegruendungBeispieleTriple, getSteigerungFallbackBeispiel } from "@/lib/goae-begruendung-beispiele";
 
 export type { Engine3ResultData } from "@/lib/engine3Result";
 
 const HINWEISE_MAX = 8;
 const TABLE_COLS = 7;
-const FAKTOR_STEP = 0.1;
 
 function applyEngine3FaktorOverride(base: Engine3Position, faktor: number): Engine3Position {
   const betrag = calculateAmountOrScaled(base.ziffer, faktor, { betrag: base.betrag, faktor: base.faktor });
@@ -46,133 +46,6 @@ function clampEngine3Faktor(ziffer: string, f: number): number {
   const { min, max } = goaeFaktorLimits(ziffer);
   const r = Math.round(f * 10) / 10;
   return Math.min(max, Math.max(min, r));
-}
-
-function formatFaktorDe(n: number): string {
-  return String(n).replace(".", ",");
-}
-
-function parseFaktorInputString(raw: string): number | null {
-  const t = raw
-    .trim()
-    .replace(/×/g, "")
-    .replace(/\s/g, "")
-    .replace(",", ".");
-  if (t === "" || t === "-" || t === ".") return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
-
-function Engine3FaktorControl({
-  ziffer,
-  faktor,
-  onCommit,
-}: {
-  ziffer: string;
-  faktor: number;
-  onCommit: (value: number) => void;
-}) {
-  const { min: fakMin, max: fakMax } = goaeFaktorLimits(ziffer);
-  const atFakMin = faktor <= fakMin + 1e-9;
-  const atFakMax = faktor >= fakMax - 1e-9;
-  const [draft, setDraft] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const displayNum = draft !== null ? draft : formatFaktorDe(faktor);
-
-  const commit = () => {
-    if (draft === null) return;
-    const t = draft.replace(/×/g, "").trim();
-    setDraft(null);
-    if (t === "") return;
-    const parsed = parseFaktorInputString(t);
-    if (parsed === null) return;
-    onCommit(parsed);
-  };
-
-  const bump = (delta: number) => {
-    setDraft(null);
-    onCommit(faktor + delta);
-  };
-
-  const maxTooltip = `max. ${formatFaktorDe(fakMax)}`;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div
-          className="inline-flex items-center gap-1 min-w-0 cursor-default"
-          onWheel={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            bump(e.deltaY < 0 ? FAKTOR_STEP : -FAKTOR_STEP);
-          }}
-        >
-          <Input
-            ref={inputRef}
-            type="text"
-            inputMode="decimal"
-            aria-label="Faktor bearbeiten"
-            className="h-7 w-[3.5rem] min-w-0 px-1.5 py-0 text-center font-mono tabular-nums text-xs"
-            value={displayNum}
-            onFocus={(e) => {
-              setDraft(formatFaktorDe(faktor));
-              e.currentTarget.select();
-            }}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowUp") {
-                e.preventDefault();
-                bump(FAKTOR_STEP);
-              } else if (e.key === "ArrowDown") {
-                e.preventDefault();
-                bump(-FAKTOR_STEP);
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                commit();
-                inputRef.current?.blur();
-              } else if (e.key === "Escape") {
-                setDraft(null);
-                inputRef.current?.blur();
-              }
-            }}
-          />
-          <div className="flex flex-col justify-center shrink-0 -space-y-px">
-            <button
-              type="button"
-              disabled={atFakMax}
-              aria-label="Faktor erhöhen"
-              onClick={() => bump(FAKTOR_STEP)}
-              className={cn(
-                "flex h-3.5 w-4 items-center justify-center rounded-t-sm text-muted-foreground/35 transition-colors",
-                "hover:bg-muted/50 hover:text-muted-foreground/80",
-                "disabled:pointer-events-none disabled:opacity-20",
-              )}
-            >
-              <ChevronUp className="w-2.5 h-2.5" strokeWidth={2} />
-            </button>
-            <button
-              type="button"
-              disabled={atFakMin}
-              aria-label="Faktor senken"
-              onClick={() => bump(-FAKTOR_STEP)}
-              className={cn(
-                "flex h-3.5 w-4 items-center justify-center rounded-b-sm text-muted-foreground/35 transition-colors",
-                "hover:bg-muted/50 hover:text-muted-foreground/80",
-                "disabled:pointer-events-none disabled:opacity-20",
-              )}
-            >
-              <ChevronDown className="w-2.5 h-2.5" strokeWidth={2} />
-            </button>
-          </div>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="text-xs font-mono tabular-nums">
-        {maxTooltip}
-      </TooltipContent>
-    </Tooltip>
-  );
 }
 
 /** Abwechselnder Hintergrund pro Positionsblock (Datenzeile + ggf. Hinweiszeile). */
@@ -472,6 +345,13 @@ type Engine3ResultProps = {
   initialEngine3BegruendungText?: Record<string, string> | null;
   /** Präfix für suggestionDecisions.engine3 bei mehreren Vorgängen (z. B. `case-a:`). */
   decisionKeyPrefix?: string;
+  /** Optional: KI-Neuformulierung, wenn weniger als drei Rotations-Varianten existieren. */
+  begruendungRegenerateContext?: {
+    supabaseKey: string;
+    model: string;
+    kontext_wissen: boolean;
+    pseudonym_session_id?: string;
+  };
 };
 
 export default function Engine3Result({
@@ -483,7 +363,9 @@ export default function Engine3Result({
   initialEngine3FaktorOverrides = null,
   initialEngine3BegruendungText = null,
   decisionKeyPrefix,
+  begruendungRegenerateContext,
 }: Engine3ResultProps) {
+  const { toast } = useToast();
   const rowKey = useCallback(
     (isOpt: boolean, p: Engine3Position) => rowKeyWithPrefix(decisionKeyPrefix, isOpt, p),
     [decisionKeyPrefix],
@@ -556,6 +438,79 @@ export default function Engine3Result({
     });
   }, []);
 
+  const [begruendungAiRowKey, setBegruendungAiRowKey] = useState<string | null>(null);
+
+  const handleBegruendungRegenerate = useCallback(
+    async (rk: string, p: Engine3Position, beispieleTriple: string[]) => {
+      const nonEmptyTriple = beispieleTriple.map((s) => s.trim()).filter((s) => s.length > 0);
+      const useAi = Boolean(begruendungRegenerateContext) && nonEmptyTriple.length < 3;
+
+      if (useAi) {
+        setBegruendungAiRowKey(rk);
+        try {
+          const cat = goaeByZiffer.get(p.ziffer);
+          const schwellenfaktor = cat?.schwellenfaktor ?? 2.3;
+          const hoechstfaktor = cat?.hoechstfaktor ?? 3.5;
+          const leistung = `GOÄ ${p.ziffer} — ${p.bezeichnung}`;
+          const betragFormatted = `€${p.betrag.toFixed(2).replace(".", ",")}`;
+          const prevText =
+            begruendungOverrides[rk]?.trim() ||
+            [p.begruendung, p.anmerkung].filter(Boolean).join(" · ").trim() ||
+            nonEmptyTriple[0] ||
+            getSteigerungFallbackBeispiel({
+              ziffer: p.ziffer,
+              bezeichnung: p.bezeichnung,
+              faktor: p.faktor,
+              betragFormatted,
+              quelleText: p.quelleText,
+            });
+
+          const res = await fetchSteigerungBegruendungRegenerate({
+            supabaseKey: begruendungRegenerateContext.supabaseKey,
+            model: begruendungRegenerateContext.model,
+            kontext_wissen: begruendungRegenerateContext.kontext_wissen,
+            ...(begruendungRegenerateContext.pseudonym_session_id?.trim()
+              ? { pseudonym_session_id: begruendungRegenerateContext.pseudonym_session_id.trim() }
+              : {}),
+            payload: {
+              id: rk,
+              ziffer: p.ziffer,
+              bezeichnung: p.bezeichnung,
+              faktor: p.faktor,
+              schwellenfaktor,
+              hoechstfaktor,
+              leistung,
+              ...(p.quelleText?.trim() ? { quelle_beschreibung: p.quelleText.trim() } : {}),
+              klinischer_kontext: data.klinischerKontext ?? "",
+              fachgebiet: data.fachgebiet ?? "",
+              previous_text: prevText,
+            },
+          });
+          if (res.ok === false) {
+            toast({ title: "Neu generieren", description: res.error, variant: "destructive" });
+            return;
+          }
+          setBegruendungOverrides((prevMap) => ({ ...prevMap, [rk]: res.text }));
+        } finally {
+          setBegruendungAiRowKey(null);
+        }
+        return;
+      }
+
+      if (nonEmptyTriple.length < 3) {
+        toast({
+          title: "Neu generieren",
+          description:
+            "Hier gibt es keine weitere lokale Variante. Bitte Text anpassen oder (mit Backend-Anbindung) KI-Neuformulierung nutzen.",
+        });
+        return;
+      }
+
+      bumpBegruendungRotation(rk);
+    },
+    [begruendungRegenerateContext, begruendungOverrides, data, bumpBegruendungRotation, toast],
+  );
+
   const allRows: RowWithOpt[] = useMemo(() => {
     const apply = (pBase: Engine3Position, isOpt: boolean) => {
       const rk = rowKeyWithPrefix(decisionKeyPrefix, isOpt, pBase);
@@ -605,8 +560,8 @@ export default function Engine3Result({
       const base = initialEngine3FaktorOverrides ?? {};
       const faktorPatch: Engine3FaktorOverridesPatch = {};
       for (const rk of knownRowKeys) {
-        const inLocal = Object.hasOwn(localFaktoren, rk);
-        const inBase = Object.hasOwn(base, rk);
+        const inLocal = Object.prototype.hasOwnProperty.call(localFaktoren, rk);
+        const inBase = Object.prototype.hasOwnProperty.call(base, rk);
         const localVal = localFaktoren[rk];
         const baseVal = base[rk];
         if (inLocal) {
@@ -618,8 +573,8 @@ export default function Engine3Result({
       const baseBegr = initialEngine3BegruendungText ?? {};
       const begrPatch: Engine3BegruendungTextPatch = {};
       for (const rk of knownRowKeys) {
-        const inLocal = Object.hasOwn(localBegr, rk);
-        const inBase = Object.hasOwn(baseBegr, rk);
+        const inLocal = Object.prototype.hasOwnProperty.call(localBegr, rk);
+        const inBase = Object.prototype.hasOwnProperty.call(baseBegr, rk);
         const localVal = localBegr[rk];
         const baseVal = baseBegr[rk];
         if (inLocal) {
@@ -833,10 +788,6 @@ export default function Engine3Result({
     const beispieleTriple = getBegruendungBeispieleTriple(p, rot);
     const st = decisions[rk] ?? "pending";
     const stripe = positionGroupStripeClass(groupIndex);
-    const cat = goaeByZiffer.get(p.ziffer);
-    const hoechstFaktor = cat?.hoechstfaktor ?? 3.5;
-    const ueberHoechst = p.faktor > hoechstFaktor + 1e-9;
-    const showFaktorMeta = isFaktorUeberSchwelle(p.ziffer, p.faktor) || ueberHoechst;
     const rowHints = dedupeHinweise(
       data.hinweise
         .map((h, i) => ({ h, i }))
@@ -848,15 +799,16 @@ export default function Engine3Result({
     const needsAlwaysExplain = p.status === "warnung" || p.status === "fehler";
     const hasRowHints = rowHints.length > 0;
     const showVorschlagOnlyRow = !needsAlwaysExplain && !hasRowHints && p.status === "vorschlag";
-    const lastTrKind: "explain" | "hints" | "vorschlag" | "faktor" | "data" = needsAlwaysExplain
+    const hasFollowingHintRows = needsAlwaysExplain || hasRowHints || showVorschlagOnlyRow;
+    const faktorPanelBorder =
+      hasFollowingHintRows ? "border-b-0" : !hasNextGroup ? "border-b border-border/50" : "border-b-0";
+    const lastTrKind: "explain" | "hints" | "vorschlag" | "data" = needsAlwaysExplain
       ? "explain"
       : hasRowHints
         ? "hints"
         : showVorschlagOnlyRow
           ? "vorschlag"
-          : showFaktorMeta
-            ? "faktor"
-            : "data";
+          : "data";
     return (
       <Fragment key={rowKeyStr}>
         {groupIndex > 0 ? (
@@ -869,8 +821,7 @@ export default function Engine3Result({
         ) : null}
         <tr
           className={cn(
-            "align-top",
-            lastTrKind === "data" && !hasNextGroup ? "border-b border-border/50" : "border-b-0",
+            "align-top border-b-0",
             st === "rejected" && "opacity-50 line-through decoration-muted-foreground",
           )}
         >
@@ -888,12 +839,8 @@ export default function Engine3Result({
           <td className={cn("py-2.5 pr-2 max-w-[180px]", stripe)}>
             <span className="font-medium">{p.bezeichnung}</span>
           </td>
-          <td className={cn("py-2.5 pr-2 align-top", stripe)}>
-            <Engine3FaktorControl
-              ziffer={pBase.ziffer}
-              faktor={p.faktor}
-              onCommit={(v) => setFaktorForRow(rk, pBase, v)}
-            />
+          <td className={cn("py-2.5 pr-2 align-top font-mono tabular-nums text-xs", stripe)}>
+            {String(p.faktor).replace(".", ",")}
           </td>
           <td className={cn("py-2.5 pr-2 text-right whitespace-nowrap", stripe)}>{formatEuro(p.betrag)}</td>
           <td className={cn("py-2.5 pr-0 whitespace-nowrap w-[108px] min-w-[108px]", stripe)}>
@@ -931,63 +878,20 @@ export default function Engine3Result({
             </div>
           </td>
         </tr>
-        {showFaktorMeta ? (
-          <tr className={trEngine3HintRowClass(hasNextGroup, lastTrKind === "faktor")}>
-            <td colSpan={TABLE_COLS} className={cn("py-3 pr-2 pl-2", stripe)}>
-              <div
-                className={cn(
-                  engine3MessageBoxClass(ueberHoechst ? "fehler" : "warnung"),
-                  engine3MessageBoxPadding(),
-                  "space-y-2",
-                )}
-              >
-                {ueberHoechst ? (
-                  <p className={cn("text-xs font-medium leading-snug", engine3MessageBodyClass("fehler"))}>
-                    {buildHoechstfaktorHinweisText(p.ziffer, p.faktor)}
-                  </p>
-                ) : null}
-                {isFaktorUeberSchwelle(p.ziffer, p.faktor) ? (
-                  beispieleTriple.length > 0 ? (
-                    <>
-                      <p className={cn("text-xs font-medium leading-snug", engine3MessageBodyClass("warnung"))}>
-                        Faktor über dem Regelhöchstsatz — für die Abrechnung ist eine nachvollziehbare ärztliche
-                        Begründung erforderlich.
-                      </p>
-                      <p className={engine3MessageSubLabelClass("warnung")}>
-                        Begründung für die Akte (eine von drei Varianten wählen oder anpassen)
-                      </p>
-                      <BegruendungBeispielePicker
-                        key={`${messageId ?? "noid"}-${rk}-stg-${rot}`}
-                        beispiele={beispieleTriple}
-                        persistedText={begruendungOverrides[rk]}
-                        onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
-                        onRegenerate={() => bumpBegruendungRotation(rk)}
-                        surface="warnung"
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <p className={cn("text-xs font-medium leading-snug", engine3MessageBodyClass("warnung"))}>
-                        Faktor über dem Regelhöchstsatz — für die Abrechnung ist eine nachvollziehbare ärztliche
-                        Begründung erforderlich.
-                      </p>
-                      <p className={engine3MessageSubLabelClass("warnung")}>Beispieltext für die Akte</p>
-                      <p className={engine3CopyPasteInnerClass(ueberHoechst ? "fehler" : "warnung")}>
-                        {getSteigerungFallbackBeispiel({
-                          ziffer: p.ziffer,
-                          bezeichnung: p.bezeichnung,
-                          faktor: p.faktor,
-                          betragFormatted: formatEuro(p.betrag),
-                          quelleText: p.quelleText,
-                        })}
-                      </p>
-                    </>
-                  )
-                ) : null}
-              </div>
-            </td>
-          </tr>
-        ) : null}
+        <GoaeFaktorBegruendungPanel
+          p={p}
+          pBase={pBase}
+          rowKey={rk}
+          messageId={messageId}
+          beispieleTriple={beispieleTriple}
+          begruendungOverrides={begruendungOverrides}
+          setBegruendungOverrides={setBegruendungOverrides}
+          onRegenerateBegruendung={() => handleBegruendungRegenerate(rk, p, beispieleTriple)}
+          regenerateLoading={begruendungAiRowKey === rk}
+          onFaktorCommit={(v) => setFaktorForRow(rk, pBase, v)}
+          stripeClass={stripe}
+          trBorderClass={faktorPanelBorder}
+        />
         {needsAlwaysExplain ? (
           <tr className={trEngine3HintRowClass(hasNextGroup, lastTrKind === "explain")}>
             <td colSpan={TABLE_COLS} className={cn("py-3 pr-2 pl-2 space-y-2.5 text-xs", stripe)}>
@@ -1043,7 +947,8 @@ export default function Engine3Result({
                         beispiele={beispieleTriple}
                         persistedText={begruendungOverrides[rk]}
                         onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
-                        onRegenerate={() => bumpBegruendungRotation(rk)}
+                        onRegenerate={() => void handleBegruendungRegenerate(rk, p, beispieleTriple)}
+                        regenerateLoading={begruendungAiRowKey === rk}
                         surface="warnung"
                       />
                     </>
@@ -1069,7 +974,8 @@ export default function Engine3Result({
                     beispiele={beispieleTriple}
                     persistedText={begruendungOverrides[rk]}
                     onTextChange={(t) => setBegruendungOverrides((prev) => ({ ...prev, [rk]: t }))}
-                    onRegenerate={() => bumpBegruendungRotation(rk)}
+                    onRegenerate={() => void handleBegruendungRegenerate(rk, p, beispieleTriple)}
+                    regenerateLoading={begruendungAiRowKey === rk}
                     surface="warnung"
                   />
                 </div>
@@ -1353,6 +1259,7 @@ export default function Engine3Result({
           <p className="leading-relaxed">{quellen.join(" · ")}</p>
         </div>
       ) : null}
+
     </div>
   );
 }

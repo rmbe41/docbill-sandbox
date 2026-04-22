@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/useAuth";
+import { fetchMyOrganisationMemberRow } from "@/lib/organisationContext";
 import { useToast } from "@/hooks/use-toast";
 import {
   mergeStructuredContent,
@@ -17,6 +18,7 @@ export type Conversation = {
   source_filename: string | null;
   archived_at: string | null;
   marked_unread: boolean;
+  organisation_id: string;
 };
 
 export type DbMessage = {
@@ -59,16 +61,38 @@ export const useConversations = () => {
   const createConversation = useCallback(
     async (title: string): Promise<string | null> => {
       if (!user) return null;
+      const mem = await fetchMyOrganisationMemberRow(user.id);
+      if (!mem?.organisation_id) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        toast({
+          title: "Keine Organisation",
+          description: sessionData.session
+            ? "Arbeitsbereich konnte nicht geladen werden. Seite neu laden. Bleibt es: in der Konsole (F12) nach „ensure_user_organisation“ sehen. Entwicklende: fehlende Migration – supabase db push."
+            : "Bitte melden Sie sich erneut an (Sitzung fehlt).",
+          variant: "destructive",
+        });
+        return null;
+      }
       const { data, error } = await supabase
         .from("conversations")
-        .insert({ user_id: user.id, title })
+        .insert({ user_id: user.id, title, organisation_id: mem.organisation_id })
         .select("id")
         .single();
-      if (error || !data) return null;
+      if (error || !data) {
+        console.error("createConversation insert failed", error);
+        toast({
+          title: "Gespräch konnte nicht angelegt werden",
+          description:
+            error?.message?.trim() ||
+            "Bitte prüfen Sie Ihre Verbindung oder laden Sie die Seite neu. Wenn das weiterhin passiert, wenden Sie sich an den Support.",
+          variant: "destructive",
+        });
+        return null;
+      }
       await fetchConversations();
       return data.id;
     },
-    [user, fetchConversations]
+    [user, fetchConversations, toast]
   );
 
   const loadMessages = useCallback(

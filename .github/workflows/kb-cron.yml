@@ -1,0 +1,26 @@
+# Spec 7.2 / 7.3: wöchentliche KB-Edge-Functions. Repo-Secrets: SUPABASE_URL, CRON_SECRET (gleiche Variable wie in Supabase Edge setzen).
+name: kb-weekly
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  trigger-edge:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Crawl + Relevanz + Report
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Set SUPABASE_URL and CRON_SECRET in repository secrets to enable." >&2
+            exit 0
+          fi
+          curl -fsS -X POST "$SUPABASE_URL/functions/v1/crawl-knowledge-base" \
+            -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{}'
+          curl -fsS -X POST "$SUPABASE_URL/functions/v1/beschluss-relevanz-run" \
+            -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{}'
+          curl -fsS -X POST "$SUPABASE_URL/functions/v1/kb-weekly-report" \
+            -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{}'

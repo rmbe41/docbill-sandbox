@@ -10,10 +10,13 @@
 import { parseBehandlungsbericht } from "./dokument-parser.ts";
 import { analysiereMedizinisch } from "./medizinisches-nlp.ts";
 import { mappeGoae } from "./goae-mapping.ts";
+import { mappeEbm } from "./ebm-mapping.ts";
+import { ebmByGop } from "../ebm-catalog-json.ts";
 import {
   pruefeServiceBillingVorschlaege,
   erstelleBegruendungVorschlag,
 } from "./regelengine.ts";
+import { pruefeServiceBillingVorschlaegeEbm } from "./ebm-regelengine.ts";
 import { getBegruendungBeispiele } from "./engine3/begruendung-beispiele.ts";
 import {
   enrichSteigerungsBegruendungenBatch,
@@ -28,6 +31,7 @@ import type {
   FilePayload,
   OptimizeFor,
 } from "./types.ts";
+import { buildAnalyseFromServiceBilling, encodeDocbillAnalyseSse } from "../analyse-envelope.ts";
 
 const PUNKTWERT = 0.0582873;
 
@@ -193,6 +197,98 @@ function parseBetragAusText(text: string): number {
   return 0;
 }
 
+async function runServiceBillingPipelineEbm(
+  input: ServiceBillingInput,
+  apiKey: string,
+  parsedRechnung: ParsedRechnung,
+  medizinischeAnalyse: MedizinischeAnalyse,
+  leistungen: ExtrahierteLeistung[],
+  sachkosten: SachkostenPosition[],
+): Promise<ServiceBillingResult> {
+  const kontextOk = input.kontextWissenEnabled !== false;
+  const mappings = await mappeEbm(
+    parsedRechnung,
+    leistungen,
+    medizinischeAnalyse,
+    apiKey,
+    input.model,
+    kontextOk ? input.adminContext : undefined,
+    kontextOk,
+  );
+  const { excludedZiffern, zusammenfassung: regelZusammenfassung } = pruefeServiceBillingVorschlaegeEbm(
+    mappings.zuordnungen,
+    medizinischeAnalyse,
+  );
+  const hauptZiffern = new Set(mappings.zuordnungen.map((z) => z.ziffer));
+
+  const vorschlaege: ServiceBillingPosition[] = mappings.zuordnungen
+    .filter((z) => !excludedZiffern.has(z.ziffer))
+    .map((z: GoaeZuordnung) => {
+      const e = ebmByGop.get(z.ziffer);
+      const betrag = e ? round2(e.euroWert) : 0;
+      const quelleBeschreibung = quelleBeschreibungFuerLeistungstext(z.leistung, leistungen);
+      return {
+        ziffer: z.ziffer,
+        bezeichnung: e?.bezeichnung ?? z.bezeichnung,
+        faktor: 1,
+        betrag,
+        begruendung: e
+          ? `EBM: ${e.punktzahl} Pkt. / ${betrag.toFixed(2).replace(".", ",")} € laut Katalog.`
+          : "GOP ohne vollständigen Katalogeintrag.",
+        leistung: z.leistung,
+        konfidenz: z.konfidenz,
+        ...(quelleBeschreibung ? { quelleBeschreibung } : {}),
+      };
+    });
+
+  const optimierungen: ServiceBillingPosition[] = [];
+  for (const z of mappings.zuordnungen) {
+    const alts = z.alternativZiffern ?? [];
+    for (const altGop of alts) {
+      if (hauptZiffern.has(altGop) || excludedZiffern.has(altGop)) continue;
+      const e = ebmByGop.get(altGop);
+      if (!e || e.euroWert <= 0) continue;
+      hauptZiffern.add(altGop);
+      const altQuelle = quelleBeschreibungFuerLeistungstext(z.leistung, leistungen);
+      optimierungen.push({
+        ziffer: altGop,
+        bezeichnung: e.bezeichnung,
+        faktor: 1,
+        betrag: round2(e.euroWert),
+        begruendung: `Alternative GOP (EBM) zu „${z.leistung}".`,
+        leistung: `Alternative zu ${z.leistung}`,
+        konfidenz: "mittel",
+        ...(altQuelle ? { quelleBeschreibung: altQuelle } : {}),
+      });
+    }
+  }
+
+  const sachkostenSumme = sachkosten.reduce((sum, s) => sum + s.betrag, 0);
+  const allPositionen = [...vorschlaege, ...optimierungen];
+  const gesamt = allPositionen.reduce((sum, p) => sum + p.betrag, 0) + sachkostenSumme;
+  const avg_factor = allPositionen.length > 0
+    ? allPositionen.reduce((sum, p) => sum + p.faktor, 0) / allPositionen.length
+    : 0;
+  const gesamtPositionen = regelZusammenfassung.gesamt;
+  const compliance_score = gesamtPositionen > 0
+    ? round2(regelZusammenfassung.korrekt / gesamtPositionen)
+    : undefined;
+
+  return {
+    vorschlaege,
+    optimierungen: optimierungen.length > 0 ? optimierungen : undefined,
+    sachkosten: sachkosten.length > 0 ? sachkosten : undefined,
+    summary: {
+      gesamt: round2(gesamt),
+      avg_factor: round2(avg_factor),
+      steigerungen: 0,
+      compliance_score,
+    },
+    klinischerKontext: medizinischeAnalyse.klinischerKontext,
+    fachgebiet: medizinischeAnalyse.fachgebiet,
+  };
+}
+
 export interface ServiceBillingInput {
   /** Bei Dateien: Behandlungsbericht parsen; bei reinem Text: null */
   files?: FilePayload[];
@@ -206,6 +302,9 @@ export interface ServiceBillingInput {
   adminContext?: string;
   /** Default an: GOÄ-/Admin-Blöcke in LLM-Prompts */
   kontextWissenEnabled?: boolean;
+  mode?: "A" | "B" | "C";
+  regelwerk?: "GOAE" | "EBM";
+  pseudonymSessionId?: string;
 }
 
 export async function runServiceBillingPipeline(
@@ -240,6 +339,7 @@ export async function runServiceBillingPipeline(
     input.model,
     kontextOk ? input.adminContext : undefined,
     kontextOk,
+    { pseudonymSessionId: input.pseudonymSessionId },
   );
 
   const leistungen = extrahiereLeistungenAusNlp(medizinischeAnalyse);
@@ -260,6 +360,17 @@ export async function runServiceBillingPipeline(
       klinischerKontext: medizinischeAnalyse.klinischerKontext,
       fachgebiet: medizinischeAnalyse.fachgebiet,
     };
+  }
+
+  if (input.regelwerk === "EBM") {
+    return runServiceBillingPipelineEbm(
+      input,
+      apiKey,
+      parsedRechnung,
+      medizinischeAnalyse,
+      leistungen,
+      sachkosten,
+    );
   }
 
   const mappings = await mappeGoae(
@@ -505,6 +616,13 @@ export async function runServiceBillingAsStream(
         data: result,
       })}\n\n`;
       await writer.write(encoder.encode(resultData));
+
+      const analyseSb = buildAnalyseFromServiceBilling(
+        input.mode ?? "B",
+        input.regelwerk ?? "GOAE",
+        result,
+      );
+      await writer.write(encoder.encode(encodeDocbillAnalyseSse(analyseSb)));
 
       const introText = "**Vorschlag** — Positionen unten in der Karte prüfen und bestätigen.\n\n";
       await writer.write(encoder.encode(`data: ${JSON.stringify({

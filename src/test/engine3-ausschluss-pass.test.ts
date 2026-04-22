@@ -12,7 +12,6 @@ function baseResult(overrides: Partial<Engine3ResultData>): Engine3ResultData {
     modus: "rechnung_pruefung",
     klinischerKontext: "Test",
     fachgebiet: "Allgemein",
-    positionen: [],
     hinweise: [],
     zusammenfassung: {
       geschaetzteSumme: 0,

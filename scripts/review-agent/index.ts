@@ -6,7 +6,7 @@
  */
 import { spawnSync } from "node:child_process";
 
-const CYCLE = 1;
+const CYCLE = Math.max(1, Number.parseInt(process.env.CYCLE_NUMBER ?? "1", 10) || 1);
 
 interface Finding {
   severity: "critical" | "warning" | "info";
