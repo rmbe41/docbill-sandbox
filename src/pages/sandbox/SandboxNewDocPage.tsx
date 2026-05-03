@@ -916,7 +916,7 @@ export default function SandboxNewDocPage() {
           <Textarea rows={4} value={findings} onChange={(e) => setFindings(e.target.value)} />
         </div>
         <div className="space-y-2">
-          <Label>Diagnose (Freitext)</Label>
+          <Label>Diagnose</Label>
           <Textarea rows={2} value={diagnosisText} onChange={(e) => setDiagnosisText(e.target.value)} />
         </div>
         <div className="space-y-2">

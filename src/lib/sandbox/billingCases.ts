@@ -13,12 +13,17 @@ import { billingBasisFromInsurance } from "./types";
 import { invoicePresentationPatch } from "./invoicePresentation";
 import { goaeV2CodeById } from "@/data/goae-catalog-v2";
 import {
-  finalizeEbmToTarget,
+  finalizeEbmSandboxLines,
   finalizeGoaeToTarget,
   r2,
   serviceItemEbm,
   serviceItemGoae,
 } from "./sandboxTariff";
+import {
+  engineArtifactEntryForTemplateIndex,
+  engineEbmVorschlaegeToSandboxItems,
+  engineGoaeVorschlaegeToSandboxItems,
+} from "./sandboxEngineBilling";
 
 export const SANDBOX_BILLING_CASE_COUNT = 50;
 
@@ -43,6 +48,9 @@ export function sandboxBillingTargetEuroForCaseIndex(i: number): number {
 
 type GoaeTpl = { code: string; factor: number; factor_justification?: string };
 
+/** GOP aus KBV-Katalog wie in der EBM-Pipeline (`ebm-mapping` + Katalogsumme); optional Menge für z. B. doppeltes 06333 */
+type EbmSeedLine = string | { gop: string; qty?: number };
+
 type TemplateDef = {
   difficulty: SandboxBillingCase["difficulty"];
   encounter_type: EncounterType;
@@ -52,13 +60,13 @@ type TemplateDef = {
   therapy: string;
   highlights?: HighlightSnippet[];
   /** KBV-GOPs aus dem DocBill EBM-Katalog (`src/data/ebm-catalog-2026-q2.json`) */
-  ebmGops: readonly string[];
+  ebmGops: readonly EbmSeedLine[];
   /** GOÄ aus `goae-catalog-v2`; Faktor nur zwischen Schwelle und Max; bei Faktor über Schwelle: Begründung (GOÄ) */
   goaeLines: readonly GoaeTpl[];
 };
 
 /** 15 Augenheilkunde-Vorlagen: klinischer Text bleibt, Abrechnung fest aus Katalogen abgeleitet */
-const TEMPLATES: TemplateDef[] = [
+export const SANDBOX_BILLING_TEMPLATES: TemplateDef[] = [
   {
     difficulty: "easy",
     encounter_type: "Erstkontakt",
@@ -240,16 +248,18 @@ const TEMPLATES: TemplateDef[] = [
     difficulty: "medium",
     encounter_type: "Erstkontakt",
     anamnesis: "Beidseits verschwommenes Sehen seit zwei Wochen, neue Stärke vermutet.",
-    findings: "Hornhaut klar, beginnend triebige Linse beidseits, Visus ohne Korrektur reduziert.",
+    findings:
+      "Hornhaut klar, beginnend triebige Linse beidseits, Visus ohne Korrektur reduziert. Binokulare Funduskopie beidseits ohne pathologischen Befund.",
     diagnosis_text: "Alterstar (Katarakt) beidseits — OP-Indikation Abklärung.",
     therapy: "Biometrie- und OP-Termin koordiniert.",
     highlights: [
-      { field: "findings", snippet: "triebige Linse", ref: "1240" },
-      { field: "anamnesis", snippet: "verschwommenes Sehen", ref: "03230" },
-      { field: "findings", snippet: "Hornhaut klar", ref: "06333" },
-      { field: "therapy", snippet: "Biometrie-", ref: "06340" },
+      { field: "anamnesis", snippet: "verschwommenes Sehen", ref: "06212" },
+      { field: "findings", snippet: "triebige Linse", ref: "06225" },
+      { field: "findings", snippet: "Funduskopie beidseits", ref: "06333" },
+      { field: "therapy", snippet: "OP-Termin", ref: "06225" },
     ],
-    ebmGops: ["03230", "06333", "06340"],
+    /** Augenärztliche Grundpauschalen/Zuschläge + beidseitige 06333; wie strukturierte KV-Liste (ohne 01601: Ausschluss zu 06212 im Katalog) */
+    ebmGops: ["06212", "06220", "06222", "06225", "06227", { gop: "06333", qty: 2 }],
     goaeLines: [
       {
         code: "3",
@@ -575,7 +585,8 @@ function enrichHighlightsForInvoiceLines(
 export function buildBillingCases(): SandboxBillingCase[] {
   const out: SandboxBillingCase[] = [];
   for (let i = 0; i < SANDBOX_BILLING_CASE_COUNT; i++) {
-    const t = TEMPLATES[i % TEMPLATES.length]!;
+    const tmplIdx = i % SANDBOX_BILLING_TEMPLATES.length;
+    const t = SANDBOX_BILLING_TEMPLATES[tmplIdx]!;
     const target = sandboxBillingTargetEuroForCaseIndex(i);
     const n = i + 1;
     const suffix = ` — Fall ${n}`;
@@ -587,8 +598,18 @@ export function buildBillingCases(): SandboxBillingCase[] {
       therapy: t.therapy,
     };
 
-    const seedEbm = t.ebmGops.map(serviceItemEbm).filter((x): x is ServiceItemEbm => Boolean(x));
-    const service_items_ebm = finalizeEbmToTarget(seedEbm, target);
+    const engineArt = engineArtifactEntryForTemplateIndex(tmplIdx);
+
+    const seedEbm = t.ebmGops
+      .map((spec) =>
+        typeof spec === "string"
+          ? serviceItemEbm(spec)
+          : serviceItemEbm(spec.gop, { quantity: spec.qty }),
+      )
+      .filter((x): x is ServiceItemEbm => Boolean(x));
+    const service_items_ebm = engineArt?.ebmVorschlaege?.length
+      ? engineEbmVorschlaegeToSandboxItems(engineArt.ebmVorschlaege)
+      : finalizeEbmSandboxLines(seedEbm);
 
     const goaeTpl = t.goaeLines.map((row) => ({ ...row }));
     if (i % 11 === 5 && goaeTpl.length > 0) {
@@ -613,7 +634,9 @@ export function buildBillingCases(): SandboxBillingCase[] {
     const seedGo = goaeTpl
       .map((l) => serviceItemGoae(l.code, l.factor, l.factor_justification))
       .filter((x): x is ServiceItemGoae => Boolean(x));
-    const service_items_goae = finalizeGoaeToTarget(seedGo, target);
+    const service_items_goae = engineArt?.goaeVorschlaege?.length
+      ? engineGoaeVorschlaegeToSandboxItems(engineArt.goaeVorschlaege)
+      : finalizeGoaeToTarget(seedGo, target);
 
     let difficulty: SandboxBillingCase["difficulty"] = t.difficulty;
     if (i % 17 === 0 || i % 19 === 0) difficulty = "hard";
@@ -628,7 +651,7 @@ export function buildBillingCases(): SandboxBillingCase[] {
       service_items_ebm,
       service_items_goae,
       total_amount: r2(target),
-      meta: { notes: `Fall sb-case-${String(n).padStart(3, "0")} · Vorlage ${(i % TEMPLATES.length) + 1}` },
+      meta: { notes: `Fall sb-case-${String(n).padStart(3, "0")} · Vorlage ${tmplIdx + 1}` },
     });
   }
   return out;

@@ -41,7 +41,7 @@ export default function SandboxDokumentationenPage() {
               <TableHead className="w-[120px]">Datum</TableHead>
               <TableHead>Patient</TableHead>
               <TableHead className="min-w-[200px]">Versicherung</TableHead>
-              <TableHead>Diagnose (Freitext)</TableHead>
+              <TableHead>Diagnose</TableHead>
               <TableHead className="w-[110px]">Status</TableHead>
               <TableHead className="w-[100px] text-right">Aktionen</TableHead>
             </TableRow>

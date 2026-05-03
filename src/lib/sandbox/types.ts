@@ -84,8 +84,12 @@ export type SandboxDocumentation = {
 export type ServiceItemEbm = {
   code: string;
   label: string;
+  /** Zeilen-Gesamtbetrag (Einzel × Menge), aus KBV-Katalog bzw. Sandbox-Ableitung */
   amount_eur?: number;
+  /** EBM-Punkte pro Einheitposition, sofern aus Katalog */
   points?: number;
+  /** z. B. 06333 zweimal beidseits — Anzeige als (2× Einzelbetrag) */
+  quantity?: number;
 };
 
 export type ServiceItemGoae = {

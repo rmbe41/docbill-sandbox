@@ -53,6 +53,7 @@ function insuranceForIndex(i: number): Pick<SandboxPatient, "insurance_type" | "
   return { insurance_type: "GKV", insurance_provider: kk };
 }
 
+/** Abwechselnd typisch weibliche / männliche Vornamen (Index i → Geschlecht in `buildSandboxSeedPatients`). */
 const FIRST = [
   "Maria",
   "Thomas",
@@ -65,7 +66,7 @@ const FIRST = [
   "Emilia",
   "Paul",
   "Hannah",
-  "Max",
+  "Maximilian",
   "Lea",
   "Ben",
   "Lisa",
@@ -73,7 +74,7 @@ const FIRST = [
   "Julia",
   "David",
   "Sarah",
-  "Jan",
+  "Lukas",
   "Nina",
   "Simon",
   "Katharina",
@@ -222,7 +223,6 @@ export function buildSandboxSeedPatients(): SandboxPatient[] {
   for (let i = 0; i < 30; i++) {
     const ins = insuranceForIndex(i);
     const id = `sb-pat-${String(i + 1).padStart(2, "0")}`;
-    const genders = ["weiblich", "männlich", "divers"];
     const plz = String(10000 + ((i * 137) % 89999)).padStart(5, "0");
     const memberYear = 2008 + (i % 15);
     const memberMonth = String((i % 11) + 1).padStart(2, "0");
@@ -240,7 +240,7 @@ export function buildSandboxSeedPatients(): SandboxPatient[] {
       insurance_number: `K${100000000 + i}`,
       insurance_status:
         ins.insurance_type === "GKV" ? "Mitglied" : ins.insurance_type === "PKV" ? "Versichert" : "Selbstzahlend",
-      gender: genders[i % genders.length],
+      gender: i % 2 === 0 ? "weiblich" : "männlich",
       street: `Musterweg ${((i * 3) % 40) + 1}`,
       postal_code: plz,
       city: SEED_CITIES[i % SEED_CITIES.length]!,

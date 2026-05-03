@@ -1,4 +1,15 @@
 import type { ConfidenceLevel, SandboxInvoice, ServiceItemEbm, ServiceItemGoae } from "./types";
+import { r2 } from "./sandboxTariff";
+
+/** Deutsche Währungsangabe für EBM-Zeilen; bei Menge z. B. „13,50 € (2× 6,75 €)” */
+export function germanEbmLineAmountEuro(item: Pick<ServiceItemEbm, "amount_eur" | "quantity">): string {
+  const cur = "EUR" as const;
+  const amt = item.amount_eur ?? 0;
+  const q = item.quantity ?? 1;
+  if (q <= 1) return amt.toLocaleString("de-DE", { style: "currency", currency: cur });
+  const unit = r2(amt / q);
+  return `${amt.toLocaleString("de-DE", { style: "currency", currency: cur })} (${q}× ${unit.toLocaleString("de-DE", { style: "currency", currency: cur })})`;
+}
 
 /** Summe nur der zur Rechnungsgrundlage gehörenden Positionen — EBM vs. GOÄ nicht addieren */
 export function recalcInvoiceTotal(inv: SandboxInvoice): number {

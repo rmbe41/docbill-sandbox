@@ -29,7 +29,8 @@
     "ebm:extract": "node scripts/ebm/extract-ebm-from-pdf.mjs",
     "generate:benchmark-cases:v2": "npx tsx benchmarks/goae-engine-eval/scripts/generate-v2-exclusion-cases.ts",
     "pdf:ingest": "npx tsx scripts/pdf-ingest/ingest-cli.ts",
-    "sandbox:logos": "node scripts/scrape-krankenkassen-logos.mjs"
+    "sandbox:logos": "node scripts/scrape-krankenkassen-logos.mjs",
+    "sandbox:engine-billing": "npx deno run --config=scripts/sandbox/deno.json --sloppy-imports --no-check --allow-net --allow-read --allow-write --allow-env scripts/sandbox/generate-engine-billing-artifacts.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

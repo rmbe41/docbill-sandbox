@@ -1,4 +1,4 @@
-import goaeCatalogV2Json from "./goae-catalog-v2.json";
+import goaeCatalogV2Json from "./goae-catalog-v2.json" with { type: "json" };
 import type { GoaeV2Catalog, GoaeV2Code } from "./goae-catalog-v2-schema";
 
 export const goaeCatalogV2 = goaeCatalogV2Json as GoaeV2Catalog;

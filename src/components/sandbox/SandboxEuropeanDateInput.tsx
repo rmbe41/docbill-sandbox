@@ -31,7 +31,7 @@ export function SandboxEuropeanDateInput({
       type="text"
       inputMode="numeric"
       autoComplete="off"
-      placeholder="TT/MM/JJJJ"
+      placeholder="TT.MM.JJJJ"
       className={cn("tabular-nums", className)}
       value={text}
       onFocus={(e) => {

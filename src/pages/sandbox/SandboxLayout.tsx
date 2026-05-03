@@ -7,20 +7,11 @@ import DocBillLogo from "@/assets/DocBill-Logo.svg";
 
 export default function SandboxLayout() {
   const { pathname } = useLocation();
-  const { reset, state } = useSandbox();
+  const { state } = useSandbox();
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="border-b border-border bg-muted/50 dark:bg-muted/40">
-          <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-2 flex flex-wrap items-center gap-3 text-xs">
-            <p className="text-foreground font-medium">Beispieldaten — Zurücksetzen lädt den Anfangszustand neu.</p>
-            <Button variant="outline" size="sm" className="h-7 text-xs bg-background" type="button" onClick={() => reset()}>
-              Zurücksetzen
-            </Button>
-          </div>
-        </div>
-
         <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-3">
           <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
             <div className="justify-self-start min-w-0 flex flex-col gap-1 self-start">

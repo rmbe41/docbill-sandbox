@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "@/": "../../src/",
+    "#/": "../../supabase/functions/goae-chat/",
+    "zod": "npm:zod@3.23.8"
+  }
+}

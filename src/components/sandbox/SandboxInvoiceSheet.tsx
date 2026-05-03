@@ -15,6 +15,7 @@ import {
   SANDBOX_INVOICE_STATUS_LABEL,
   type SandboxInvoice,
 } from "@/lib/sandbox/types";
+import { germanEbmLineAmountEuro } from "@/lib/sandbox/invoicePresentation";
 import { InsurerLabelRow } from "@/components/sandbox/InsurerMark";
 import { ConfidenceDot, PayerChip, SandboxGoaePositionBlock } from "@/components/sandbox/sandboxUi";
 import { terminalSubLabel } from "@/lib/sandbox/board";
@@ -132,15 +133,13 @@ export function SandboxInvoiceSheet({
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-2">EBM (GKV)</p>
                   <ul className="space-y-1 text-xs">
-                    {invoice.service_items_ebm.map((r) => (
-                      <li key={r.code}>
+                    {invoice.service_items_ebm.map((r, idx) => (
+                      <li key={`ebm-${idx}-${r.code}`}>
                         <span className="font-mono">{r.code}</span> {r.label}
-                        {r.amount_eur != null && (
-                          <span className="text-muted-foreground tabular-nums">
-                            {" "}
-                            · {r.amount_eur.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
-                          </span>
-                        )}
+                        <span className="text-muted-foreground tabular-nums">
+                          {" "}
+                          · {germanEbmLineAmountEuro(r)}
+                        </span>
                       </li>
                     ))}
                   </ul>

@@ -1,4 +1,4 @@
-import ebmCatalogJson from "@/data/ebm-catalog-2026-q2.json";
+import ebmCatalogJson from "@/data/ebm-catalog-2026-q2.json" with { type: "json" };
 import { goaeV2CodeById, isGoaeV2CodeExcluded } from "@/data/goae-catalog-v2";
 import type { ServiceItemEbm, ServiceItemGoae } from "./types";
 
@@ -17,6 +17,17 @@ type EbmGopRow = {
 const DB = ebmCatalogJson as { orientierungswert?: number; gops: EbmGopRow[] };
 
 export const ebmPositionByGop = new Map<string, EbmGopRow>(DB.gops.map((g) => [g.gop, g]));
+
+const EBM_ORIENTIERUNGSWERT = DB.orientierungswert ?? 0;
+
+/**
+ * Einige GOP-Zeilen haben in der PDF-Extraktion 0 € ohne Punktzahl; für die Sandbox nutzen wir
+ * dokumentierte Orientierungsbeträge (€), damit die Demo strukturell KBV-/Engine-nah bleibt.
+ */
+const EBM_SANDBOX_FALLBACK_EURO: Record<string, number> = {
+  /** Zuschlag augenärztliche Grundversorgung — Extrakt ohne €/Pkt.; Demo wie Engine-Summenbildung */
+  "06220": 2.68,
+};
 
 /** Aufsteigend € – für kleine „Lücken“ bei EBM-Summenziel */
 export const SANDBOX_EBM_FILLERS_ASC: readonly EbmGopRow[] = [...DB.gops]
@@ -46,6 +57,16 @@ function buildSandboxGoaeFillerCodesDesc(): string[] {
 const SANDBOX_GOAE_FILLERS_DESC: readonly string[] = buildSandboxGoaeFillerCodesDesc();
 const SANDBOX_GOAE_FILLERS_ASC: readonly string[] = [...SANDBOX_GOAE_FILLERS_DESC].slice().reverse();
 
+export function unitEbmEuroFromCatalogRow(row: EbmGopRow): number | null {
+  if (row.euroWert > 0) return r2(row.euroWert);
+  if (row.punktzahl > 0 && EBM_ORIENTIERUNGSWERT > 0) {
+    return r2((row.punktzahl * EBM_ORIENTIERUNGSWERT) / 100);
+  }
+  const fb = EBM_SANDBOX_FALLBACK_EURO[row.gop];
+  if (fb != null && fb > 0) return r2(fb);
+  return null;
+}
+
 export function sumEbm(items: readonly ServiceItemEbm[]): number {
   return r2(items.reduce((s, x) => s + (x.amount_eur ?? 0), 0));
 }
@@ -54,15 +75,37 @@ export function sumGoae(items: readonly ServiceItemGoae[]): number {
   return r2(items.reduce((s, x) => s + x.amount, 0));
 }
 
-export function serviceItemEbm(gop: string): ServiceItemEbm | null {
+export function serviceItemEbm(
+  gop: string,
+  options?: { quantity?: number },
+): ServiceItemEbm | null {
   const row = ebmPositionByGop.get(gop);
-  if (!row || row.euroWert <= 0) return null;
+  if (!row) return null;
+  const unit = unitEbmEuroFromCatalogRow(row);
+  if (unit == null || unit <= 0) return null;
+  const quantity = Math.max(1, options?.quantity ?? 1);
+  const amount_eur = r2(unit * quantity);
   return {
     code: row.gop,
     label: row.bezeichnung.trim() || row.gop,
     points: row.punktzahl,
-    amount_eur: r2(row.euroWert),
+    amount_eur,
+    ...(quantity > 1 ? { quantity } : {}),
   };
+}
+
+/** Reihenfolge wie typische KV-Liste: 062…-Paket zuerst, danach 063…-Erweiterungen, dann Briefe 016…. */
+export function finalizeEbmSandboxLines(seedItems: readonly ServiceItemEbm[]): ServiceItemEbm[] {
+  const prefWeight = (code: string): number => {
+    if (code.startsWith("062")) return 100;
+    if (code.startsWith("063")) return 200;
+    if (code.startsWith("064")) return 250;
+    if (code.startsWith("016")) return 800;
+    return 400;
+  };
+  return [...seedItems].sort(
+    (a, b) => prefWeight(a.code) - prefWeight(b.code) || a.code.localeCompare(b.code),
+  );
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -175,38 +218,6 @@ function appendGoaeLinesTowardTarget(lines: readonly ServiceItemGoae[], targetEu
   return out;
 }
 
-/** EBM: nur echte GOP-Beträge, optional Ziel € durch zusätzliche/abgetrennte Positionen (gleicher Ansatz wie Service-Billing: Summe aus Katalog) */
-export function finalizeEbmToTarget(seedItems: readonly ServiceItemEbm[], targetEuro: number): ServiceItemEbm[] {
-  let lines = [...seedItems];
-
-  while (lines.length > 1 && sumEbm(lines) > targetEuro + EPS) {
-    lines.sort((a, b) => (b.amount_eur ?? 0) - (a.amount_eur ?? 0));
-    lines.shift();
-  }
-
-  let guard = 0;
-  const used = () => new Set(lines.map((l) => l.code));
-  while (sumEbm(lines) + EPS < targetEuro && guard++ < 4000) {
-    const rem = targetEuro - sumEbm(lines);
-    const u = used();
-    let pick =
-      SANDBOX_EBM_FILLERS_DESC.find((row) => !u.has(row.gop) && row.euroWert <= rem + EPS) ?? null;
-    if (!pick)
-      pick = SANDBOX_EBM_FILLERS_ASC.find((row) => !u.has(row.gop) && row.euroWert >= rem - EPS) ?? null;
-    if (!pick) {
-      pick = SANDBOX_EBM_FILLERS_ASC.find((row) => !u.has(row.gop)) ?? null;
-    }
-    if (!pick) {
-      pick = SANDBOX_EBM_FILLERS_ASC[0] ?? null;
-    }
-    if (!pick) break;
-    const item = serviceItemEbm(pick.gop);
-    if (item) lines.push(item);
-    else break;
-  }
-
-  return lines;
-}
 
 /** GOÄ: Faktoren im Katalog-Intervall [Schwelle, Max] so anpassen, dass die Summe dem Ziel nahekommt; ggf. eine konfliktfreie Zusatzposition */
 export function finalizeGoaeToTarget(seedItems: readonly ServiceItemGoae[], targetEuro: number): ServiceItemGoae[] {

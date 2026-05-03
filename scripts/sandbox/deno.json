@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "strict": false,
+    "noUncheckedIndexedAccess": false,
+    "lib": ["deno.ns", "deno.worker", "esnext", "dom", "dom.iterable"]
+  },
+  "importMap": "deno-import-map.json",
+  "nodeModulesDir": "none"
+}

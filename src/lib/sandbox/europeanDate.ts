@@ -1,4 +1,4 @@
-/** Sandbox-Daten speichern ISO-Datum (yyyy-mm-dd); Anzeige/Eingabe europäisch dd/mm/yyyy. */
+/** Sandbox-Daten speichern ISO-Datum (yyyy-mm-dd); Anzeige europäisch dd.mm.yyyy. */
 
 const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const EURO_DAY = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/;
@@ -11,10 +11,10 @@ export function formatSandboxDateEuropean(
   if (value == null || !String(value).trim()) return empty;
   const m = String(value).trim().match(ISO_DAY);
   if (!m) return String(value).trim();
-  return `${m[3]}/${m[2]}/${m[1]}`;
+  return `${m[3]}.${m[2]}.${m[1]}`;
 }
 
-/** Akzeptiert yyyy-mm-dd oder dd/mm/yyyy (auch mit `.` als Trenner). */
+/** Akzeptiert yyyy-mm-dd oder dd.mm.yyyy / dd/mm/yyyy (`.` oder `/` als Trenner). */
 export function parseSandboxDateToIso(raw: string): string | null {
   const s = raw.trim();
   if (!s) return null;

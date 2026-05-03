@@ -4,7 +4,11 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
-import { invoicePresentationPatch } from "@/lib/sandbox/invoicePresentation";
+import {
+  invoicePresentationPatch,
+  germanEbmLineAmountEuro,
+  recalcInvoiceTotal,
+} from "@/lib/sandbox/invoicePresentation";
 import { BILLING_CASES } from "@/lib/sandbox/billingCases";
 import { SANDBOX_CONSENT_LABEL, type HighlightSnippet } from "@/lib/sandbox/types";
 import {
@@ -51,7 +55,8 @@ export default function SandboxReviewPage() {
   const isProposed = invoice.status === "proposed";
 
   const lineKeyList = useMemo(() => {
-    if (isStatutory) return invoice.service_items_ebm.map((r) => `ebm:${r.code}`);
+    if (isStatutory)
+      return invoice.service_items_ebm.map((r, i) => `ebm:${i}:${r.code}`);
     return invoice.service_items_goae.map((_, i) => `goae:${i}`);
   }, [isStatutory, invoice.service_items_ebm, invoice.service_items_goae]);
 
@@ -61,6 +66,25 @@ export default function SandboxReviewPage() {
     if (!isProposed) return;
     setAcceptedLines(new Set());
   }, [invoice.id, lineKeysSig, isProposed]);
+
+  const proposalTotalAll = useMemo(() => recalcInvoiceTotal(invoice), [invoice]);
+
+  const acceptedPositionsTotal = useMemo(() => {
+    if (isStatutory) {
+      const raw = invoice.service_items_ebm.reduce((s, r, i) => {
+        const key = `ebm:${i}:${r.code}`;
+        if (!acceptedLines.has(key)) return s;
+        return s + (r.amount_eur ?? 0);
+      }, 0);
+      return Math.round(raw * 100) / 100;
+    }
+    const raw = invoice.service_items_goae.reduce((s, r, idx) => {
+      const key = `goae:${idx}`;
+      if (!acceptedLines.has(key)) return s;
+      return s + r.amount;
+    }, 0);
+    return Math.round(raw * 100) / 100;
+  }, [isStatutory, invoice.service_items_ebm, invoice.service_items_goae, acceptedLines]);
 
   const applyPresentation = (next: typeof invoice) => {
     patchInvoice(invoice.id, invoicePresentationPatch(next));
@@ -202,7 +226,7 @@ export default function SandboxReviewPage() {
                   </div>
                   <ul className="space-y-2">
                     {invoice.service_items_ebm.map((r, i) => {
-                      const key = `ebm:${r.code}`;
+                      const key = `ebm:${i}:${r.code}`;
                       const ok = acceptedLines.has(key);
                       const evidenceLinks = sandboxHighlightsForCode(highlights, r.code);
                       return (
@@ -215,9 +239,7 @@ export default function SandboxReviewPage() {
                               <LineDocEvidence hints={evidenceLinks} />
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <span className="tabular-nums text-muted-foreground">
-                                {(r.amount_eur ?? 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
-                              </span>
+                              <span className="tabular-nums text-muted-foreground">{germanEbmLineAmountEuro(r)}</span>
                               {isProposed ? (
                                 <Button
                                   variant={ok ? "secondary" : "outline"}
@@ -319,11 +341,24 @@ export default function SandboxReviewPage() {
           </ScrollArea>
 
           <div className="p-4 border-t border-border/70 bg-muted/20">
-            <div className="text-xs text-muted-foreground tabular-nums text-right w-full">
-              Summe{" "}
-              <span className="text-lg font-semibold text-foreground inline-block ml-2">
-                {invoice.total_amount.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
-              </span>
+            <div className="flex flex-col items-end gap-1 text-right w-full tabular-nums">
+              <div className="text-xs text-muted-foreground">
+                Summe{" "}
+                <span className="text-lg font-semibold text-foreground">
+                  {(isProposed && lineKeyList.length > 0 ? acceptedPositionsTotal : invoice.total_amount).toLocaleString(
+                    "de-DE",
+                    { style: "currency", currency: "EUR" },
+                  )}
+                </span>
+              </div>
+              {isProposed && lineKeyList.length > 0
+                ? Math.abs(acceptedPositionsTotal - proposalTotalAll) > 0.005 && (
+                    <p className="text-[10px] leading-tight text-muted-foreground m-0">
+                      alle vorgeschlagen{" "}
+                      {proposalTotalAll.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+                    </p>
+                  )
+                : null}
             </div>
           </div>
         </div>
