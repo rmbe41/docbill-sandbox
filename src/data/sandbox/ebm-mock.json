@@ -1,0 +1,202 @@
+[
+  {
+    "code": "03230",
+    "label": "Beratung – Problemorientiert",
+    "points": 160
+  },
+  {
+    "code": "03240",
+    "label": "Symptombezogene Untersuchung",
+    "points": 120
+  },
+  {
+    "code": "01424",
+    "label": "Erstkontaktaufnahme — Beispielzuordnung",
+    "points": 100
+  },
+  {
+    "code": "01423",
+    "label": "Untersuchung zur Erstdiagnosestellung",
+    "points": 280
+  },
+  {
+    "code": "01732",
+    "label": "Ultraschall Abdomen",
+    "points": 450
+  },
+  {
+    "code": "01701",
+    "label": "Ruhe-EKG",
+    "points": 220
+  },
+  {
+    "code": "03100",
+    "label": "Labor Blutentnahme Basis",
+    "points": 80
+  },
+  {
+    "code": "03150",
+    "label": "Labor CRP",
+    "points": 45
+  },
+  {
+    "code": "01570",
+    "label": "Immunisierung Beratung",
+    "points": 90
+  },
+  {
+    "code": "02420",
+    "label": "Chroniker-Pauschale",
+    "points": 60
+  },
+  {
+    "code": "03711",
+    "label": "Psychosomatische Grundversorgung",
+    "points": 210
+  },
+  {
+    "code": "04520",
+    "label": "Asthma/COPD Kontakt",
+    "points": 180
+  },
+  {
+    "code": "04521",
+    "label": "Spirometrie",
+    "points": 350
+  },
+  {
+    "code": "05610",
+    "label": "Diabetes Schulung",
+    "points": 150
+  },
+  {
+    "code": "05611",
+    "label": "HbA1c Labor",
+    "points": 55
+  },
+  {
+    "code": "06700",
+    "label": "Notfallpauschale Praxis",
+    "points": 400
+  },
+  {
+    "code": "07810",
+    "label": "Präventionsuntersuchung",
+    "points": 320
+  },
+  {
+    "code": "08900",
+    "label": "Hausärztliche Koordination",
+    "points": 130
+  },
+  {
+    "code": "09110",
+    "label": "Wundversorgung",
+    "points": 170
+  },
+  {
+    "code": "10220",
+    "label": "Infusion kurz",
+    "points": 240
+  },
+  {
+    "code": "11330",
+    "label": "Langzeit-RR",
+    "points": 190
+  },
+  {
+    "code": "12440",
+    "label": "Hausbesuch",
+    "points": 520
+  },
+  {
+    "code": "13550",
+    "label": "Akupunktur GOP",
+    "points": 110
+  },
+  {
+    "code": "14660",
+    "label": "Telefonische Beratung",
+    "points": 70
+  },
+  {
+    "code": "15770",
+    "label": "Rezept-/Überweisungsmanagement",
+    "points": 40
+  },
+  {
+    "code": "16880",
+    "label": "Arbeitsunfähigkeitsbescheinigung",
+    "points": 60
+  },
+  {
+    "code": "17990",
+    "label": "Rehab-Vorbereitung",
+    "points": 200
+  },
+  {
+    "code": "18100",
+    "label": "GOP Platzhalter X",
+    "points": 100
+  },
+  {
+    "code": "18200",
+    "label": "GOP Platzhalter Y",
+    "points": 110
+  },
+  {
+    "code": "18300",
+    "label": "GOP Platzhalter Z",
+    "points": 120
+  },
+  {
+    "code": "21001",
+    "label": "Augenärztliche problemorientierte Beratung (Sandbox)",
+    "points": 160
+  },
+  {
+    "code": "21002",
+    "label": "Biomikroskopie / Spaltlampe — vorderer Bulbusabschnitt (Sandbox)",
+    "points": 220
+  },
+  {
+    "code": "21003",
+    "label": "Tonometrie / Augendruck — Serienmessung (Sandbox)",
+    "points": 140
+  },
+  {
+    "code": "21004",
+    "label": "Streifenbild / binokulare Funduskopie dokumentiert (Sandbox)",
+    "points": 190
+  },
+  {
+    "code": "21005",
+    "label": "OCT Papille / Makula — Auswertung (Sandbox)",
+    "points": 520
+  },
+  {
+    "code": "21006",
+    "label": "Automatische Perimetrie / Gesichtsfeld (Sandbox)",
+    "points": 380
+  },
+  {
+    "code": "21007",
+    "label": "I.v.-FA / ICG — Durchführung und Befundung (Sandbox)",
+    "points": 640
+  },
+  {
+    "code": "21008",
+    "label": "Lasertherapie Retina — Planung und Nachsorge (Sandbox)",
+    "points": 290
+  },
+  {
+    "code": "21009",
+    "label": "OP-Vorbereitung / mikrochirurgischer Eingriff Auge — Komplex (Sandbox)",
+    "points": 980
+  },
+  {
+    "code": "21010",
+    "label": "Augenärztlicher Notfall Praxis — Pauschale (Sandbox)",
+    "points": 400
+  }
+]

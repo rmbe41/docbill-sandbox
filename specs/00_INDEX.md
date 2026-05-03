@@ -1,7 +1,7 @@
 # DocBill – Spezifikation v1.3 (Modular)
 
 **Version:** 1.3  
-**Stand:** April 2026  
+**Stand:** Mai 2026  
 **Status:** Final  
 **Zielgruppe:** Cursor / Entwicklungsteam  
 
@@ -28,6 +28,7 @@ Die Spec ist in einzelne Dateien aufgeteilt, damit Cursor pro Task nur den relev
 | `06_ARCHITECTURE.md` | System-Architektur, Pseudonymisierung, große Dateien, Chunking, Sessions, EBM-Integration. | Bei Backend-Architektur, Infrastruktur. |
 | `07_COMPLIANCE_AND_OPS.md` | DSGVO, Disclaimer, Out of Scope, KPIs, Risiken, offene Fragen. | Bei Compliance, Launch-Vorbereitung. |
 | `08_AUTH_AND_TENANCY.md` | Multi-Tenancy, Rollen (Admin/Manager/Viewer), SSO, Datenisolierung. | Bei Auth, User-Management, Rollen. |
+| `09_SANDBOX_PROTOTYPE.md` | DocBill Sandbox v0.2: klickbarer Prototyp auf Mock-Daten, IA, Board ohne DnD, 50 deterministische Billing-Cases (GOÄ+EBM), LocalStorage-Seed. | Bei Sandbox-Routes, Demo-Flows, Fixture-JSON. |
 
 ---
 
@@ -43,6 +44,7 @@ Die Spec ist in einzelne Dateien aufgeteilt, damit Cursor pro Task nur den relev
 | E2E-Tests | `01_DEV_LIFECYCLE.md` | `07_COMPLIANCE_AND_OPS.md` |
 | EBM-Integration | `06_ARCHITECTURE.md` | `02_MODES_AND_PIPELINE.md`, `05_KNOWLEDGE_BASE.md` |
 | Batch-Verarbeitung | `03_UI_UX.md` | `06_ARCHITECTURE.md`, `04_INVOICE_AND_EXPORT.md` |
+| Sandbox-Prototyp (Demo-Daten, keine Produktiv-Pipeline) | `09_SANDBOX_PROTOTYPE.md` | `03_UI_UX.md`, `04_INVOICE_AND_EXPORT.md` |
 
 ---
 

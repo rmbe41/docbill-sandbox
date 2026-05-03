@@ -1,0 +1,272 @@
+[
+  {
+    "code": "1",
+    "label": "Beratung",
+    "defaultEuro": 10.72
+  },
+  {
+    "code": "3",
+    "label": "Eingehende Untersuchung",
+    "defaultEuro": 22.18
+  },
+  {
+    "code": "5",
+    "label": "Symptombezogene Untersuchung",
+    "defaultEuro": 10.72
+  },
+  {
+    "code": "7",
+    "label": "Vollständige körperliche Untersuchung",
+    "defaultEuro": 21.45
+  },
+  {
+    "code": "29",
+    "label": "Erhebung der Fremdanamnese",
+    "defaultEuro": 16.09
+  },
+  {
+    "code": "250",
+    "label": "Blutentnahme aus Vene",
+    "defaultEuro": 5.36
+  },
+  {
+    "code": "3511",
+    "label": "Ruhe-EKG mindestens neun Ableitungen",
+    "defaultEuro": 26.14
+  },
+  {
+    "code": "612",
+    "label": "Ultraschall eines Organs",
+    "defaultEuro": 40
+  },
+  {
+    "code": "750",
+    "label": "Beratung telefonisch",
+    "defaultEuro": 9
+  },
+  {
+    "code": "2000",
+    "label": "Beratung – Haut",
+    "defaultEuro": 15.2
+  },
+  {
+    "code": "3780",
+    "label": "Beratung mit symptombezogener Untersuchung",
+    "defaultEuro": 24
+  },
+  {
+    "code": "1240",
+    "label": "Spaltlampenuntersuchung",
+    "defaultEuro": 26.8
+  },
+  {
+    "code": "1241",
+    "label": "Tonometrie / Applanation (Augenheilkunde, Sandbox)",
+    "defaultEuro": 18.5
+  },
+  {
+    "code": "1242",
+    "label": "Digitale Fundus-/CCD-Dokumentation (Sandbox)",
+    "defaultEuro": 34
+  },
+  {
+    "code": "1245",
+    "label": "Computergestützte Gesichtsfeldprüfung (Sandbox)",
+    "defaultEuro": 48
+  },
+  {
+    "code": "03221",
+    "label": "Injektion, subkutan",
+    "defaultEuro": 8.5
+  },
+  {
+    "code": "0150",
+    "label": "Analogabrechnung",
+    "defaultEuro": 12.5
+  },
+  {
+    "code": "4850",
+    "label": "Bronchoskopie",
+    "defaultEuro": 120
+  },
+  {
+    "code": "602",
+    "label": "Ultraschall — zweites Organ",
+    "defaultEuro": 35
+  },
+  {
+    "code": "800",
+    "label": "Akupunktur Einzelbehandlung",
+    "defaultEuro": 18
+  },
+  {
+    "code": "410",
+    "label": "Verband klein",
+    "defaultEuro": 6.5
+  },
+  {
+    "code": "420",
+    "label": "Verband mittel",
+    "defaultEuro": 9.2
+  },
+  {
+    "code": "460",
+    "label": "Infusion intravenös kurz",
+    "defaultEuro": 22
+  },
+  {
+    "code": "605",
+    "label": "Sonographie Abdomen",
+    "defaultEuro": 38
+  },
+  {
+    "code": "710",
+    "label": "Psychotherapeutisch orientierte Gesprächsführung",
+    "defaultEuro": 25
+  },
+  {
+    "code": "2500",
+    "label": "Labor – kleines Blutbild zugeordnet",
+    "defaultEuro": 12
+  },
+  {
+    "code": "2970",
+    "label": "Labor – CRP",
+    "defaultEuro": 8
+  },
+  {
+    "code": "2972",
+    "label": "Labor – Troponin",
+    "defaultEuro": 18
+  },
+  {
+    "code": "3550",
+    "label": "Langzeit-EKG Auswertung",
+    "defaultEuro": 45
+  },
+  {
+    "code": "3555",
+    "label": "Langzeit-BDEinsatz",
+    "defaultEuro": 55
+  },
+  {
+    "code": "2090",
+    "label": "Injektion intramuskulär",
+    "defaultEuro": 7.5
+  },
+  {
+    "code": "3020",
+    "label": "Wundversorgung ausführlich",
+    "defaultEuro": 28
+  },
+  {
+    "code": "385",
+    "label": "Blutdruckmessung Langzeit",
+    "defaultEuro": 15
+  },
+  {
+    "code": "395",
+    "label": "Ruhespirographie",
+    "defaultEuro": 42
+  },
+  {
+    "code": "520",
+    "label": "Beratung Schwangerschaft",
+    "defaultEuro": 20
+  },
+  {
+    "code": "540",
+    "label": "Untersuchung Schwangerschaft",
+    "defaultEuro": 24
+  },
+  {
+    "code": "560",
+    "label": "CT nicht invasiv — Analog",
+    "defaultEuro": 180
+  },
+  {
+    "code": "570",
+    "label": "MRT — Analog",
+    "defaultEuro": 220
+  },
+  {
+    "code": "580",
+    "label": "Physikalische Therapie Einheit",
+    "defaultEuro": 14
+  },
+  {
+    "code": "590",
+    "label": "Akute Schmerzbehandlung",
+    "defaultEuro": 19
+  },
+  {
+    "code": "600",
+    "label": "Wiederholungsrezept Telefon",
+    "defaultEuro": 5
+  },
+  {
+    "code": "610",
+    "label": "Hausbesuch",
+    "defaultEuro": 65
+  },
+  {
+    "code": "620",
+    "label": "Notfallbesuch Praxis",
+    "defaultEuro": 55
+  },
+  {
+    "code": "630",
+    "label": "Konsiliarischer Auftrag",
+    "defaultEuro": 35
+  },
+  {
+    "code": "640",
+    "label": "Bericht für Dritte",
+    "defaultEuro": 30
+  },
+  {
+    "code": "650",
+    "label": "Schreibgebühr Aktenkopie",
+    "defaultEuro": 12
+  },
+  {
+    "code": "660",
+    "label": "Bescheinigung Arbeitsunfähigkeit",
+    "defaultEuro": 8
+  },
+  {
+    "code": "670",
+    "label": "Impfberatung erwachsen",
+    "defaultEuro": 11
+  },
+  {
+    "code": "680",
+    "label": "Reiseimpfberatung",
+    "defaultEuro": 16
+  },
+  {
+    "code": "690",
+    "label": "Erste Hilfe Kleinverletzung",
+    "defaultEuro": 13
+  },
+  {
+    "code": "700",
+    "label": "Chroniker-Vorsorge Gespräch",
+    "defaultEuro": 17
+  },
+  {
+    "code": "7100",
+    "label": "Platzhalter-Ziffer Platzhalter A",
+    "defaultEuro": 20
+  },
+  {
+    "code": "7200",
+    "label": "Platzhalter-Ziffer Platzhalter B",
+    "defaultEuro": 22
+  },
+  {
+    "code": "7300",
+    "label": "Platzhalter-Ziffer Platzhalter C",
+    "defaultEuro": 24
+  }
+]

@@ -18,6 +18,13 @@ import BatchesPage from "./pages/BatchesPage";
 import BatchDetailPage from "./pages/BatchDetailPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
 import KbRelevanzDashboard from "./pages/KbRelevanzDashboard";
+import { SandboxProvider } from "@/lib/sandbox/sandboxStore";
+import SandboxLayout from "@/pages/sandbox/SandboxLayout";
+import SandboxRechnungenPage from "@/pages/sandbox/SandboxRechnungenPage";
+import SandboxDokumentationenPage from "@/pages/sandbox/SandboxDokumentationenPage";
+import SandboxNewDocPage from "@/pages/sandbox/SandboxNewDocPage";
+import SandboxAnalysePage from "@/pages/sandbox/SandboxAnalysePage";
+import SandboxReviewPage from "@/pages/sandbox/SandboxReviewPage";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +65,21 @@ const App = () => (
           <DraftProvider>
             <Routes>
               <Route path="/status" element={<Status />} />
+              <Route
+                path="/sandbox"
+                element={
+                  <SandboxProvider>
+                    <SandboxLayout />
+                  </SandboxProvider>
+                }
+              >
+                <Route index element={<Navigate to="rechnungen" replace />} />
+                <Route path="rechnungen" element={<SandboxRechnungenPage />} />
+                <Route path="dokumentationen" element={<SandboxDokumentationenPage />} />
+                <Route path="dokus/new" element={<SandboxNewDocPage />} />
+                <Route path="analyse/:docId" element={<SandboxAnalysePage />} />
+                <Route path="review/:invoiceId" element={<SandboxReviewPage />} />
+              </Route>
               <Route
                 path="/dashboard/feedback"
                 element={
