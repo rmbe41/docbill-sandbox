@@ -10,7 +10,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
-import type { SandboxInvoice } from "@/lib/sandbox/types";
+import {
+  SANDBOX_CONSENT_LABEL,
+  SANDBOX_INVOICE_STATUS_LABEL,
+  type SandboxInvoice,
+} from "@/lib/sandbox/types";
 import { InsurerLabelRow } from "@/components/sandbox/InsurerMark";
 import { ConfidenceDot, PayerChip, SandboxGoaePositionBlock } from "@/components/sandbox/sandboxUi";
 import { terminalSubLabel } from "@/lib/sandbox/board";
@@ -26,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useState } from "react";
 import { SendInvoiceDialog } from "@/components/sandbox/SendInvoiceDialog";
+import { formatSandboxDateEuropean } from "@/lib/sandbox/europeanDate";
 
 export function SandboxInvoiceSheet({
   invoice,
@@ -67,7 +72,7 @@ export function SandboxInvoiceSheet({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent className="w-full sm:max-w-xl flex flex-col gap-0 p-0">
           <SheetHeader className="p-6 pb-4 border-b border-border/80 text-left space-y-1">
-            <SheetTitle className="text-base">{patient?.name ?? "Patient:in"}</SheetTitle>
+            <SheetTitle className="text-base">{patient?.name ?? "Patient"}</SheetTitle>
             <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
               {patient && <PayerChip type={patient.insurance_type} />}
               {patient && (
@@ -79,17 +84,37 @@ export function SandboxInvoiceSheet({
               {patient && (
                 <span className="text-muted-foreground tabular-nums">VN {patient.insurance_number}</span>
               )}
-              <span className="text-muted-foreground">{doc?.date}</span>
+              <span className="text-muted-foreground tabular-nums">{formatSandboxDateEuropean(doc?.date)}</span>
               <ConfidenceDot tier={invoice.confidence_tier} percent={invoice.confidence_percent} />
               <span className="tabular-nums font-medium">{invoice.total_amount.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</span>
             </SheetDescription>
           </SheetHeader>
 
+          {patient && (
+            <div className="px-6 pb-4 text-xs text-muted-foreground border-b border-border/60 space-y-1.5 leading-snug">
+              {(patient.street || patient.postal_code || patient.city) && (
+                <p>
+                  Adresse:{" "}
+                  {[patient.street, [patient.postal_code, patient.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
+                </p>
+              )}
+              {patient.phone && <p>Tel.: {patient.phone}</p>}
+              {patient.phone_alt && <p>Tel. alt.: {patient.phone_alt}</p>}
+              {patient.email && <p>E-Mail: {patient.email}</p>}
+              {patient.consent_status != null && (
+                <p>Einwilligung: {SANDBOX_CONSENT_LABEL[patient.consent_status]}</p>
+              )}
+            </div>
+          )}
+
           <ScrollArea className="flex-1 px-6 py-4">
             <div className="space-y-4 text-sm">
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-1">Status</p>
-                <p>{invoice.status}</p>
+                <p>{SANDBOX_INVOICE_STATUS_LABEL[invoice.status]}</p>
+                {invoice.status === "sent" && invoice.sent_via && (
+                  <p className="text-xs text-muted-foreground mt-1">Versandweg: {invoice.sent_via}</p>
+                )}
                 {invoiceBoardTerminal(invoice) && (
                   <p className="text-xs text-muted-foreground mt-1">
                     {terminalSubLabel(invoice) === "paid"
@@ -139,7 +164,7 @@ export function SandboxInvoiceSheet({
               <Separator />
 
               <div>
-                <p className="text-xs font-medium text-muted-foreground mb-2">Timeline</p>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Verlauf</p>
                 <ul className="space-y-2 text-xs">
                   {[...invoice.timeline].reverse().map((e, i) => (
                     <li key={`${e.ts}-${i}`} className="border-l-2 border-muted pl-2">

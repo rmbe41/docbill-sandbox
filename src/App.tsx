@@ -76,7 +76,7 @@ const App = () => (
                 <Route index element={<Navigate to="rechnungen" replace />} />
                 <Route path="rechnungen" element={<SandboxRechnungenPage />} />
                 <Route path="dokumentationen" element={<SandboxDokumentationenPage />} />
-                <Route path="dokus/new" element={<SandboxNewDocPage />} />
+                <Route path="abrechnung/neu" element={<SandboxNewDocPage />} />
                 <Route path="analyse/:docId" element={<SandboxAnalysePage />} />
                 <Route path="review/:invoiceId" element={<SandboxReviewPage />} />
               </Route>

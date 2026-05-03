@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
 import { InsurerLabelRow } from "@/components/sandbox/InsurerMark";
 import { PayerChip } from "@/components/sandbox/sandboxUi";
+import { formatSandboxDateEuropean } from "@/lib/sandbox/europeanDate";
 import { MoreHorizontal } from "lucide-react";
 
 const statusLabel: Record<string, string> = {
@@ -38,7 +39,7 @@ export default function SandboxDokumentationenPage() {
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-[120px]">Datum</TableHead>
-              <TableHead>Patient:in</TableHead>
+              <TableHead>Patient</TableHead>
               <TableHead className="min-w-[200px]">Versicherung</TableHead>
               <TableHead>Diagnose (Freitext)</TableHead>
               <TableHead className="w-[110px]">Status</TableHead>
@@ -51,7 +52,9 @@ export default function SandboxDokumentationenPage() {
               const inv = invoiceForDoc(doc.id);
               return (
                 <TableRow key={doc.id}>
-                  <TableCell className="tabular-nums text-muted-foreground">{doc.date}</TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {formatSandboxDateEuropean(doc.date)}
+                  </TableCell>
                   <TableCell className="font-medium">{patient?.name ?? doc.patient_id}</TableCell>
                   <TableCell className="align-top">
                     {patient ? (

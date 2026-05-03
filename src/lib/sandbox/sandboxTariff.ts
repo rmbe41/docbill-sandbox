@@ -69,24 +69,31 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
-/** Steigerung über den katalogisierten Schwellensatz (Regelhöchstfaktor) — typisch Begründungspflicht GOÄ */
+/** Sandbox: Begründungspflicht ab Steigerung über max(Regelhöchstfaktor, 2,3) — typisch GOÄ / Demo-Klarheit */
 export function goaeFactorRequiresJustification(code: string, factor: number): boolean {
   const row = goaeV2CodeById.get(code);
-  if (!row) return false;
-  return factor > row.fee.thresholdFactor + 0.009;
+  const th = row?.fee.thresholdFactor ?? 2.3;
+  const effective = Math.max(th, 2.3);
+  return factor > effective + 0.009;
+}
+
+/** Anzeige/Ergänzung: Begründungstext bei Faktor über Schwellwert (siehe `goaeFactorRequiresJustification`). */
+export function effectiveGoaeFactorJustification(code: string, factor: number, preferred?: string): string | undefined {
+  if (!goaeFactorRequiresJustification(code, factor)) return undefined;
+  const t = preferred?.trim();
+  if (t) return t;
+  const row = goaeV2CodeById.get(code);
+  const th = row?.fee.thresholdFactor ?? 2.3;
+  const refTh = Math.max(th, 2.3);
+  const fs = r2(factor).toFixed(2).replace(".", ",");
+  const ts = r2(refTh).toFixed(2).replace(".", ",");
+  return `Steigerungsfaktor ${fs} über ${ts} (GOÄ Nr. ${code}): erhöhter Zeitaufwand und besondere Schwierigkeit.`;
 }
 
 function factorJustificationForLine(code: string, factor: number, preferred?: string): Pick<ServiceItemGoae, "factor_justification"> | object {
-  if (!goaeFactorRequiresJustification(code, factor)) return {};
-  const t = preferred?.trim();
-  if (t) return { factor_justification: t };
-  const row = goaeV2CodeById.get(code);
-  const th = row?.fee.thresholdFactor ?? 0;
-  const fs = r2(factor).toFixed(2).replace(".", ",");
-  const ts = r2(th).toFixed(2).replace(".", ",");
-  return {
-    factor_justification: `Steigerungsfaktor ${fs} gegenüber Schwellensatz ${ts} (GOÄ Nr. ${code}): erhöhter Zeitaufwand und besondere Schwierigkeit.`,
-  };
+  const text = effectiveGoaeFactorJustification(code, factor, preferred);
+  if (!text) return {};
+  return { factor_justification: text };
 }
 
 export function serviceItemGoae(code: string, factor: number, factor_justification?: string): ServiceItemGoae | null {

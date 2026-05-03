@@ -9,7 +9,7 @@
 
 ### 1.1 Was die Sandbox ist
 
-Klickbarer **Prototyp** der DocBill-Plattform für niedergelassene Ärzt:innen auf **ausschließlich synthetischen Daten**. Sie demonstriert den Kern-Workflow:
+Klickbarer **Prototyp** der DocBill-Plattform **im Bereich ambulanter Haus- und Facharztversorgung** auf **ausschließlich synthetischen Daten**. Sie demonstriert den Kern-Workflow:
 
 **Dokumentation anlegen → Abrechnungsvorschlag → Review → Versand → Übersicht über alle Rechnungen.**
 
@@ -26,7 +26,7 @@ Auth, echte APIs, vollständiger offizieller Code-Katalog als Produktionsquelle,
 
 | Thema | Entscheidung |
 |--------|----------------|
-| **GOÄ und EBM im Vorschlag** | Im Review werden **beide Welten** angezeigt, auch wenn die Patient:in **GKV** ist: klar getrennte Abschnitte (z. B. „EBM (GKV-Leistungen)“ und „GOÄ (Referenz / privatärztliche Parallelrechnung)“) mit verständlichen Kurzlabels, damit der Prototyp nicht wie ein fachlicher Widerspruch wirkt. |
+| **GOÄ und EBM im Vorschlag** | Im Review werden **beide Welten** angezeigt, auch **bei Kostenträger GKV**: klar getrennte Abschnitte (z. B. „EBM (GKV-Leistungen)“ und „GOÄ (Referenz / privatärztliche Parallelrechnung)“) mit verständlichen Kurzlabels, damit der Prototyp nicht wie ein fachlicher Widerspruch wirkt. |
 | **Kanban-Interaktion** | **Kein Drag-and-Drop.** Spalten sind rein lesend gruppiert; Statuswechsel nur über **explizite Aktionen** (Buttons, Menüs, modale Bestätigungen). |
 | **Quelle der Kodierung** | Keine echte KI-Inferenz und kein Keyword-Matching als „Wahrheit“. **Genau 50 synthetische Testfälle** in JSON definieren Doku, ICD, GOÄ- und EBM-Zeilen, Begründungen und optional **Zuordnungen zu Textstellen**. Ein kurzer Ladezustand (~1,5 s) ist **reines UX-Theater**; danach wird der **Testfall** zur gewählten Case-ID geladen. |
 | **Katalogbezug** | Ziffern-**Labels** und Plausibilität werden aus den im Repo vorhandenen Snapshots abgeleitet: mindestens `src/data/goae-catalog-v2.json` und `src/data/ebm-catalog-2026-q2.json` (oder gleichwertige Sandbox-Teilmengen). Im Testfall verwendete Codes müssen im Snapshot existieren oder in einem validierten Katalogausschnitt dokumentiert sein. |
@@ -37,7 +37,7 @@ Auth, echte APIs, vollständiger offizieller Code-Katalog als Produktionsquelle,
 
 1. **Board „Rechnungen“** — Spalten nach Status, Karten kompakt, Klick öffnet Slide-Over mit Timeline und Details; **Freitextsuche** in der Übersichtszeile (rechts); Spaltenkopf mit **Anzahl und Summe (€)**.
 2. **Dokumentationen** — Tabelle aller Dokus mit Status und Zeilenaktionen (u. a. „Rechnung erstellen“).
-3. **Neue Dokumentation** — Primärer CTA im Header, Formular mit Tabs/Steps (Patient:in, Behandlung, Vorschau & Speichern), **Testdaten-Generator** auf Basis der Testfall-/Template-Struktur.
+3. **Neue Dokumentation** — Primärer CTA im Header, Formular mit Tabs/Steps (Patient, Behandlung, Vorschau & Speichern), **Testdaten-Generator** auf Basis der Testfall-/Template-Struktur.
 
 **Durchgängiger Flow:** Speichern & Rechnung vorschlagen → Review (Split-Screen) → Freigeben → Versand (ohne echte Übermittlung) → Karte im Board unter **„Eingereicht“** wiederfinden.
 
@@ -81,13 +81,13 @@ Vier **horizontal scrollbare** Pipeline-Spalten (Claims-orientiert). Jede **Kart
 
 ### 5.2 Karteninhalt (kompakt, ~3 Zeilen)
 
-1. Patient:innenname + Datum  
+1. Patientenname + Datum  
 2. Betrag (€) + Kostenträger-Chip (**GKV** / **PKV** / **Selbstzahler**)  
 3. Top-Code-Kurzlabel (z. B. „GOÄ 1 + ICD R51“) + **Konfidenz-Anzeige** (grün/gelb/rot) gemäß Testfall (nicht berechnet durch ein Modell)
 
 ### 5.3 Interaktionen (ohne DnD)
 
-- **Klick** auf Karte → **Slide-Over** rechts: Timeline, Ziffernlisten (GOÄ + EBM nach Spec-Abschnitt), Aktionen (je nach Status).
+- **Klick** auf Karte → **Slide-Over** rechts: **Verlauf** (chronologische Ereignisse), Ziffernlisten (GOÄ + EBM nach Spec-Abschnitt), Aktionen (je nach Status). Rechnungsstatus wird auf Deutsch angezeigt (`SANDBOX_INVOICE_STATUS_LABEL`); interne Schlüssel (`proposed`, `approved`, …) bleiben Englisch.
 - Statuswechsel nur über **UI-Aktionen**, z. B.:
   - „Freigeben“ nach Review,
   - „Rechnung versenden“ aus Freigegeben (Modal mit Versandweg),
@@ -104,11 +104,11 @@ Freitextfeld in derselben Zeile wie die Überschrift **„Übersicht“**, recht
 
 ### 6.1 Einstieg
 
-„Neue Dokumentation“ (Header-Button) → Route `/sandbox/dokus/new`.
+„Neue Dokumentation“ (Header-Button) → Route `/sandbox/abrechnung/neu`.
 
 ### 6.2 Formularstruktur (Tabs oder Stepper)
 
-**Tab 1 — Patient:in**
+**Tab 1 — Patient**
 
 - Felder: Name, Geburtsdatum, Versichertennummer, Kostenträger (GKV-Liste + PKV + Selbstzahler), Versicherungsstatus.
 - Autocomplete aus Mock-Patientenpool oder neu anlegen.
@@ -116,7 +116,7 @@ Freitextfeld in derselben Zeile wie die Überschrift **„Übersicht“**, recht
 
 **Tab 2 — Behandlung**
 
-- Datum (Default: heute), Behandelnde:r (Dropdown aus Seed), Behandlungsart (Erstkontakt / Folge / Notfall / Vorsorge).
+- Datum (Default: heute), Behandlungsperson (Dropdown aus Seed), Behandlungsart (Erstkontakt / Folge / Notfall / Vorsorge).
 - Anamnese, Befund, Diagnose (Freitext), Therapie / Leistungen (Freitext).
 
 **Tab 3 — Vorschau & Speichern**
@@ -128,7 +128,7 @@ Freitextfeld in derselben Zeile wie die Überschrift **„Übersicht“**, recht
 
 ### 6.3 Validierung
 
-Pflicht: Patient:in (Mindestangaben), Datum, **mindestens Anamnese oder Befund**. Inline-Fehler; Submit nur bei Mindestumfang.
+Pflicht: Patient (Mindestangaben), Datum, **mindestens Anamnese oder Befund**. Inline-Fehler; Submit nur bei Mindestumfang.
 
 ---
 
@@ -149,7 +149,7 @@ Ladezustand („Analyse läuft …“ / neutraler Hinweis). Danach: **Lookup** d
 
 **Rechts (~50 %)** — Vorschlagsrechnung:
 
-- Kopf: Patient:in, Kostenträger, Versicherung.
+- Kopf: Patient, Kostenträger, Versicherung.
 - **ICD-10:** Code, Klartext, Konfidenz-Badge (Hoch/Mittel/Niedrig — **aus Testfall**), einzeilige Begründung, Aktionen Bearbeiten/Entfernen.
 - **Leistungen — zwei Blöcke:**
   - **EBM** (Ziffer/Bezeichnung/Orientierung am Snapshot),
@@ -159,11 +159,35 @@ Ladezustand („Analyse läuft …“ / neutraler Hinweis). Danach: **Lookup** d
 
 **Footer:** Ablehnen (zurück auf Entwurf / kein aktiver Vorschlag), Freigeben (primär) → Status **Freigegeben**, Karte in Spalte 2. Änderungen können **auto-gespeichert** werden (lokal), ohne separaten „Anpassen“-Button.
 
-### 7.4 Schritt 3 — Versand
+### 7.4 Schritt 3 — Versand (Demo, ohne echte Übermittlung)
 
-Aus Freigegeben oder nach Freigabe: „Rechnung versenden“.
+**Einstieg:** Rechnung hat internen Status `approved` (Anzeige: **Freigegeben**). Aktion **„Rechnung versenden“** öffnet das Modal `SendInvoiceDialog`.
 
-**Modal:** Versandweg (Radio): z. B. KV-Abrechnung / PKV Brief / E-Mail an Patient:in — Kurzsummary der Rechnung, „Senden“ → Toast „Rechnung als versendet markiert.“ o. ä., Status **Versendet** (`sent`), Timeline-Eintrag; Kanban-Spalte **Eingereicht**.
+**Modal-Inhalt (alles Deutsch):**
+
+- Titel: „Rechnung versenden“, Beschreibung: es findet **keine** echte KV-/E-Mail-/Post-Übermittlung statt; es wird nur ein prototypischer Versandweg persistiert.
+- Anzeige der Rechnungssumme (EUR, `de-DE`).
+- **Radio-Gruppe — gespeicherter Versandweg** (`sent_via`, lesbar auch im Slide-Over unter Status):
+
+  | Wert (intern) | Anzeige / Speicherstring |
+  |---------------|---------------------------|
+  | `kv` | KV-Abrechnung |
+  | `pkv` | PKV per Brief |
+  | `email` | Versand als E-Mail |
+
+**Aktion „Als versendet markieren“** (`send`):
+
+1. `patchInvoice` setzt `status: "sent"`.
+2. `sent_via` = gewähltes Label aus der Tabelle (exakt der deutsche String, nicht der Radio-Key).
+3. **Verlauf** (`timeline`): neuer Eintrag mit `ts` = ISO-Now, `event` = `Versendet — <Label>`, `actor` = `Nutzer`.
+4. Toast: „Rechnung als versendet markiert.“
+5. Modal schließt; optional schließt das übergeordnete Slide-Over.
+
+**Board:** `invoiceBoardColumn` mappt `sent` → Spalte **Eingereicht** (`submitted`).
+
+**Rückgängig:** Aus `sent` kann **„Zurück zur Freigabe…“** den Status auf `approved` setzen (Bestätigungsdialog); ein Verlaufs-Eintrag „Zurück zu Freigegeben“ wird angehängt. `sent_via` wird durch den Patch nicht explizit geleert (Implementierungsdetail; UI zeigt Versandweg nur bei `sent`).
+
+**Seed-Daten:** Vorgebaute Rechnungen mit Status `sent` erhalten synthetische Verlaufseinträge „Versendet“ ohne gewählten Modal-Weg (`sent_via` fehlt oft); das ist für Demo-Menge akzeptabel.
 
 ---
 
@@ -184,6 +208,8 @@ Mapping auf Board-Spalten (`invoiceBoardColumn`):
 | Eingereicht | `sent` |
 | Klärung | `denied`, `appealed` |
 | Endzustand | `paid` |
+
+**Deutsche Status-Labels in der UI** (`SANDBOX_INVOICE_STATUS_LABEL`): `proposed` → Vorschlag, `approved` → Freigegeben, `sent` → Versendet, `paid` → Bezahlt, `denied` → Abgelehnt, `appealed` → Anfechtung.
 
 ---
 
@@ -259,7 +285,7 @@ Vorgeschlagenes Layout (an Repo anpassen):
 
 | Pfad | Inhalt |
 |------|--------|
-| `src/lib/sandbox/seed.ts` | Erzeugt den Initial-State (Praxis, Behandelnde, Patienten, Dokus, Rechnungen) gemäß Zielgrößen |
+| `src/lib/sandbox/seed.ts` | Erzeugt den Initial-State (Praxis, Behandlungsperson(en), Patienten, Dokus, Rechnungen) gemäß Zielgrößen |
 | `src/lib/sandbox/billingCases.ts` | **50** deterministische `SandboxBillingCase`-Einträge (programmatisch aus Templates) |
 | `src/data/sandbox/goae-mock.json` · `ebm-mock.json` | Katalogausschnitte (angelehnt an GOÄ-/EBM-Snapshots) für Picker und Orientierungsbeträge |
 | `scripts/validate-sandbox-catalogs.ts` (optional) | Prüft: alle in Testfällen genannten GOÄ-/EBM-Codes existieren in den Referenz-Snapshots |
@@ -281,8 +307,8 @@ Nach Reset soll der Nutzer ungefähr vorfinden:
 
 | Entity | Richtwert |
 |--------|-----------|
-| Praxis / Behandelnde | 1 / 1 („Dr. M. Müller“) |
-| Patient:innen | ~30 — **40 % GKV / 50 % PKV / 10 % Selbstzahler** (Zyklus siehe `seed.ts` → `insuranceForIndex`) |
+| Praxis / Behandlungsperson | 1 / 1 („Dr. M. Müller“) |
+| Stammdaten / Patienten | ~30 — **40 % GKV / 50 % PKV / 10 % Selbstzahler** (Zyklus siehe `seed.ts` → `insuranceForIndex`) |
 | Dokumentationen | ~50 über ~90 Tage, ~10 noch `draft` |
 | Rechnungen gesamt | ~48 — verteilt auf die vier Spalten wie in Abschnitt 5.1 |
 | Authoritative Billing-Cases | **50** (davon Nutzung für Generator + deterministischer Vorschlag) |
@@ -291,7 +317,7 @@ Rechnungsbeträge realistisch im Bereich ca. **€15–€350** pro Fall (fallab
 
 ---
 
-## 13. Erfolgskriterium (Tester:in ohne Anleitung)
+## 13. Erfolgskriterium (ohne separate Anleitung)
 
 In **unter drei Minuten:** Neue Doku über Testdatengenerator → Rechnung vorschlagen → eine ICD-Zeile entfernen, eine Ziffer ergänzen → freigeben → versenden → dieselbe Rechnung in der Spalte **„Eingereicht“** wiederfinden.
 

@@ -67,7 +67,11 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Biomikroskopie: mäßige papilläre Hyperämie, kein Hornhautinfiltrat, Vorderkammer frei.",
     diagnosis_text: "Akute bakterielle Konjunktivitis links.",
     therapy: "Antibiotische Augentropfen, Kühlkompresse, Hygienehinweise.",
-    highlights: [{ field: "findings", snippet: "papilläre Hyperämie", ref: "1240" }],
+    highlights: [
+      { field: "findings", snippet: "papilläre Hyperämie", ref: "1240" },
+      { field: "anamnesis", snippet: "juckendes linkes Auge", ref: "03230" },
+      { field: "findings", snippet: "Biomikroskopie", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333"],
     goaeLines: [
       {
@@ -89,10 +93,14 @@ const TEMPLATES: TemplateDef[] = [
     difficulty: "easy",
     encounter_type: "Folge",
     anamnesis: "Bekannte Pollenallergie; beide Augen tränen und brennen im Frühjahr, Kontaktlinsen derzeit nicht getragen.",
-    findings: "Beidseits feine papilläre Falten Unterlid, keine Hornhautbeteiligung.",
+    findings: "Beidseits feine papilläre Falten Unterlid, keine Hornhautbeteiligung. Tonometrie beidseits im Normbereich.",
     diagnosis_text: "Chronische allergische Konjunktivitis.",
     therapy: "Mastzellstabilisator und Antihistaminikum topisch, Kältekompressen.",
-    highlights: [{ field: "anamnesis", snippet: "Pollenallergie", ref: "03230" }],
+    highlights: [
+      { field: "anamnesis", snippet: "Pollenallergie", ref: "03230" },
+      { field: "findings", snippet: "papilläre Falten", ref: "06333" },
+      { field: "findings", snippet: "Tonometrie", ref: "06330" },
+    ],
     ebmGops: ["03230", "06333", "06330"],
     goaeLines: [
       { code: "1", factor: 2.3 },
@@ -112,7 +120,11 @@ const TEMPLATES: TemplateDef[] = [
     findings: "SPK leicht fleckig, Tränenfilm unstabil in der Spaltlampe, keine Infektzeichen.",
     diagnosis_text: "Keratopathia filiformis bei Sicca-Symptomatik.",
     therapy: "Konservierung, hyaluronsäurehaltige Tränenersatzmittel, Lidhygiene.",
-    highlights: [{ field: "findings", snippet: "Tränenfilm unstabil", ref: "1240" }],
+    highlights: [
+      { field: "findings", snippet: "Tränenfilm unstabil", ref: "1240" },
+      { field: "anamnesis", snippet: "Bildschirmarbeit", ref: "03230" },
+      { field: "findings", snippet: "Spaltlampe", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333"],
     goaeLines: [
       { code: "1", factor: 2.3 },
@@ -131,7 +143,10 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Visus beidseits 1,0 mit Korrektur; Papillen scharf, ZNÖ approx. 0,35–0,45.",
     diagnosis_text: "Alterspresbyopie, strukturierte Alterssichtprüfung.",
     therapy: "Lesebrillenrezept; nächstes Screening in 2 Jahren.",
-    highlights: [{ field: "findings", snippet: "1,0 mit Korrektur", ref: "06333" }],
+    highlights: [
+      { field: "findings", snippet: "1,0 mit Korrektur", ref: "06333" },
+      { field: "anamnesis", snippet: "Augencheck", ref: "03230" },
+    ],
     ebmGops: ["03230", "06333"],
     goaeLines: [
       {
@@ -151,7 +166,11 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Makula trocken, Drusen mittlerer Größe, OCT ohne Flüssigkeit.",
     diagnosis_text: "Altersbedingte Makuladegeneration (trockene AMD), beidseits.",
     therapy: "AREDS-Empfehlung besprechen, Verlauf OCT in 6 Monaten.",
-    highlights: [{ field: "findings", snippet: "Drusen mittlerer Größe", ref: "06336" }],
+    highlights: [
+      { field: "findings", snippet: "Drusen mittlerer Größe", ref: "06336" },
+      { field: "anamnesis", snippet: "zentralen Gesichtsfeld", ref: "03230" },
+      { field: "findings", snippet: "Makula trocken", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333", "06336"],
     goaeLines: [
       {
@@ -176,7 +195,11 @@ const TEMPLATES: TemplateDef[] = [
     findings: "IOP 23/24 mmHg Goldmann, Papille ISNT asymmetrisch, RNFL-Ausdünnung inferior temporal.",
     diagnosis_text: "Okulärer Hypertonus / Verdacht auf Offenwinkelglaukom.",
     therapy: "Prostanalog beginnen, Verlauf 4 Wochen.",
-    highlights: [{ field: "findings", snippet: "IOP 23/24", ref: "06330" }],
+    highlights: [
+      { field: "findings", snippet: "IOP 23/24", ref: "06330" },
+      { field: "anamnesis", snippet: "Glaukomverdacht", ref: "03230" },
+      { field: "findings", snippet: "ISNT asymmetrisch", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333", "06330"],
     goaeLines: [
       { code: "1", factor: 2.3 },
@@ -197,7 +220,10 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Keine proliferative Retinopathie; wenige Mikroaneurysmen temporal inferi temporal.",
     diagnosis_text: "Leichte nicht proliferative diabetische Retinopathie.",
     therapy: "Strikte Einstellung, Wiederholung in 12 Monaten, Hinweis Augenarzt bei Sehstörungen.",
-    highlights: [{ field: "findings", snippet: "Mikroaneurysmen", ref: "06333" }],
+    highlights: [
+      { field: "findings", snippet: "Mikroaneurysmen", ref: "06333" },
+      { field: "anamnesis", snippet: "Diabetes mellitus", ref: "03230" },
+    ],
     ebmGops: ["03230", "06333"],
     goaeLines: [
       { code: "1", factor: 2.3 },
@@ -217,7 +243,12 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Hornhaut klar, beginnend triebige Linse beidseits, Visus ohne Korrektur reduziert.",
     diagnosis_text: "Alterstar (Katarakt) beidseits — OP-Indikation Abklärung.",
     therapy: "Biometrie- und OP-Termin koordiniert.",
-    highlights: [{ field: "findings", snippet: "triebige Linse", ref: "1240" }],
+    highlights: [
+      { field: "findings", snippet: "triebige Linse", ref: "1240" },
+      { field: "anamnesis", snippet: "verschwommenes Sehen", ref: "03230" },
+      { field: "findings", snippet: "Hornhaut klar", ref: "06333" },
+      { field: "therapy", snippet: "Biometrie-", ref: "06340" },
+    ],
     ebmGops: ["03230", "06333", "06340"],
     goaeLines: [
       {
@@ -243,7 +274,12 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Mittelweit, Ödem Hornhaut, IOP 48 mmHg links, flache Vorderkammer DD Winkelblock.",
     diagnosis_text: "Akutes Winkelblockglaukom links.",
     therapy: "Notfalltherapie: pilocarpinähnlich, Azetazolamid, Laseriridotomie Anmeldung.",
-    highlights: [{ field: "findings", snippet: "IOP 48 mmHg", ref: "1256" }],
+    highlights: [
+      { field: "findings", snippet: "IOP 48 mmHg", ref: "1256" },
+      { field: "anamnesis", snippet: "rot schmerzendes Auge", ref: "03230" },
+      { field: "findings", snippet: "Hornhaut", ref: "06333" },
+      { field: "findings", snippet: "Vorderkammer", ref: "01701" },
+    ],
     ebmGops: ["03230", "06333", "01701"],
     goaeLines: [
       {
@@ -279,7 +315,11 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Hinterkapsel klar, kein Ödem Makula in OCT, IOL zentriert.",
     diagnosis_text: "Zustand nach Phakoemulsifikation re — Verlauf ohne Komplikation.",
     therapy: "NSAR-topisch auslaufen lassen, nächste Kontrolle 6 Wo.",
-    highlights: [{ field: "anamnesis", snippet: "Nach Katarakt-OP", ref: "06340" }],
+    highlights: [
+      { field: "anamnesis", snippet: "Nach Katarakt-OP", ref: "06340" },
+      { field: "anamnesis", snippet: "Unschärfe", ref: "03230" },
+      { field: "findings", snippet: "Makula in OCT", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333", "06340"],
     goaeLines: [
       {
@@ -300,7 +340,10 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Alternierendes intermittierendes Exotropie bei Ermüdung, Stereo mind. 400″.",
     diagnosis_text: "Intermittierendes Schielen — Überwachung.",
     therapy: "Orthoptik-Termin, keine Operation indiziert zurzeit.",
-    highlights: [{ field: "findings", snippet: "intermittierendes Exotropie", ref: "03230" }],
+    highlights: [
+      { field: "findings", snippet: "intermittierendes Exotropie", ref: "03230" },
+      { field: "findings", snippet: "Stereo", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333"],
     goaeLines: [
       { code: "3", factor: 2.3 },
@@ -320,7 +363,13 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Weisslich hinterlegende Netzhautperipherie rechts, kein Makulaforamen — dringende Laserindikation geklärt.",
     diagnosis_text: "Netzhautabhebung rechts — Frühstadium.",
     therapy: "Notfall-Laserretinopexie / Vitrektomie-Anmeldung extern.",
-    highlights: [{ field: "anamnesis", snippet: "Lichtblitze", ref: "06336" }],
+    highlights: [
+      { field: "anamnesis", snippet: "Lichtblitze", ref: "06336" },
+      { field: "anamnesis", snippet: "Myopie hoch", ref: "03230" },
+      { field: "findings", snippet: "Netzhautperipherie", ref: "06337" },
+      { field: "findings", snippet: "Makulaforamen", ref: "06333" },
+      { field: "therapy", snippet: "Laserretinopexie", ref: "06330" },
+    ],
     ebmGops: ["03230", "06336", "06337", "06330"],
     goaeLines: [
       {
@@ -351,7 +400,11 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Korneadurchmesser und Achslängen im Normbereich, keine Makulapathologie in OCT.",
     diagnosis_text: "Katarakt beidseits — elektive OP Planung.",
     therapy: "Linsenwahl besprochen, Prämedikationsplan.",
-    highlights: [{ field: "anamnesis", snippet: "OP-Vorbereitung", ref: "06340" }],
+    highlights: [
+      { field: "anamnesis", snippet: "OP-Vorbereitung", ref: "06340" },
+      { field: "anamnesis", snippet: "Biometrie", ref: "03230" },
+      { field: "findings", snippet: "Makulapathologie", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333", "06340"],
     goaeLines: [
       {
@@ -382,7 +435,11 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Pallor papillomakulärer Bündel, Gesichtsfeld zentral ausgefallen.",
     diagnosis_text: "Ischämische Optikusneuropathie links (DD AION).",
     therapy: "Internistische Risikofaktoren; neuroophthalmologische Mitbehandlung.",
-    highlights: [{ field: "findings", snippet: "Gesichtsfeld", ref: "06330" }],
+    highlights: [
+      { field: "findings", snippet: "Gesichtsfeld", ref: "06330" },
+      { field: "anamnesis", snippet: "Skotom links", ref: "03230" },
+      { field: "findings", snippet: "papillomakulärer", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333", "06330"],
     goaeLines: [
       {
@@ -419,7 +476,11 @@ const TEMPLATES: TemplateDef[] = [
     findings: "Chemische Konjunktivitis, pH neutralisiert, epitheliale Erosion lateral inferior.",
     diagnosis_text: "Verätzung der Konjunktiva und Kornea durch Chemikalie.",
     therapy: "Spülprotokoll, antibiotische Salbe, engmaschige Kontrolle.",
-    highlights: [{ field: "findings", snippet: "epitheliale Erosion", ref: "1240" }],
+    highlights: [
+      { field: "findings", snippet: "epitheliale Erosion", ref: "1240" },
+      { field: "anamnesis", snippet: "starkes Brennen", ref: "03230" },
+      { field: "findings", snippet: "Chemische Konjunktivitis", ref: "06333" },
+    ],
     ebmGops: ["03230", "06333"],
     goaeLines: [
       {
@@ -438,6 +499,78 @@ const TEMPLATES: TemplateDef[] = [
     ],
   },
 ];
+
+/** Zerlegt Freitext für Beleg-Snippets; nur Teilstrings, die wirklich in der Akte vorkommen. */
+function collectDocSegments(doc: SandboxBillingCaseDocumentation): { field: HighlightSnippet["field"]; snippet: string }[] {
+  const out: { field: HighlightSnippet["field"]; snippet: string }[] = [];
+  const order: HighlightSnippet["field"][] = ["findings", "anamnesis", "diagnosis_text", "therapy"];
+  for (const field of order) {
+    const text = doc[field]?.trim() ?? "";
+    if (text.length < 6) continue;
+    const chunks = text
+      .split(/\s*[.;]\s+|\s*,\s+/)
+      .map((c) => c.trim())
+      .filter((c) => c.length >= 6 && c.length <= 130);
+    if (chunks.length > 0) {
+      for (const snippet of chunks) out.push({ field, snippet });
+    } else {
+      out.push({ field, snippet: text.slice(0, Math.min(100, text.length)) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Jede Positions-Ziffer der Rechnung erhält mindestens einen Aktenbeleg (`HighlightSnippet`),
+ * damit Demo-Abrechnung aus Dokumentation ableitbar bleibt (inkl. per Finalize ergänzter GOP/GOÄ).
+ */
+function enrichHighlightsForInvoiceLines(
+  doc: SandboxBillingCaseDocumentation,
+  base: HighlightSnippet[] | undefined,
+  service_items_ebm: readonly ServiceItemEbm[],
+  service_items_goae: readonly ServiceItemGoae[],
+): HighlightSnippet[] {
+  const refsOnInvoice = new Set<string>();
+  for (const x of service_items_ebm) refsOnInvoice.add(x.code);
+  for (const x of service_items_goae) refsOnInvoice.add(x.code);
+
+  const merged: HighlightSnippet[] = [...(base ?? []).filter((h) => refsOnInvoice.has(h.ref))];
+
+  const refsWithHighlight = new Set(merged.map((h) => h.ref));
+  const missing = [...refsOnInvoice].filter((r) => !refsWithHighlight.has(r));
+  if (missing.length === 0) return merged;
+
+  const segments = collectDocSegments(doc);
+  const fbText = (doc.findings || doc.anamnesis || doc.diagnosis_text || "").trim();
+  const fbField: HighlightSnippet["field"] = doc.findings?.trim()
+    ? "findings"
+    : doc.anamnesis?.trim()
+      ? "anamnesis"
+      : "diagnosis_text";
+
+  let segIdx = 0;
+  for (const ref of missing) {
+    if (segments.length > 0) {
+      merged.push({ ...segments[segIdx % segments.length]!, ref });
+      segIdx++;
+      continue;
+    }
+    if (fbText.length < 6) continue;
+    const span = Math.min(88, fbText.length);
+    const start = Math.min(
+      (segIdx * 17) % Math.max(1, fbText.length - span + 1),
+      Math.max(0, fbText.length - span),
+    );
+    merged.push({
+      field: fbField,
+      snippet: fbText.slice(start, Math.min(fbText.length, start + span)),
+      ref,
+    });
+    segIdx++;
+  }
+
+  return merged;
+}
 
 export function buildBillingCases(): SandboxBillingCase[] {
   const out: SandboxBillingCase[] = [];
@@ -491,7 +624,7 @@ export function buildBillingCases(): SandboxBillingCase[] {
       id: `sb-case-${String(n).padStart(3, "0")}`,
       difficulty,
       documentation: doc,
-      highlights: t.highlights,
+      highlights: enrichHighlightsForInvoiceLines(doc, t.highlights, service_items_ebm, service_items_goae),
       service_items_ebm,
       service_items_goae,
       total_amount: r2(target),

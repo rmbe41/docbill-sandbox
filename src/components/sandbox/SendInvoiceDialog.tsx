@@ -32,7 +32,7 @@ export function SendInvoiceDialog({
     const labels: Record<string, string> = {
       kv: "KV-Abrechnung",
       pkv: "PKV per Brief",
-      email: "Patient:in per E-Mail",
+      email: "Versand als E-Mail",
     };
     patchInvoice(invoice.id, {
       status: "sent",
@@ -42,7 +42,7 @@ export function SendInvoiceDialog({
         {
           ts: new Date().toISOString(),
           event: `Versendet — ${labels[via]}`,
-                  actor: "System",
+          actor: "Nutzer",
         },
       ],
     });
@@ -84,7 +84,7 @@ export function SendInvoiceDialog({
             <div className="flex items-center space-x-2">
               <RadioGroupItem value="email" id="email" />
               <Label htmlFor="email" className="font-normal cursor-pointer">
-                Patient:in per E-Mail
+                Versand als E-Mail
               </Label>
             </div>
           </RadioGroup>
@@ -95,7 +95,7 @@ export function SendInvoiceDialog({
             Abbrechen
           </Button>
           <Button type="button" onClick={send}>
-            Senden
+            Als versendet markieren
           </Button>
         </DialogFooter>
       </DialogContent>

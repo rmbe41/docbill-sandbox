@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { ConfidenceLevel, InsuranceType, ServiceItemGoae } from "@/lib/sandbox/types";
+import { effectiveGoaeFactorJustification } from "@/lib/sandbox/sandboxTariff";
 
 function fallbackPercentForTier(tier: ConfidenceLevel): number {
   if (tier === "high") return 91;
@@ -32,8 +34,15 @@ export function ConfidenceDot({
   );
 }
 
-/** Einzelne GOÄ-Position im Sandbox-Prototyp inkl. Steigerungsbemerkung */
-export function SandboxGoaePositionBlock({ row }: { row: ServiceItemGoae }) {
+/** Einzelne GOÄ-Position im Sandbox-Prototyp inkl. Begründungstext bei hohem Steigerungsfaktor */
+export function SandboxGoaePositionBlock({
+  row,
+  docEvidence,
+}: {
+  row: ServiceItemGoae;
+  docEvidence?: ReactNode;
+}) {
+  const justificationText = effectiveGoaeFactorJustification(row.code, row.factor, row.factor_justification);
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap gap-x-1 gap-y-0.5 items-baseline">
@@ -41,9 +50,10 @@ export function SandboxGoaePositionBlock({ row }: { row: ServiceItemGoae }) {
         <span className="min-w-0">{row.label}</span>
         <span className="text-muted-foreground tabular-nums shrink-0">Faktor {row.factor}</span>
       </div>
-      {row.factor_justification ? (
-        <p className="mt-1.5 pl-2 border-l-2 border-muted text-muted-foreground leading-snug text-[11px]">
-          Steigerungsbemerkung (GOÄ): {row.factor_justification}
+      {docEvidence ? <div className="mt-0.5">{docEvidence}</div> : null}
+      {justificationText ? (
+        <p className="mt-1 text-muted-foreground leading-snug text-[11px]">
+          Begründungstext (GOÄ Steigerung): {justificationText}
         </p>
       ) : null}
     </div>

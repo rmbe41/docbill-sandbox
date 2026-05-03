@@ -21,7 +21,7 @@ const PROVIDER_ID = "prov-1";
  */
 
 /**
- * Kostenträger-Mix der Seed-Patient:innen (Zyklus von 10 Indizes, wiederholt über ~30 Personen):
+ * Kostenträger-Mix im Seed-Stammdatenpool (~30 Personen; Zyklus von 10 Indizes):
  *
  * | Anteil | Typ |
  * |--------|-----|
@@ -136,6 +136,51 @@ function isoDaysAgo(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Kleinschreibung + Umlaute für typische lokale E-Mail-Teile (ASCII). */
+function emailLocalAscii(part: string): string {
+  return part
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+const SEED_FREEMAIL_DOMAINS = [
+  "web.de",
+  "gmx.de",
+  "posteo.de",
+  "t-online.de",
+  "icloud.com",
+  "gmail.com",
+  "yahoo.de",
+  "outlook.de",
+] as const;
+
+/** Abwechselnd: vorname@post123.de, vorname+nachname@Freemail, vorname+Geburtsdatum@Freemail */
+function sandboxSeedEmail(
+  i: number,
+  firstName: string,
+  lastName: string,
+  dobYmd: string,
+): string {
+  const first = emailLocalAscii(firstName);
+  const last = emailLocalAscii(lastName);
+  const ymd = dobYmd.replace(/-/g, "");
+  const domain = SEED_FREEMAIL_DOMAINS[i % SEED_FREEMAIL_DOMAINS.length]!;
+  const mode = i % 3;
+  if (mode === 0) {
+    const n = String(100 + ((i * 37) % 800));
+    const providerStem = (["post", "mail", "freemail", "online", "netmail"] as const)[i % 5];
+    return `${first}@${providerStem}${n}.de`;
+  }
+  if (mode === 1) {
+    return `${first}+${last}@${domain}`;
+  }
+  return `${first}+${ymd}@${domain}`;
+}
+
 function statusForInvoiceIndex(i: number): InvoiceStatus {
   if (i < 8) return "proposed";
   if (i < 13) return "approved";
@@ -171,7 +216,8 @@ function enrichTimeline(st: InvoiceStatus, base: TimelineEntry[]): TimelineEntry
   return t;
 }
 
-export function buildSandboxSeed(): SandboxSeedState {
+/** Kanonischer Stammdaten-Pool (~30 Personen); IDs stabil für LocalStorage-Reparatur. */
+export function buildSandboxSeedPatients(): SandboxPatient[] {
   const patients: SandboxPatient[] = [];
   for (let i = 0; i < 30; i++) {
     const ins = insuranceForIndex(i);
@@ -184,23 +230,34 @@ export function buildSandboxSeed(): SandboxSeedState {
       ins.insurance_type === "GKV"
         ? String(100000000 + (i * 791) % 899999999).padStart(9, "0")
         : undefined;
+    const firstName = FIRST[i % FIRST.length]!;
+    const lastName = LAST[i % LAST.length]!;
+    const dob = `${1965 + (i % 45)}-${String((i % 11) + 1).padStart(2, "0")}-${String((i % 27) + 1).padStart(2, "0")}`;
     patients.push({
       id,
-      name: `${LAST[i % LAST.length]!}, ${FIRST[i % FIRST.length]!}`,
-      dob: `${1965 + (i % 45)}-${String((i % 11) + 1).padStart(2, "0")}-${String((i % 27) + 1).padStart(2, "0")}`,
+      name: `${lastName}, ${firstName}`,
+      dob,
       insurance_number: `K${100000000 + i}`,
-      insurance_status: ins.insurance_type === "GKV" ? "Mitglied" : ins.insurance_type === "PKV" ? "Versichert" : "—",
+      insurance_status:
+        ins.insurance_type === "GKV" ? "Mitglied" : ins.insurance_type === "PKV" ? "Versichert" : "Selbstzahlend",
       gender: genders[i % genders.length],
       street: `Musterweg ${((i * 3) % 40) + 1}`,
       postal_code: plz,
       city: SEED_CITIES[i % SEED_CITIES.length]!,
       phone: `+49 170 ${String(1000000 + (i * 917) % 8999999)}`,
-      email: `patient.${String(i + 1).padStart(2, "0")}@sandbox.docbill.demo`,
+      phone_alt: `+49 89 ${String(2000000 + (i * 313) % 7999999)}`,
+      email: sandboxSeedEmail(i, firstName, lastName, dob),
+      consent_status: (["erteilt", "ausstehend", "fehlend"] as const)[i % 3],
       insurance_member_since: `${memberYear}-${memberMonth}-01`,
       insurance_ik: ik,
       ...ins,
     });
   }
+  return patients;
+}
+
+export function buildSandboxSeed(): SandboxSeedState {
+  const patients = buildSandboxSeedPatients();
 
   const documentations: SandboxDocumentation[] = [];
   const invoices: SandboxInvoice[] = [];

@@ -64,7 +64,7 @@ export default function SandboxLayout() {
                 Übersicht
               </NavLink>
               <Button size="sm" className="shrink-0" asChild>
-                <Link to="/sandbox/dokus/new">Neue Dokumentation</Link>
+                <Link to="/sandbox/abrechnung/neu">Neue Abrechnung</Link>
               </Button>
             </div>
           </div>

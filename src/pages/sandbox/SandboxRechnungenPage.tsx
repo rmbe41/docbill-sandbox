@@ -1,15 +1,109 @@
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
 import { followupSubLabel, invoiceBoardColumn } from "@/lib/sandbox/board";
-import type { InsuranceType, SandboxInvoice } from "@/lib/sandbox/types";
+import type { ConfidenceLevel, InsuranceType, SandboxInvoice } from "@/lib/sandbox/types";
 import { InsurerLabelRow } from "@/components/sandbox/InsurerMark";
 import { ConfidenceDot, PayerChip } from "@/components/sandbox/sandboxUi";
 import { SandboxInvoiceSheet } from "@/components/sandbox/SandboxInvoiceSheet";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CircleHelp } from "lucide-react";
+import { formatSandboxDateEuropean } from "@/lib/sandbox/europeanDate";
+import { ChevronDown, CircleHelp } from "lucide-react";
+
+type BoardSortKey =
+  | "doc_date_desc"
+  | "doc_date_asc"
+  | "amount_desc"
+  | "amount_asc"
+  | "patient_asc"
+  | "patient_desc"
+  | "confidence_desc"
+  | "confidence_asc";
+
+type InsuranceFilter = "all" | InsuranceType;
+
+type ConfidenceFilter = "all" | ConfidenceLevel;
+
+const SORT_OPTIONS: { value: BoardSortKey; label: string }[] = [
+  { value: "doc_date_desc", label: "Datum · neu zuerst" },
+  { value: "doc_date_asc", label: "Datum · alt zuerst" },
+  { value: "amount_desc", label: "Betrag · hoch" },
+  { value: "amount_asc", label: "Betrag · niedrig" },
+  { value: "patient_asc", label: "Patient · A–Z" },
+  { value: "patient_desc", label: "Patient · Z–A" },
+  { value: "confidence_desc", label: "Konfidenz · hoch" },
+  { value: "confidence_asc", label: "Konfidenz · niedrig" },
+];
+
+const TIER_RANK: Record<ConfidenceLevel, number> = { high: 0, medium: 1, low: 2 };
+
+const subtleSelectTriggerSort =
+  "h-10 w-[min(100%,12rem)] sm:w-[12rem] border-dashed border-border/60 bg-transparent shadow-none text-xs text-muted-foreground hover:text-foreground hover:bg-muted/20 hover:border-border px-2.5 gap-1 focus:ring-1";
+
+const subtleFilterTrigger =
+  "inline-flex h-10 shrink-0 items-center gap-1 rounded-md border border-dashed border-border/60 bg-transparent px-3 text-xs font-medium text-muted-foreground shadow-none hover:border-border hover:bg-muted/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
+
+function sortSandboxInvoices(
+  invoices: SandboxInvoice[],
+  sortKey: BoardSortKey,
+  docDateByDocId: Map<string, string>,
+  patientNameByPatientId: Map<string, string>,
+): SandboxInvoice[] {
+  const arr = [...invoices];
+  arr.sort((a, b) => {
+    switch (sortKey) {
+      case "doc_date_desc": {
+        const da = Date.parse(docDateByDocId.get(a.documentation_id) ?? "") || 0;
+        const db = Date.parse(docDateByDocId.get(b.documentation_id) ?? "") || 0;
+        return db - da;
+      }
+      case "doc_date_asc": {
+        const da = Date.parse(docDateByDocId.get(a.documentation_id) ?? "") || 0;
+        const db = Date.parse(docDateByDocId.get(b.documentation_id) ?? "") || 0;
+        return da - db;
+      }
+      case "amount_desc":
+        return b.total_amount - a.total_amount;
+      case "amount_asc":
+        return a.total_amount - b.total_amount;
+      case "patient_asc": {
+        const na = patientNameByPatientId.get(a.patient_id) ?? "";
+        const nb = patientNameByPatientId.get(b.patient_id) ?? "";
+        return na.localeCompare(nb, "de", { sensitivity: "base" });
+      }
+      case "patient_desc": {
+        const na = patientNameByPatientId.get(a.patient_id) ?? "";
+        const nb = patientNameByPatientId.get(b.patient_id) ?? "";
+        return nb.localeCompare(na, "de", { sensitivity: "base" });
+      }
+      case "confidence_desc":
+        return TIER_RANK[a.confidence_tier] - TIER_RANK[b.confidence_tier];
+      case "confidence_asc":
+        return TIER_RANK[b.confidence_tier] - TIER_RANK[a.confidence_tier];
+      default:
+        return 0;
+    }
+  });
+  return arr;
+}
 
 const COLS = [
   {
@@ -46,12 +140,29 @@ export default function SandboxRechnungenPage() {
   const { state } = useSandbox();
   const [sheetInv, setSheetInv] = useState<SandboxInvoice | null>(null);
   const [q, setQ] = useState("");
+  const [sortKey, setSortKey] = useState<BoardSortKey>("doc_date_desc");
+  const [insuranceFilter, setInsuranceFilter] = useState<InsuranceFilter>("all");
+  const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
+
+  const docDateByDocId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of state.documentations) m.set(d.id, d.date);
+    return m;
+  }, [state.documentations]);
+
+  const patientNameByPatientId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of state.patients) m.set(p.id, p.name);
+    return m;
+  }, [state.patients]);
 
   const filtered = useMemo(() => {
-    return state.invoices.filter((inv) => {
+    const base = state.invoices.filter((inv) => {
       const patient = state.patients.find((p) => p.id === inv.patient_id);
       const doc = state.documentations.find((d) => d.id === inv.documentation_id);
       if (!patient || !doc) return false;
+      if (insuranceFilter !== "all" && patient.insurance_type !== insuranceFilter) return false;
+      if (confidenceFilter !== "all" && inv.confidence_tier !== confidenceFilter) return false;
       if (q.trim()) {
         const needle = q.trim().toLowerCase();
         if (
@@ -64,7 +175,18 @@ export default function SandboxRechnungenPage() {
       }
       return true;
     });
-  }, [state.invoices, state.patients, state.documentations, q]);
+    return sortSandboxInvoices(base, sortKey, docDateByDocId, patientNameByPatientId);
+  }, [
+    state.invoices,
+    state.patients,
+    state.documentations,
+    q,
+    insuranceFilter,
+    confidenceFilter,
+    sortKey,
+    docDateByDocId,
+    patientNameByPatientId,
+  ]);
 
   const byCol = useMemo(() => {
     const m: Record<string, SandboxInvoice[]> = { pre_visit: [], submitted: [], followup: [], paid: [] };
@@ -77,19 +199,91 @@ export default function SandboxRechnungenPage() {
   const colSum = (list: SandboxInvoice[]) =>
     list.reduce((s, i) => s + i.total_amount, 0);
 
+  const filterActive = insuranceFilter !== "all" || confidenceFilter !== "all";
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h1 className="text-lg font-semibold tracking-tight shrink-0">Übersicht</h1>
-        <div className="w-full min-w-0 sm:w-auto sm:flex-1 sm:max-w-md sm:flex sm:justify-end">
-          <Input
-            className="h-9 text-sm w-full sm:max-w-md"
-            placeholder="Suche: Name, Code, ID…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            aria-label="Suche"
-          />
+      <div className="flex flex-col gap-3 lg:relative lg:h-10 lg:w-full">
+        <div className="flex items-center justify-between gap-3 lg:contents">
+          <h1 className="text-lg font-semibold tracking-tight lg:absolute lg:left-0 lg:top-1/2 lg:z-20 lg:-translate-y-1/2 lg:whitespace-nowrap">
+            Übersicht
+          </h1>
+          <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5 lg:absolute lg:right-0 lg:top-1/2 lg:z-20 lg:-translate-y-1/2">
+            <Select value={sortKey} onValueChange={(v) => setSortKey(v as BoardSortKey)}>
+              <SelectTrigger className={subtleSelectTriggerSort} aria-label="Sortierung">
+                <SelectValue placeholder="Sortierung" />
+              </SelectTrigger>
+              <SelectContent align="end" className="max-h-72">
+                {SORT_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <DropdownMenu>
+              <DropdownMenuTrigger type="button" className={subtleFilterTrigger} aria-label="Filter">
+                <span>Filter</span>
+                {filterActive && (
+                  <span className="tabular-nums text-[10px] font-semibold text-foreground/80" aria-hidden>
+                    ●
+                  </span>
+                )}
+                <ChevronDown className="h-3.5 w-3.5 opacity-50" aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[13rem]">
+                <DropdownMenuLabel className="text-[11px] font-semibold text-muted-foreground">
+                  Kostenträger
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={insuranceFilter}
+                  onValueChange={(v) => setInsuranceFilter(v as InsuranceFilter)}
+                >
+                  <DropdownMenuRadioItem value="all" className="text-xs">
+                    Alle Kassenarten
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="GKV" className="text-xs">
+                    GKV
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="PKV" className="text-xs">
+                    PKV
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="self" className="text-xs">
+                    Selbstzahler
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[11px] font-semibold text-muted-foreground">
+                  Konfidenz
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={confidenceFilter}
+                  onValueChange={(v) => setConfidenceFilter(v as ConfidenceFilter)}
+                >
+                  <DropdownMenuRadioItem value="all" className="text-xs">
+                    Alle Konfidenz
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="high" className="text-xs">
+                    Hoch
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="medium" className="text-xs">
+                    Mittel
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="low" className="text-xs">
+                    Niedrig
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
+        <Input
+          className="h-10 w-full text-sm lg:absolute lg:left-1/2 lg:top-1/2 lg:z-10 lg:w-[min(32rem,calc(100%-16rem))] lg:-translate-x-1/2 lg:-translate-y-1/2"
+          placeholder="Suche: Name, Code, ID…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Suche"
+        />
       </div>
 
       <ScrollArea className="w-full pb-3">
@@ -99,7 +293,7 @@ export default function SandboxRechnungenPage() {
             const sum = colSum(list);
             return (
               <div key={col.id} className="flex flex-1 min-w-[220px] min-h-0 flex-col bg-background">
-                <div className="px-3 py-3 border-b-2 border-border/90 bg-muted/55 dark:bg-muted/40">
+                <div className="px-3 py-3 border-b-2 border-border/90">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="flex items-start gap-1.5 cursor-help text-left">
@@ -172,7 +366,9 @@ function InvoiceCard({
     >
       <div className="flex items-start justify-between gap-2">
         <span className="text-xs font-medium leading-tight line-clamp-2">{patient.name}</span>
-        <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">{docDate}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+          {formatSandboxDateEuropean(docDate)}
+        </span>
       </div>
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-semibold tabular-nums">

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
-import { buildSandboxSeed } from "./seed";
+import { buildSandboxSeed, buildSandboxSeedPatients } from "./seed";
 import { BILLING_CASES, invoiceFromCase, pickBillingCaseIndex } from "./billingCases";
 import { invoicePresentationPatch, recalcInvoiceTotal } from "./invoicePresentation";
 import {
@@ -82,8 +82,38 @@ function migrateSandboxPatients(patients: SandboxPatient[]): SandboxPatient[] {
   });
 }
 
+function isBlankSandboxField(v: string | undefined): boolean {
+  return v == null || String(v).trim() === "" || String(v).trim() === "—";
+}
+
+/** Füllt fehlende Demo-Stammdaten aus dem Seed nach (gleiche `sb-pat-…`-IDs). */
+function mergeSeedStammdatenForStoredPatients(patients: SandboxPatient[]): SandboxPatient[] {
+  const canonical = buildSandboxSeedPatients();
+  const byId = new Map(canonical.map((x) => [x.id, x]));
+  return patients.map((p) => {
+    const c = byId.get(p.id);
+    if (!c) return p;
+    const str = (a: string | undefined, b: string | undefined) => (!isBlankSandboxField(a) ? a! : b ?? a);
+    return {
+      ...p,
+      gender: str(p.gender, c.gender),
+      street: str(p.street, c.street),
+      postal_code: str(p.postal_code, c.postal_code),
+      city: str(p.city, c.city),
+      phone: str(p.phone, c.phone),
+      phone_alt: str(p.phone_alt, c.phone_alt),
+      email: str(p.email, c.email),
+      consent_status: p.consent_status ?? c.consent_status,
+      insurance_status: str(p.insurance_status, c.insurance_status),
+      insurance_member_since: str(p.insurance_member_since, c.insurance_member_since),
+      insurance_ik:
+        p.insurance_type === "GKV" && isBlankSandboxField(p.insurance_ik) ? c.insurance_ik : p.insurance_ik,
+    };
+  });
+}
+
 function normalizeSandboxSnapshot(s: SandboxStoreSnapshot): SandboxStoreSnapshot {
-  const patients = migrateSandboxPatients(s.patients);
+  const patients = mergeSeedStammdatenForStoredPatients(migrateSandboxPatients(s.patients));
   return {
     ...s,
     patients,
@@ -168,7 +198,7 @@ function persist(state: SandboxStoreSnapshot) {
 type Ctx = {
   state: SandboxStoreSnapshot;
   reset: () => void;
-  /** neue Patient:in oder bestehende überschreiben */
+  /** neuen Patienten anlegen oder bestehenden Stammdatensatz überschreiben */
   upsertPatient: (p: SandboxPatient) => void;
   upsertProvider: (p: SandboxProvider) => void;
   addDocumentation: (d: SandboxDocumentation) => void;

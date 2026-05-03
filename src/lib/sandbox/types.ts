@@ -15,11 +15,30 @@ export type DocStatus = "draft" | "proposed" | "invoiced";
 
 export type InvoiceStatus = "proposed" | "approved" | "sent" | "paid" | "denied" | "appealed";
 
+/** Anzeige im Prototyp (interne Schlüssel bleiben Englisch). */
+export const SANDBOX_INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
+  proposed: "Vorschlag",
+  approved: "Freigegeben",
+  sent: "Versendet",
+  paid: "Bezahlt",
+  denied: "Abgelehnt",
+  appealed: "Anfechtung",
+};
+
 export type ConfidenceLevel = "high" | "medium" | "low";
 
 export type SandboxProvider = {
   id: string;
   name: string;
+};
+
+/** Dokumentierter Einwilligungs-/Consent-Stand im Sandbox-Prototyp (Demo). */
+export type SandboxConsentStatus = "erteilt" | "ausstehend" | "fehlend";
+
+export const SANDBOX_CONSENT_LABEL: Record<SandboxConsentStatus, string> = {
+  erteilt: "Erteilt",
+  ausstehend: "Ausstehend",
+  fehlend: "Nicht dokumentiert",
 };
 
 export type SandboxPatient = {
@@ -36,7 +55,10 @@ export type SandboxPatient = {
   postal_code?: string;
   city?: string;
   phone?: string;
+  /** Alternativtelefon */
+  phone_alt?: string;
   email?: string;
+  consent_status?: SandboxConsentStatus;
   /** Versicherung */
   insurance_member_since?: string;
   /** Institutionskennzeichen der Krankenkasse (GKV-Demo) */

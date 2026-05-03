@@ -1,6 +1,6 @@
 # DocBill – Technische Dokumentation
 
-Einstieg für Entwickler:innen. Projekt-Setup und Supabase-Erstkonfiguration weiterhin im Repository-Root verlinkt.
+Einstieg für die Arbeit am Code. Projekt-Setup und Supabase-Erstkonfiguration weiterhin im Repository-Root verlinkt.
 
 ## Im Root
 
