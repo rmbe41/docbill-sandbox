@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
 import { followupSubLabel, invoiceBoardColumn } from "@/lib/sandbox/board";
 import type { InsuranceType, SandboxInvoice } from "@/lib/sandbox/types";
+import { InsurerLabelRow } from "@/components/sandbox/InsurerMark";
 import { ConfidenceDot, PayerChip } from "@/components/sandbox/sandboxUi";
 import { SandboxInvoiceSheet } from "@/components/sandbox/SandboxInvoiceSheet";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
@@ -179,7 +180,10 @@ function InvoiceCard({
         </span>
         <PayerChip type={patient.insurance_type} />
       </div>
-      <p className="text-[10px] text-muted-foreground line-clamp-2 leading-tight">{patient.insurance_provider}</p>
+      <InsurerLabelRow
+        name={patient.insurance_provider}
+        textClassName="text-[10px] text-muted-foreground line-clamp-2 leading-tight"
+      />
       <div className="flex items-center justify-between gap-2 pt-0.5">
         <span className="text-[10px] text-muted-foreground line-clamp-2">{invoice.card_code_summary}</span>
         <ConfidenceDot tier={invoice.confidence_tier} percent={invoice.confidence_percent} />

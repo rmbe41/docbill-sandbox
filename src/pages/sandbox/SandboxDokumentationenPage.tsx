@@ -9,6 +9,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
+import { InsurerLabelRow } from "@/components/sandbox/InsurerMark";
 import { PayerChip } from "@/components/sandbox/sandboxUi";
 import { MoreHorizontal } from "lucide-react";
 
@@ -56,7 +57,7 @@ export default function SandboxDokumentationenPage() {
                     {patient ? (
                       <div className="flex flex-col gap-1 items-start">
                         <PayerChip type={patient.insurance_type} />
-                        <span className="text-xs text-muted-foreground leading-snug line-clamp-2">{patient.insurance_provider}</span>
+                        <InsurerLabelRow name={patient.insurance_provider} textClassName="text-xs text-muted-foreground leading-snug line-clamp-2" />
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>

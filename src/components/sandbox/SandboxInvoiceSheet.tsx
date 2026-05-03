@@ -11,7 +11,8 @@ import {
 } from "@/components/ui/sheet";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
 import type { SandboxInvoice } from "@/lib/sandbox/types";
-import { ConfidenceDot, PayerChip } from "@/components/sandbox/sandboxUi";
+import { InsurerLabelRow } from "@/components/sandbox/InsurerMark";
+import { ConfidenceDot, PayerChip, SandboxGoaePositionBlock } from "@/components/sandbox/sandboxUi";
 import { terminalSubLabel } from "@/lib/sandbox/board";
 import {
   AlertDialog,
@@ -70,9 +71,10 @@ export function SandboxInvoiceSheet({
             <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
               {patient && <PayerChip type={patient.insurance_type} />}
               {patient && (
-                <span className="text-muted-foreground max-w-[220px] truncate" title={patient.insurance_provider}>
-                  {patient.insurance_provider}
-                </span>
+                <InsurerLabelRow
+                  name={patient.insurance_provider}
+                  textClassName="text-muted-foreground max-w-[220px] truncate text-xs"
+                />
               )}
               {patient && (
                 <span className="text-muted-foreground tabular-nums">VN {patient.insurance_number}</span>
@@ -101,36 +103,38 @@ export function SandboxInvoiceSheet({
 
               <Separator />
 
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-2">EBM (GKV-Leistungen)</p>
-                <ul className="space-y-1 text-xs">
-                  {invoice.service_items_ebm.map((r) => (
-                    <li key={r.code}>
-                      <span className="font-mono">{r.code}</span> {r.label}
-                      {r.amount_eur != null && (
-                        <span className="text-muted-foreground tabular-nums">
-                          {" "}
-                          · {r.amount_eur.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-2">GOÄ (Referenz / privatärztliche Parallelrechnung)</p>
-                <ul className="space-y-1 text-xs">
-                  {invoice.service_items_goae.map((r) => (
-                    <li key={r.code}>
-                      <span className="font-mono">{r.code}</span> {r.label}{" "}
-                      <span className="text-muted-foreground">
-                        Faktor {r.factor} · {r.amount.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              {invoice.billing_basis === "statutory" ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">EBM (GKV)</p>
+                  <ul className="space-y-1 text-xs">
+                    {invoice.service_items_ebm.map((r) => (
+                      <li key={r.code}>
+                        <span className="font-mono">{r.code}</span> {r.label}
+                        {r.amount_eur != null && (
+                          <span className="text-muted-foreground tabular-nums">
+                            {" "}
+                            · {r.amount_eur.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">GOÄ (Privat / Selbstzahler)</p>
+                  <ul className="space-y-2 text-xs">
+                    {invoice.service_items_goae.map((r, idx) => (
+                      <li key={`${r.code}-${idx}`} className="border-b border-border/40 pb-2 last:border-0 last:pb-0">
+                        <SandboxGoaePositionBlock row={r} />
+                        <p className="mt-1 text-muted-foreground tabular-nums">
+                          {r.amount.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               <Separator />
 

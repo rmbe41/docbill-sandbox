@@ -282,7 +282,7 @@ Nach Reset soll der Nutzer ungefähr vorfinden:
 | Entity | Richtwert |
 |--------|-----------|
 | Praxis / Behandelnde | 1 / 1 („Dr. M. Müller“) |
-| Patient:innen | ~30 (Mix GKV/PKV/Selbst ~70/25/5) |
+| Patient:innen | ~30 — **40 % GKV / 50 % PKV / 10 % Selbstzahler** (Zyklus siehe `seed.ts` → `insuranceForIndex`) |
 | Dokumentationen | ~50 über ~90 Tage, ~10 noch `draft` |
 | Rechnungen gesamt | ~48 — verteilt auf die vier Spalten wie in Abschnitt 5.1 |
 | Authoritative Billing-Cases | **50** (davon Nutzung für Generator + deterministischer Vorschlag) |

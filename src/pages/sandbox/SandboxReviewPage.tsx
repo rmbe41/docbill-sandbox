@@ -3,14 +3,14 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
 import { invoicePresentationPatch } from "@/lib/sandbox/invoicePresentation";
 import { BILLING_CASES } from "@/lib/sandbox/billingCases";
 import type { HighlightSnippet } from "@/lib/sandbox/types";
 import { CodePickerDialog, type CodePickerKind } from "@/components/sandbox/CodePickerDialog";
 import { SendInvoiceDialog } from "@/components/sandbox/SendInvoiceDialog";
-import { PayerChip } from "@/components/sandbox/sandboxUi";
+import { InsurerLabelRow } from "@/components/sandbox/InsurerMark";
+import { PayerChip, SandboxGoaePositionBlock } from "@/components/sandbox/sandboxUi";
 import { Trash2 } from "lucide-react";
 
 export default function SandboxReviewPage() {
@@ -40,16 +40,10 @@ export default function SandboxReviewPage() {
       </div>
     );
   }
+  const isStatutory = invoice.billing_basis === "statutory";
 
   const applyPresentation = (next: typeof invoice) => {
     patchInvoice(invoice.id, invoicePresentationPatch(next));
-  };
-
-  const removeIcd = (code: string) => {
-    const diagnosis_codes = invoice.diagnosis_codes.filter((d) => d.code !== code);
-    const next = { ...invoice, diagnosis_codes };
-    patchInvoice(invoice.id, { diagnosis_codes });
-    applyPresentation(next);
   };
 
   const removeEbm = (code: string) => {
@@ -110,7 +104,9 @@ export default function SandboxReviewPage() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Abrechnungsvorschlag — Review</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Links Doku (read-only), rechts Vorschlag mit EBM und GOÄ. Änderungen werden lokal gespeichert.
+            Links Doku (read-only), rechts{" "}
+            {isStatutory ? "nur EBM-Ziffern (GKV)" : "nur GOÄ-Ziffern (PKV / Selbstzahler)"}. Änderungen werden lokal
+            gespeichert.
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
@@ -124,6 +120,21 @@ export default function SandboxReviewPage() {
             <div>
               <p className="text-xs font-medium text-muted-foreground">Patient:in</p>
               <p className="font-medium">{patient.name}</p>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <PayerChip type={patient.insurance_type} />
+                <InsurerLabelRow name={patient.insurance_provider} textClassName="text-xs text-muted-foreground" />
+                <span className="text-xs text-muted-foreground tabular-nums">VN {patient.insurance_number}</span>
+              </div>
+              {(patient.street || patient.postal_code || patient.city) && (
+                <p className="text-xs text-muted-foreground mt-2 leading-snug">
+                  {[patient.street, [patient.postal_code, patient.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
+                </p>
+              )}
+              {(patient.phone || patient.email) && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {[patient.phone, patient.email].filter(Boolean).join(" · ")}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground mt-1">{doc.date}</p>
             </div>
             <Separator />
@@ -138,88 +149,78 @@ export default function SandboxReviewPage() {
           <div className="p-4 border-b border-border/70 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <PayerChip type={patient.insurance_type} />
-              <span className="text-xs text-muted-foreground">{patient.insurance_provider}</span>
+              <InsurerLabelRow name={patient.insurance_provider} textClassName="text-xs text-muted-foreground" />
               <span className="text-xs text-muted-foreground tabular-nums">VN {patient.insurance_number}</span>
             </div>
           </div>
 
           <ScrollArea className="flex-1 p-4">
             <div className="space-y-6 text-sm">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1">ICD-10</p>
-                <p className="text-[11px] text-muted-foreground leading-snug mb-2">
-                  Strukturierte Diagnosecodes für Abrechnung, Kostenträger-Rückmeldungen und die Zuordnung zu EBM/GOÄ. In der Akte links bleibt der
-                  Freitext; die Codes schlägt der Prototyp erst im Abrechnungsvorschlag vor.
-                </p>
-                <ul className="space-y-2">
-                  {invoice.diagnosis_codes.map((d) => (
-                    <li key={d.code} className="flex flex-wrap gap-2 items-start justify-between border border-border/60 rounded-md p-2">
-                      <div className="min-w-0">
-                        <span className="font-mono text-xs">{d.code}</span>{" "}
-                        <span className="text-xs">{d.label}</span>
-                        <p className="text-[11px] text-muted-foreground mt-1">{d.rationale}</p>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <ConfidenceBadge c={d.confidence} />
-                        <Button variant="ghost" size="icon" className="h-8 w-8" type="button" onClick={() => removeIcd(d.code)} aria-label="Entfernen">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+              <div className="rounded-md border border-dashed border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground leading-snug">
+                <p className="font-medium text-foreground mb-1">Deutsche Abrechnungsziffern</p>
+                {isStatutory ? (
+                  <p>
+                    Gesetzlich versichert: Abrechnung über EBM (einseitig). GOÄ-Ziffern werden hier nicht mitgeführt.
+                  </p>
+                ) : (
+                  <p>
+                    Privat oder Selbstzahler: Abrechnung über GOÄ (einseitig). EBM-Leistungsgruppen werden hier nicht
+                    mitgeführt.
+                  </p>
+                )}
               </div>
 
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <p className="text-xs font-medium text-muted-foreground">EBM (GKV-Leistungen)</p>
-                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setPickerKind("ebm")}>
-                    Hinzufügen
-                  </Button>
-                </div>
-                <ul className="space-y-2">
-                  {invoice.service_items_ebm.map((r) => (
-                    <li key={r.code} className="flex justify-between gap-2 border border-border/60 rounded-md p-2 text-xs">
-                      <span className="min-w-0">
-                        <span className="font-mono">{r.code}</span> {r.label}
-                      </span>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="tabular-nums text-muted-foreground">
-                          {(r.amount_eur ?? 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+              {isStatutory ? (
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-xs font-medium text-muted-foreground">EBM (GKV)</p>
+                    <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setPickerKind("ebm")}>
+                      Hinzufügen
+                    </Button>
+                  </div>
+                  <ul className="space-y-2">
+                    {invoice.service_items_ebm.map((r) => (
+                      <li key={r.code} className="flex justify-between gap-2 border border-border/60 rounded-md p-2 text-xs">
+                        <span className="min-w-0">
+                          <span className="font-mono">{r.code}</span> {r.label}
                         </span>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" type="button" onClick={() => removeEbm(r.code)}>
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <p className="text-xs font-medium text-muted-foreground">GOÄ (Referenz / privatärztliche Parallelrechnung)</p>
-                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setPickerKind("goae")}>
-                    Hinzufügen
-                  </Button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="tabular-nums text-muted-foreground">
+                            {(r.amount_eur ?? 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+                          </span>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" type="button" onClick={() => removeEbm(r.code)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <ul className="space-y-2">
-                  {invoice.service_items_goae.map((r) => (
-                    <li key={r.code} className="flex justify-between gap-2 border border-border/60 rounded-md p-2 text-xs">
-                      <span className="min-w-0">
-                        <span className="font-mono">{r.code}</span> {r.label}{" "}
-                        <span className="text-muted-foreground">Faktor {r.factor}</span>
-                      </span>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="tabular-nums">{r.amount.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</span>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" type="button" onClick={() => removeGoae(r.code)}>
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-xs font-medium text-muted-foreground">GOÄ (Privat / Selbstzahler)</p>
+                    <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setPickerKind("goae")}>
+                      Hinzufügen
+                    </Button>
+                  </div>
+                  <ul className="space-y-2">
+                    {invoice.service_items_goae.map((r, idx) => (
+                      <li key={`${r.code}-${idx}`} className="flex justify-between gap-2 border border-border/60 rounded-md p-2 text-xs">
+                        <span className="min-w-0 flex-1">
+                          <SandboxGoaePositionBlock row={r} />
+                        </span>
+                        <div className="flex flex-col items-end gap-2 shrink-0">
+                          <span className="tabular-nums">{r.amount.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</span>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" type="button" onClick={() => removeGoae(r.code)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </ScrollArea>
 
@@ -255,17 +256,6 @@ export default function SandboxReviewPage() {
   );
 }
 
-function ConfidenceBadge({ c }: { c: "high" | "medium" | "low" }) {
-  const label = c === "high" ? "Hoch" : c === "medium" ? "Mittel" : "Niedrig";
-  const variant: "default" | "secondary" | "destructive" =
-    c === "high" ? "default" : c === "medium" ? "secondary" : "destructive";
-  return (
-    <Badge variant={variant} className="text-[10px] font-normal">
-      {label}
-    </Badge>
-  );
-}
-
 function DocBlock({ title, text, highlights }: { title: string; text: string; highlights: HighlightSnippet[] }) {
   return (
     <div>
@@ -289,7 +279,7 @@ function Highlighted({ text, snippets }: { text: string; snippets: HighlightSnip
   for (const s of positions) {
     if (s.i > cursor) parts.push(text.slice(cursor, s.i));
     parts.push(
-      <mark key={`${s.ref}-${s.i}`} className="bg-primary/15 dark:bg-primary/25 text-foreground px-0.5 rounded ring-1 ring-border/60" title={`Zuordnung ${s.ref}`}>
+      <mark key={`${s.ref}-${s.i}`} className="bg-primary/15 dark:bg-primary/25 text-foreground px-0.5 rounded ring-1 ring-border/60" title={`Ziffer ${s.ref}`}>
         {s.snippet}
       </mark>,
     );

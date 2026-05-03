@@ -1,52 +1,51 @@
-import type { ConfidenceLevel, DiagnosisRow, SandboxInvoice, ServiceItemGoae } from "./types";
+import type { ConfidenceLevel, SandboxInvoice, ServiceItemEbm, ServiceItemGoae } from "./types";
 
+/** Summe nur der zur Rechnungsgrundlage gehörenden Positionen — EBM vs. GOÄ nicht addieren */
 export function recalcInvoiceTotal(inv: SandboxInvoice): number {
-  const eb = inv.service_items_ebm.reduce((s, x) => s + (x.amount_eur ?? 0), 0);
-  const go = inv.service_items_goae.reduce((s, x) => s + x.amount, 0);
-  return Math.round((eb + go) * 100) / 100;
-}
-
-function hashStr(s: string): number {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
+  const basis =
+    inv.billing_basis ??
+    (inv.service_items_ebm.length > 0 && inv.service_items_goae.length === 0 ? "statutory" : "private");
+  if (basis === "statutory") {
+    const eb = inv.service_items_ebm.reduce((s, x) => s + (x.amount_eur ?? 0), 0);
+    return Math.round(eb * 100) / 100;
   }
-  return h;
+  const go = inv.service_items_goae.reduce((s, x) => s + x.amount, 0);
+  return Math.round(go * 100) / 100;
 }
 
-/** Deterministischer Score pro ICD-Zeile (Prototyp), passend zur Stufe. */
-function diagnosisScorePercent(row: DiagnosisRow): number {
-  const frac = (hashStr(`${row.code}:${row.confidence}`) % 1000) / 1000;
-  if (row.confidence === "high") return Math.round(87 + frac * 10);
-  if (row.confidence === "medium") return Math.round(55 + frac * 18);
-  return Math.round(24 + frac * 18);
+function confidenceFromBillingDifficulty(diff: SandboxInvoice["billing_difficulty"]): {
+  confidence_tier: ConfidenceLevel;
+  confidence_percent: number;
+} {
+  if (diff === "hard") return { confidence_tier: "low", confidence_percent: 38 };
+  if (diff === "medium") return { confidence_tier: "medium", confidence_percent: 64 };
+  return { confidence_tier: "high", confidence_percent: 89 };
 }
 
-export function confidencePercentFromDiagnoses(rows: DiagnosisRow[]): number {
-  if (rows.length === 0) return 72;
-  return Math.min(...rows.map(diagnosisScorePercent));
-}
-
-function tierFromDiagnoses(d: DiagnosisRow[]): ConfidenceLevel {
-  if (d.some((x) => x.confidence === "low")) return "low";
-  if (d.some((x) => x.confidence === "medium")) return "medium";
-  return "high";
-}
-
-function cardSummary(d: DiagnosisRow[], g: ServiceItemGoae[]): string {
-  const icd = d[0]?.code ?? "—";
-  const z = g[0]?.code ?? "—";
-  return `GOÄ ${z} · ICD ${icd}`;
+function cardSummaryGerman(ebm: ServiceItemEbm[], goae: ServiceItemGoae[]): string {
+  const ePart = ebm
+    .slice(0, 4)
+    .map((x) => x.code)
+    .join(", ");
+  const gPart = goae
+    .slice(0, 4)
+    .map((x) => x.code)
+    .join(", ");
+  const eMore = ebm.length > 4 ? " …" : "";
+  const gMore = goae.length > 4 ? " …" : "";
+  if (ePart && gPart) return `EBM ${ePart}${eMore} · GOÄ ${gPart}${gMore}`;
+  if (ePart) return `EBM ${ePart}${eMore}`;
+  return `GOÄ ${gPart}${gMore}`;
 }
 
 export function invoicePresentationPatch(
   inv: SandboxInvoice,
 ): Pick<SandboxInvoice, "confidence_tier" | "confidence_percent" | "card_code_summary" | "total_amount"> {
+  const diff = inv.billing_difficulty ?? "medium";
+  const conf = confidenceFromBillingDifficulty(diff);
   return {
     total_amount: recalcInvoiceTotal(inv),
-    confidence_tier: tierFromDiagnoses(inv.diagnosis_codes),
-    confidence_percent: confidencePercentFromDiagnoses(inv.diagnosis_codes),
-    card_code_summary: cardSummary(inv.diagnosis_codes, inv.service_items_goae),
+    ...conf,
+    card_code_summary: cardSummaryGerman(inv.service_items_ebm, inv.service_items_goae),
   };
 }

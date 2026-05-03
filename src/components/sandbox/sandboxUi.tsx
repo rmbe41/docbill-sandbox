@@ -1,6 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { ConfidenceLevel } from "@/lib/sandbox/types";
-import type { InsuranceType } from "@/lib/sandbox/types";
+import type { ConfidenceLevel, InsuranceType, ServiceItemGoae } from "@/lib/sandbox/types";
 
 function fallbackPercentForTier(tier: ConfidenceLevel): number {
   if (tier === "high") return 91;
@@ -30,6 +29,24 @@ export function ConfidenceDot({
       <span className={cn("inline-block h-2 w-2 rounded-full", cls)} aria-hidden />
       <span className="text-[10px] tabular-nums text-muted-foreground leading-none">{p} %</span>
     </span>
+  );
+}
+
+/** Einzelne GOÄ-Position im Sandbox-Prototyp inkl. Steigerungsbemerkung */
+export function SandboxGoaePositionBlock({ row }: { row: ServiceItemGoae }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap gap-x-1 gap-y-0.5 items-baseline">
+        <span className="font-mono shrink-0">{row.code}</span>
+        <span className="min-w-0">{row.label}</span>
+        <span className="text-muted-foreground tabular-nums shrink-0">Faktor {row.factor}</span>
+      </div>
+      {row.factor_justification ? (
+        <p className="mt-1.5 pl-2 border-l-2 border-muted text-muted-foreground leading-snug text-[11px]">
+          Steigerungsbemerkung (GOÄ): {row.factor_justification}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

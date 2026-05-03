@@ -2,6 +2,13 @@
 
 export type InsuranceType = "GKV" | "PKV" | "self";
 
+/** GKV → EBM; PKV/Selbstzahler → GOÄ — nicht mischen */
+export type BillingBasis = "statutory" | "private";
+
+export function billingBasisFromInsurance(ins: InsuranceType): BillingBasis {
+  return ins === "GKV" ? "statutory" : "private";
+}
+
 export type EncounterType = "Erstkontakt" | "Folge" | "Notfall" | "Vorsorge";
 
 export type DocStatus = "draft" | "proposed" | "invoiced";
@@ -23,6 +30,17 @@ export type SandboxPatient = {
   insurance_number: string;
   insurance_provider: string;
   insurance_status?: string;
+  /** Stammdaten (optional; ältere LocalStorage-Snapshots ohne diese Felder) */
+  gender?: string;
+  street?: string;
+  postal_code?: string;
+  city?: string;
+  phone?: string;
+  email?: string;
+  /** Versicherung */
+  insurance_member_since?: string;
+  /** Institutionskennzeichen der Krankenkasse (GKV-Demo) */
+  insurance_ik?: string;
 };
 
 export type SandboxDocumentation = {
@@ -41,14 +59,6 @@ export type SandboxDocumentation = {
   created_at: string;
 };
 
-export type DiagnosisRow = {
-  code: string;
-  label: string;
-  confidence: ConfidenceLevel;
-  rationale: string;
-  source_snippet?: string;
-};
-
 export type ServiceItemEbm = {
   code: string;
   label: string;
@@ -61,6 +71,8 @@ export type ServiceItemGoae = {
   label: string;
   factor: number;
   amount: number;
+  /** Pflichtig bei Steigerung über den Schwellensatz der Ziffer (GOÄ); siehe Katalog `thresholdFactor` */
+  factor_justification?: string;
 };
 
 export type TimelineEntry = {
@@ -73,21 +85,24 @@ export type SandboxInvoice = {
   id: string;
   documentation_id: string;
   patient_id: string;
-  diagnosis_codes: DiagnosisRow[];
+  billing_basis: BillingBasis;
   service_items_ebm: ServiceItemEbm[];
   service_items_goae: ServiceItemGoae[];
   total_amount: number;
   status: InvoiceStatus;
   sent_via?: string;
   timeline: TimelineEntry[];
-  /** niedrigste Diagnose-Konfidenz für Karten-Dot */
+  /** Fallback-Schwierigkeit des Demo-Falls; steuert Konfidenz im Prototyp */
+  billing_difficulty: "easy" | "medium" | "hard";
+  /** niedrigste Konfidenzstufe für Karten-Dot (aus billing_difficulty abgeleitet) */
   confidence_tier: ConfidenceLevel;
-  /** Prototyp: abgeleiteter Score 0–100 aus Diagnose-Konfidenzen (kein echtes Modell) */
+  /** Prototyp: Score 0–100 (kein echtes Modell) */
   confidence_percent: number;
-  /** Kurzlabel für Karte z. B. GOÄ 1 + ICD R51 */
+  /** Kurzlabel für Karte: nur EBM oder nur GOÄ je nach Kostenträger */
   card_code_summary: string;
 };
 
+/** Markierung im Freitext der Akte; ref kann EBM oder GOÄ bezeichnen — Abrechnung bleibt getrennt */
 export type HighlightSnippet = {
   field: "anamnesis" | "findings" | "diagnosis_text" | "therapy";
   snippet: string;
@@ -108,7 +123,6 @@ export type SandboxBillingCase = {
   patient_profile_id?: string;
   documentation: SandboxBillingCaseDocumentation;
   highlights?: HighlightSnippet[];
-  diagnosis_codes: DiagnosisRow[];
   service_items_ebm: ServiceItemEbm[];
   service_items_goae: ServiceItemGoae[];
   total_amount: number;

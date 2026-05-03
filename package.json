@@ -28,7 +28,8 @@
     "goae:build:v2": "npx tsx scripts/goae-v2/build-goae-v2.ts",
     "ebm:extract": "node scripts/ebm/extract-ebm-from-pdf.mjs",
     "generate:benchmark-cases:v2": "npx tsx benchmarks/goae-engine-eval/scripts/generate-v2-exclusion-cases.ts",
-    "pdf:ingest": "npx tsx scripts/pdf-ingest/ingest-cli.ts"
+    "pdf:ingest": "npx tsx scripts/pdf-ingest/ingest-cli.ts",
+    "sandbox:logos": "node scripts/scrape-krankenkassen-logos.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

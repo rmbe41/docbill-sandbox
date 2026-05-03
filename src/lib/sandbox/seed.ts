@@ -9,43 +9,47 @@ import type {
   TimelineEntry,
 } from "./types";
 
+import { PKV_NAMES } from "@/data/sandbox/krankenkassenCatalog";
+
 const PROVIDER_ID = "prov-1";
 
-const GKV_NAMES = [
-  "BARMER",
+/**
+ * Feste Rechnungs-Zielbrutto über die Sandbox-Fälle: linear zwischen SANDBOX_BILLING_INVOICE_MIN_EUR und SANDBOX_BILLING_INVOICE_MAX_EUR
+ * (Konstanten in `./billingCases`, Index `sandboxBillingTargetEuroForCaseIndex(0 … SANDBOX_BILLING_CASE_COUNT − 1)`).
+ * Positionsbetraege stammen nur aus dem KBV-EBM-Katalog (`src/data/ebm-catalog-2026-q2.json`) bzw. GOÄ `goae-catalog-v2`
+ * mit Punktwert wie GOÄ-Regelengine (`sandboxTariff.ts`); GKV → EBM, PKV und Selbstzahler → GOÄ.
+ */
+
+/**
+ * Kostenträger-Mix der Seed-Patient:innen (Zyklus von 10 Indizes, wiederholt über ~30 Personen):
+ *
+ * | Anteil | Typ |
+ * |--------|-----|
+ * | 40 % | GKV |
+ * | 50 % | PKV |
+ * | 10 % | Selbstzahler |
+ *
+ * Details: `specs/09_SANDBOX_PROTOTYPE.md` → Abschnitt 12 (Seed-Zielgrößen).
+ */
+const SEED_GKV_PROVIDER_CYCLE: readonly string[] = [
+  "DAK Gesundheit",
   "Techniker Krankenkasse (TK)",
+  "BARMER",
+  "mhplus Krankenkasse",
   "AOK Bayern",
-  "DAK-Gesundheit",
-  "ikk classic",
-  "mhplus Betriebskrankenkasse",
+  "IKK classic",
   "BIG direkt gesund",
-  "Audi BKK",
-  "Handelskrankenkasse (hkk)",
-  "Knappschaft",
+  "SBK",
+  "VIACTIV Krankenkasse",
 ];
 
-const PKV_NAMES = [
-  "Allianz Private Krankenversicherung",
-  "AXA Krankenversicherung",
-  "Debeka Krankenversicherungsverein",
-  "Dialog Krankenversicherung",
-  "Generali Gesundheit",
-  "Hallesche Krankenversicherung",
-  "R+V Krankenversicherung",
-  "Signal Iduna Krankenversicherung",
-  "UKV Union Krankenversicherung",
-  "WWK Krankenversicherung",
-  "Barmenia Krankenversicherung",
-  "INTER Krankenversicherung",
-];
-
-/** Pro 10 Patienten: 1 Selbst, 4 PKV, 5 GKV — skaliert gleichmäßig mit Listenlänge */
+/** i % 10: 0 = Selbst (10 %), 1–5 = PKV (50 %), 6–9 = GKV (40 %). */
 function insuranceForIndex(i: number): Pick<SandboxPatient, "insurance_type" | "insurance_provider"> {
   const k = i % 10;
   if (k === 0) return { insurance_type: "self", insurance_provider: "Selbstzahler" };
-  if (k >= 1 && k <= 4)
+  if (k >= 1 && k <= 5)
     return { insurance_type: "PKV", insurance_provider: PKV_NAMES[i % PKV_NAMES.length]! };
-  const kk = GKV_NAMES[i % GKV_NAMES.length]!;
+  const kk = SEED_GKV_PROVIDER_CYCLE[(i % SEED_GKV_PROVIDER_CYCLE.length)]!;
   return { insurance_type: "GKV", insurance_provider: kk };
 }
 
@@ -81,6 +85,17 @@ const FIRST = [
   "Vanessa",
   "Patrick",
 ];
+
+const SEED_CITIES = [
+  "Musterstadt",
+  "Beispielhausen",
+  "Demingen",
+  "Altstadt",
+  "Neustadt",
+  "Linden",
+  "Bergheim",
+  "Seerhausen",
+] as const;
 
 const LAST = [
   "Müller",
@@ -161,12 +176,28 @@ export function buildSandboxSeed(): SandboxSeedState {
   for (let i = 0; i < 30; i++) {
     const ins = insuranceForIndex(i);
     const id = `sb-pat-${String(i + 1).padStart(2, "0")}`;
+    const genders = ["weiblich", "männlich", "divers"];
+    const plz = String(10000 + ((i * 137) % 89999)).padStart(5, "0");
+    const memberYear = 2008 + (i % 15);
+    const memberMonth = String((i % 11) + 1).padStart(2, "0");
+    const ik =
+      ins.insurance_type === "GKV"
+        ? String(100000000 + (i * 791) % 899999999).padStart(9, "0")
+        : undefined;
     patients.push({
       id,
       name: `${LAST[i % LAST.length]!}, ${FIRST[i % FIRST.length]!}`,
       dob: `${1965 + (i % 45)}-${String((i % 11) + 1).padStart(2, "0")}-${String((i % 27) + 1).padStart(2, "0")}`,
       insurance_number: `K${100000000 + i}`,
       insurance_status: ins.insurance_type === "GKV" ? "Mitglied" : ins.insurance_type === "PKV" ? "Versichert" : "—",
+      gender: genders[i % genders.length],
+      street: `Musterweg ${((i * 3) % 40) + 1}`,
+      postal_code: plz,
+      city: SEED_CITIES[i % SEED_CITIES.length]!,
+      phone: `+49 170 ${String(1000000 + (i * 917) % 8999999)}`,
+      email: `patient.${String(i + 1).padStart(2, "0")}@sandbox.docbill.demo`,
+      insurance_member_since: `${memberYear}-${memberMonth}-01`,
+      insurance_ik: ik,
       ...ins,
     });
   }
@@ -204,7 +235,7 @@ export function buildSandboxSeed(): SandboxSeedState {
     if (!isDraft) {
       const st = statusForInvoiceIndex(i);
       const invId = `sb-inv-${String(i + 1).padStart(3, "0")}`;
-      let inv = invoiceFromCase(invId, docId, patient.id, case_, st);
+      let inv = invoiceFromCase(invId, docId, patient.id, case_, st, patient.insurance_type);
       inv = { ...inv, timeline: enrichTimeline(st, inv.timeline) };
       invoices.push(inv);
     }
