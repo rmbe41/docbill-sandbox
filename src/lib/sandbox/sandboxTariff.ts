@@ -183,6 +183,11 @@ function bundleCompatibleWith(existingBundle: readonly string[], code: string): 
   return true;
 }
 
+/** Sandbox-Demo: dieselbe GOÄ-Ziffer nicht mehrfach auf einer Rechnung (außer explizite Seed-/Engine-Zeilen mit eigener Semantik). */
+function bundleAlreadyHasGoaeCode(bundle: readonly string[], code: string): boolean {
+  return bundle.includes(code);
+}
+
 /** Zusatzpositionen aus dem GOÄ-Katalog bis zur Ziel-Summe (nach Faktor-Anpassungen). */
 function appendGoaeLinesTowardTarget(lines: readonly ServiceItemGoae[], targetEuro: number): ServiceItemGoae[] {
   const out = [...lines];
@@ -192,6 +197,7 @@ function appendGoaeLinesTowardTarget(lines: readonly ServiceItemGoae[], targetEu
     const bundle = out.map((w) => w.code);
     let bestFit: ServiceItemGoae | null = null;
     for (const code of SANDBOX_GOAE_FILLERS_DESC) {
+      if (bundleAlreadyHasGoaeCode(bundle, code)) continue;
       if (!bundleCompatibleWith(bundle, code)) continue;
       const row = goaeV2CodeById.get(code);
       if (!row) continue;
@@ -205,6 +211,7 @@ function appendGoaeLinesTowardTarget(lines: readonly ServiceItemGoae[], targetEu
     }
     let smallest: ServiceItemGoae | null = null;
     for (const code of SANDBOX_GOAE_FILLERS_ASC) {
+      if (bundleAlreadyHasGoaeCode(bundle, code)) continue;
       if (!bundleCompatibleWith(bundle, code)) continue;
       const row = goaeV2CodeById.get(code);
       if (!row) continue;
@@ -283,6 +290,7 @@ export function finalizeGoaeToTarget(seedItems: readonly ServiceItemGoae[], targ
     for (const code of PAD_CODES) {
       const row = goaeV2CodeById.get(code);
       if (!row) continue;
+      if (cs().includes(code)) continue;
       if (codesGoaeConflict([...cs(), code])) continue;
       const item = serviceItemGoae(code, row.fee.thresholdFactor);
       if (!item || item.amount > rem + 120) continue;
