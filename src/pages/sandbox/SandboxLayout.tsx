@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid, Moon, Sun } from "lucide-react";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
 
@@ -20,6 +20,23 @@ export default function SandboxLayout() {
   const { pathname } = useLocation();
   const { state, reset } = useSandbox();
   const [resetOpen, setResetOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(() =>
+    document.documentElement.classList.contains("dark"),
+  );
+
+  const toggleTheme = () => {
+    setDarkMode((prev) => {
+      const next = !prev;
+      if (next) {
+        document.documentElement.classList.add("dark");
+        localStorage.setItem("theme", "dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+        localStorage.setItem("theme", "light");
+      }
+      return next;
+    });
+  };
 
   const confirmReset = () => {
     reset();
@@ -113,6 +130,20 @@ export default function SandboxLayout() {
       <main id="sandbox-main" className="flex-1 w-full px-4 md:px-6 lg:px-8 py-6 overflow-auto">
         <Outlet />
       </main>
+
+      <div className="fixed bottom-4 right-4 z-50 md:bottom-6 md:right-6">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-11 w-11 rounded-full border-border bg-background/90 shadow-md backdrop-blur-sm hover:bg-muted/80"
+          onClick={toggleTheme}
+          title={darkMode ? "Helles Erscheinungsbild" : "Dunkles Erscheinungsbild"}
+          aria-label={darkMode ? "Zu hellem Modus wechseln" : "Zu dunklem Modus wechseln"}
+        >
+          {darkMode ? <Sun className="h-[1.125rem] w-[1.125rem]" aria-hidden /> : <Moon className="h-[1.125rem] w-[1.125rem]" aria-hidden />}
+        </Button>
+      </div>
     </div>
   );
 }
