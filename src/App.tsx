@@ -3,12 +3,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { initPostHog } from "@/lib/observability/posthog";
-import { AuthProvider, useAuth } from "@/hooks/useAuth";
-import { DraftProvider } from "@/hooks/useDraft";
-import Index from "./pages/Index";
-import Auth from "./pages/Auth";
+import { AuthProvider } from "@/hooks/useAuth";
+import { PasswordGate } from "@/components/PasswordGate";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
@@ -35,24 +33,25 @@ function PostHogRootInit() {
   return null;
 }
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading } = useAuth();
-  if (loading)
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <p className="text-muted-foreground">Laden…</p>
-      </div>
-    );
-  if (!user) return <Navigate to="/auth" replace />;
-  return <>{children}</>;
-};
+function LegacySandboxAnalyseRedirect() {
+  const { docId } = useParams<{ docId: string }>();
+  if (!docId) return <Navigate to="/" replace />;
+  return <Navigate to={`/analyse/${docId}`} replace />;
+}
 
-const AuthRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading } = useAuth();
-  if (loading) return null;
-  if (user) return <Navigate to="/" replace />;
-  return <>{children}</>;
-};
+function LegacySandboxReviewRedirect() {
+  const { invoiceId } = useParams<{ invoiceId: string }>();
+  if (!invoiceId) return <Navigate to="/" replace />;
+  return <Navigate to={`/review/${invoiceId}`} replace />;
+}
+
+function SandboxRootLayout() {
+  return (
+    <SandboxProvider>
+      <SandboxLayout />
+    </SandboxProvider>
+  );
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -61,101 +60,34 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <AuthProvider>
-          <DraftProvider>
+        <PasswordGate>
+          <AuthProvider>
             <Routes>
               <Route path="/status" element={<Status />} />
-              <Route
-                path="/sandbox"
-                element={
-                  <SandboxProvider>
-                    <SandboxLayout />
-                  </SandboxProvider>
-                }
-              >
-                <Route index element={<Navigate to="rechnungen" replace />} />
-                <Route path="rechnungen" element={<SandboxRechnungenPage />} />
+              <Route path="/sandbox" element={<Navigate to="/" replace />} />
+              <Route path="/sandbox/rechnungen" element={<Navigate to="/" replace />} />
+              <Route path="/sandbox/dokumentationen" element={<Navigate to="/dokumentationen" replace />} />
+              <Route path="/sandbox/abrechnung/neu" element={<Navigate to="/abrechnung/neu" replace />} />
+              <Route path="/sandbox/analyse/:docId" element={<LegacySandboxAnalyseRedirect />} />
+              <Route path="/sandbox/review/:invoiceId" element={<LegacySandboxReviewRedirect />} />
+              <Route path="/" element={<SandboxRootLayout />}>
+                <Route index element={<SandboxRechnungenPage />} />
                 <Route path="dokumentationen" element={<SandboxDokumentationenPage />} />
                 <Route path="abrechnung/neu" element={<SandboxNewDocPage />} />
                 <Route path="analyse/:docId" element={<SandboxAnalysePage />} />
                 <Route path="review/:invoiceId" element={<SandboxReviewPage />} />
               </Route>
-              <Route
-                path="/dashboard/feedback"
-                element={
-                  <ProtectedRoute>
-                    <FeedbackDashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/batches"
-                element={
-                  <ProtectedRoute>
-                    <BatchesPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/batches/:batchId"
-                element={
-                  <ProtectedRoute>
-                    <BatchDetailPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/invite/:token"
-                element={
-                  <ProtectedRoute>
-                    <AcceptInvitePage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/dashboard/kb-relevanz"
-                element={
-                  <ProtectedRoute>
-                    <KbRelevanzDashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/auth"
-                element={
-                  <AuthRoute>
-                    <Auth />
-                  </AuthRoute>
-                }
-              />
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <Index />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/settings"
-                element={
-                  <ProtectedRoute>
-                    <Settings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/profile"
-                element={
-                  <ProtectedRoute>
-                    <Profile />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="/dashboard/feedback" element={<FeedbackDashboard />} />
+              <Route path="/batches" element={<BatchesPage />} />
+              <Route path="/batches/:batchId" element={<BatchDetailPage />} />
+              <Route path="/invite/:token" element={<AcceptInvitePage />} />
+              <Route path="/dashboard/kb-relevanz" element={<KbRelevanzDashboard />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
-          </DraftProvider>
-        </AuthProvider>
+          </AuthProvider>
+        </PasswordGate>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

@@ -25,21 +25,49 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let cancelled = false;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (session?.user) {
+        setSession(session);
+        setUser(session.user);
+        setLoading(false);
+        return;
+      }
+      const email = (import.meta.env.VITE_AUTO_LOGIN_EMAIL as string | undefined)?.trim();
+      const autoPassword = import.meta.env.VITE_AUTO_LOGIN_PASSWORD as string | undefined;
+      if (email && autoPassword) {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password: autoPassword,
+        });
+        if (cancelled) return;
+        if (error) {
+          console.error("Auto-Anmeldung fehlgeschlagen:", error.message);
+          setLoading(false);
+        }
+        /* Erfolg: onAuthStateChange setzt User */
+        return;
+      }
+      setLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

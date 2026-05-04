@@ -13,13 +13,13 @@ export default function SandboxAnalysePage() {
 
   useEffect(() => {
     if (!docId) {
-      navigate("/sandbox/dokumentationen", { replace: true });
+      navigate("/dokumentationen", { replace: true });
       return;
     }
     const t = window.setTimeout(() => {
       const inv = createRef.current(docId);
-      if (inv) navigate(`/sandbox/review/${inv.id}`, { replace: true });
-      else navigate("/sandbox/dokumentationen", { replace: true });
+      if (inv) navigate(`/review/${inv.id}`, { replace: true });
+      else navigate("/dokumentationen", { replace: true });
     }, 1500);
 
     return () => window.clearTimeout(t);

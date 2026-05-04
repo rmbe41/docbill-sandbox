@@ -689,7 +689,7 @@ export default function SandboxNewDocPage() {
       return;
     }
     addDocumentation({ ...buildDocPayload(pid, prid), status: "draft" });
-    navigate("/sandbox/dokumentationen");
+    navigate("/dokumentationen");
   };
 
   const saveAndPropose = () => {
@@ -706,7 +706,7 @@ export default function SandboxNewDocPage() {
     }
     const doc = { ...buildDocPayload(pid, prid), status: "draft" as const };
     addDocumentation(doc);
-    navigate(`/sandbox/analyse/${doc.id}`);
+    navigate(`/analyse/${doc.id}`);
   };
 
   return (
@@ -1027,7 +1027,7 @@ function PatientHistorieBlock({
         {docs.map((doc) => {
           const inv = invoices.find((i) => i.documentation_id === doc.id);
           const providerName = providers.find((p) => p.id === doc.provider_id)?.name ?? doc.provider_id;
-          const href = inv ? `/sandbox/review/${inv.id}` : `/sandbox/analyse/${doc.id}`;
+          const href = inv ? `/review/${inv.id}` : `/analyse/${doc.id}`;
           const label = DOC_STATUS_LABEL[doc.status] ?? doc.status;
           return (
             <li key={doc.id}>

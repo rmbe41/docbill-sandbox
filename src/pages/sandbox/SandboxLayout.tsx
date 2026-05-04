@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,7 +17,6 @@ import { useSandbox } from "@/lib/sandbox/sandboxStore";
 import DocBillLogo from "@/assets/DocBill-Logo.svg";
 
 export default function SandboxLayout() {
-  const { pathname } = useLocation();
   const { state, reset } = useSandbox();
   const [resetOpen, setResetOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() =>
@@ -50,7 +49,7 @@ export default function SandboxLayout() {
           <div className="grid grid-cols-1 gap-y-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-x-3">
             <div className="justify-self-start min-w-0 flex flex-col gap-1">
               <Link
-                to="/sandbox/rechnungen"
+                to="/"
                 className="shrink-0 inline-flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
                 aria-label="DocBill Sandbox — Zur Übersicht"
               >
@@ -76,25 +75,17 @@ export default function SandboxLayout() {
                 >
                   Daten zurücksetzen
                 </button>
-                <span className="opacity-70 select-none" aria-hidden>
-                  |
-                </span>
-                <Link
-                  to="/"
-                  className="whitespace-nowrap text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md ring-offset-background"
-                >
-                  Zurück zur Website
-                </Link>
               </div>
             </div>
 
             <div className="justify-self-end flex items-center gap-2 flex-wrap row-start-3 sm:row-start-auto sm:justify-self-end">
               <NavLink
-                to="/sandbox/rechnungen"
+                to="/"
+                end
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm whitespace-nowrap transition-colors shrink-0",
-                    isActive || pathname === "/sandbox"
+                    isActive
                       ? "bg-muted text-foreground font-medium"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/70",
                   )
@@ -104,7 +95,7 @@ export default function SandboxLayout() {
                 Übersicht
               </NavLink>
               <Button size="sm" className="shrink-0" asChild>
-                <Link to="/sandbox/abrechnung/neu">Neue Abrechnung</Link>
+                <Link to="/abrechnung/neu">Neue Abrechnung</Link>
               </Button>
             </div>
           </div>

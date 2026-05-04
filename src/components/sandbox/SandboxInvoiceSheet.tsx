@@ -182,7 +182,7 @@ export function SandboxInvoiceSheet({
 
           <div className="p-4 border-t border-border/80 flex flex-wrap gap-2 bg-muted/20">
             {invoice.status === "proposed" && (
-              <Button size="sm" onClick={() => navigate(`/sandbox/review/${invoice.id}`)}>
+              <Button size="sm" onClick={() => navigate(`/review/${invoice.id}`)}>
                 Zur Review
               </Button>
             )}
@@ -198,7 +198,7 @@ export function SandboxInvoiceSheet({
             )}
             {invoiceBoardTerminal(invoice) && (
               <Button variant="ghost" size="sm" className="text-xs" asChild>
-                <Link to="/sandbox/dokumentationen">Zur Dokumentation</Link>
+                <Link to="/dokumentationen">Zur Dokumentation</Link>
               </Button>
             )}
           </div>

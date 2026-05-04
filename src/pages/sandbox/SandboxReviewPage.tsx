@@ -45,7 +45,7 @@ export default function SandboxReviewPage() {
     return (
       <div className="text-sm text-muted-foreground">
         Rechnung nicht gefunden.{" "}
-        <Link to="/sandbox/rechnungen" className="text-primary underline">
+        <Link to="/" className="text-primary underline">
           Zum Board
         </Link>
       </div>
@@ -133,7 +133,7 @@ export default function SandboxReviewPage() {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link to="/sandbox/rechnungen">Abbrechen</Link>
+            <Link to="/">Abbrechen</Link>
           </Button>
           {invoice.status === "approved" ? (
             <Button type="button" size="sm" onClick={() => setSendOpen(true)}>
@@ -366,7 +366,7 @@ export default function SandboxReviewPage() {
 
       <CodePickerDialog kind={pickerKind ?? "goae"} open={pickerKind !== null} onOpenChange={(o) => !o && setPickerKind(null)} onPick={addPick} />
 
-      <SendInvoiceDialog invoice={invoice} open={sendOpen} onOpenChange={setSendOpen} onSent={() => navigate("/sandbox/rechnungen")} />
+      <SendInvoiceDialog invoice={invoice} open={sendOpen} onOpenChange={setSendOpen} onSent={() => navigate("/")} />
     </div>
   );
 }

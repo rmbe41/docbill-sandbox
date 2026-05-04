@@ -205,7 +205,7 @@ const ProfileContent = () => {
     setResetSending(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
-        redirectTo: `${getRedirectUrl()}/auth`,
+        redirectTo: `${getRedirectUrl()}/`,
       });
       if (error) throw error;
       toast({
@@ -244,7 +244,7 @@ const ProfileContent = () => {
 
       await signOut();
       toast({ title: "Konto gelöscht", description: "Auf Wiedersehen." });
-      navigate("/auth", { replace: true });
+      navigate("/", { replace: true });
     } catch (e: unknown) {
       toast({
         title: "Löschen fehlgeschlagen",

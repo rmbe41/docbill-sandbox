@@ -81,13 +81,13 @@ export default function SandboxDokumentationenPage() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         {doc.status === "draft" && (
-                          <DropdownMenuItem onClick={() => navigate(`/sandbox/analyse/${doc.id}`)}>
+                          <DropdownMenuItem onClick={() => navigate(`/analyse/${doc.id}`)}>
                             Rechnung erstellen
                           </DropdownMenuItem>
                         )}
                         {inv && (
                           <DropdownMenuItem asChild>
-                            <Link to={`/sandbox/review/${inv.id}`}>Zur Review</Link>
+                            <Link to={`/review/${inv.id}`}>Zur Review</Link>
                           </DropdownMenuItem>
                         )}
                         {!inv && doc.status !== "draft" && (
