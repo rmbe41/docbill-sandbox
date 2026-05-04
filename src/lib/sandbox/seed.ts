@@ -1,4 +1,9 @@
 import { BILLING_CASES, invoiceFromCase } from "./billingCases";
+import {
+  SANDBOX_SCENARIO_COUNT,
+  SANDBOX_SCENARIO_ROWS,
+  SANDBOX_VISIBLE_SCENARIO_COUNT,
+} from "./sandboxScenarioCatalog";
 import type {
   DocStatus,
   InvoiceStatus,
@@ -14,14 +19,15 @@ import { PKV_NAMES } from "@/data/sandbox/krankenkassenCatalog";
 const PROVIDER_ID = "prov-1";
 
 /**
- * Feste Rechnungs-Zielbrutto über die Sandbox-Fälle: linear zwischen SANDBOX_BILLING_INVOICE_MIN_EUR und SANDBOX_BILLING_INVOICE_MAX_EUR
- * (Konstanten in `./billingCases`, Index `sandboxBillingTargetEuroForCaseIndex(0 … SANDBOX_BILLING_CASE_COUNT − 1)`).
- * Positionsbetraege stammen nur aus dem KBV-EBM-Katalog (`src/data/ebm-catalog-2026-q2.json`) bzw. GOÄ `goae-catalog-v2`
- * mit Punktwert wie GOÄ-Regelengine (`sandboxTariff.ts`); GKV → EBM, PKV und Selbstzahler → GOÄ.
+ * Feste Rechnungs-Zielbrutto für GOÄ-Pfad/Finalize analog `./billingCases` (linear über Fallindex).
+ * EBM-Zeilen sind Katalog-/Engine-nah ohne „Zielsummen-Filler“ (siehe `finalizeEbmSandboxLines`).
+ *
+ * Seed: 50 Szenarien (`sandboxScenarioCatalog`) — 40 mit Rechnung (Board/Doku-Flow), 10 Reserve-Entwürfe
+ * für „Testdaten generieren“. Patient und Billing-Vorlage je Zeile koppelbar für Feintuning.
  */
 
 /**
- * Kostenträger-Mix im Seed-Stammdatenpool (~30 Personen; Zyklus von 10 Indizes):
+ * Kostenträger-Mix im Seed-Stammdatenpool (50 Personen; Zyklus von 10 Indizes):
  *
  * | Anteil | Typ |
  * |--------|-----|
@@ -85,6 +91,36 @@ const FIRST = [
   "Niklas",
   "Vanessa",
   "Patrick",
+  "Charles",
+  "Charlotte",
+  "Karl",
+  "Karla",
+  "Carlo",
+  "Carla",
+  "Charlie",
+  "Charlene",
+  "Carlos",
+  "Carlotta",
+  "Kalle",
+  "Klara",
+  "Arthur",
+  "Alice",
+  "Henry",
+  "Henriette",
+  "George",
+  "Georgia",
+  "Louis",
+  "Louise",
+  "Anton",
+  "Antonia",
+  "Emil",
+  "Emilia",
+  "Paul",
+  "Paula",
+  "Oscar",
+  "Oona",
+  "Theo",
+  "Thea",
 ];
 
 const SEED_CITIES = [
@@ -96,6 +132,12 @@ const SEED_CITIES = [
   "Linden",
   "Bergheim",
   "Seerhausen",
+  "Kitzbühl",
+  "Mingaoida",
+  "Rülzheim",
+  "Lahr",
+  "Schwarzerwald",
+  "Ammerland",
 ] as const;
 
 const LAST = [
@@ -129,6 +171,36 @@ const LAST = [
   "Schulze",
   "Maier",
   "Köhler",
+  "Fischer",
+  "Wagner",
+  "Becker",
+  "Hoffmann",
+  "Schulz",
+  "Koch",
+  "Richter",
+  "Klein",
+  "Wolf",
+  "Schröder",
+  "Neumann",
+  "Schwarz",
+  "Zimmermann",
+  "Braun",
+  "Krüger",
+  "Hofmann",
+  "Hartmann",
+  "Lange",
+  "Schmitt",
+  "Werner",
+  "Schmitz",
+  "Krause",
+  "Meier",
+  "Lehmann",
+  "Schmid",
+  "Müller",
+  "Maier",
+  "Köhler",
+  "Herrmann",
+  "König",
 ];
 
 function isoDaysAgo(days: number): string {
@@ -182,12 +254,13 @@ function sandboxSeedEmail(
   return `${first}+${ymd}@${domain}`;
 }
 
-function statusForInvoiceIndex(i: number): InvoiceStatus {
-  if (i < 8) return "proposed";
-  if (i < 13) return "approved";
-  if (i < 33) return "sent";
-  if (i < 42) return "paid";
-  if (i < 45) return "appealed";
+/** Statusverteilung für die 40 sichtbaren Rechnungen (~anteilig wie früher bei 48). */
+function statusForVisibleInvoiceIndex(i: number): InvoiceStatus {
+  if (i < 7) return "proposed";
+  if (i < 11) return "approved";
+  if (i < 28) return "sent";
+  if (i < 36) return "paid";
+  if (i < 38) return "appealed";
   return "denied";
 }
 
@@ -217,10 +290,10 @@ function enrichTimeline(st: InvoiceStatus, base: TimelineEntry[]): TimelineEntry
   return t;
 }
 
-/** Kanonischer Stammdaten-Pool (~30 Personen); IDs stabil für LocalStorage-Reparatur. */
+/** Kanonischer Stammdaten-Pool (50 Personen); IDs stabil für LocalStorage-Reparatur. */
 export function buildSandboxSeedPatients(): SandboxPatient[] {
   const patients: SandboxPatient[] = [];
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < SANDBOX_SCENARIO_COUNT; i++) {
     const ins = insuranceForIndex(i);
     const id = `sb-pat-${String(i + 1).padStart(2, "0")}`;
     const plz = String(10000 + ((i * 137) % 89999)).padStart(5, "0");
@@ -262,16 +335,14 @@ export function buildSandboxSeed(): SandboxSeedState {
   const documentations: SandboxDocumentation[] = [];
   const invoices: SandboxInvoice[] = [];
 
-  const NUM_INVOICED_DOCS = 48;
-  const NUM_DRAFT_ONLY = 10;
-  const TOTAL_DOCS = NUM_INVOICED_DOCS + NUM_DRAFT_ONLY;
 
-  for (let i = 0; i < TOTAL_DOCS; i++) {
+  for (let i = 0; i < SANDBOX_SCENARIO_COUNT; i++) {
     const docId = `sb-doc-${String(i + 1).padStart(3, "0")}`;
-    const patient = patients[i % patients.length]!;
-    const case_ = BILLING_CASES[i % BILLING_CASES.length]!;
+    const row = SANDBOX_SCENARIO_ROWS[i]!;
+    const patient = patients[row.patient_index % patients.length]!;
+    const case_ = BILLING_CASES[row.billing_case_index % BILLING_CASES.length]!;
     const days = (i * 17 + 3) % 90;
-    const isDraft = i >= NUM_INVOICED_DOCS;
+    const isReserveDraft = i >= SANDBOX_VISIBLE_SCENARIO_COUNT;
 
     const doc: SandboxDocumentation = {
       id: docId,
@@ -283,14 +354,14 @@ export function buildSandboxSeed(): SandboxSeedState {
       findings: case_.documentation.findings,
       diagnosis_text: case_.documentation.diagnosis_text,
       therapy: case_.documentation.therapy,
-      status: isDraft ? "draft" : docStatusForInvoice(statusForInvoiceIndex(i)),
+      status: isReserveDraft ? "draft" : docStatusForInvoice(statusForVisibleInvoiceIndex(i)),
       case_id: case_.id,
       created_at: new Date(Date.now() - days * 86400000).toISOString(),
     };
     documentations.push(doc);
 
-    if (!isDraft) {
-      const st = statusForInvoiceIndex(i);
+    if (!isReserveDraft) {
+      const st = statusForVisibleInvoiceIndex(i);
       const invId = `sb-inv-${String(i + 1).padStart(3, "0")}`;
       let inv = invoiceFromCase(invId, docId, patient.id, case_, st, patient.insurance_type);
       inv = { ...inv, timeline: enrichTimeline(st, inv.timeline) };

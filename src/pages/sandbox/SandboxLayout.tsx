@@ -1,5 +1,16 @@
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { LayoutGrid } from "lucide-react";
 import { useSandbox } from "@/lib/sandbox/sandboxStore";
@@ -7,7 +18,13 @@ import DocBillLogo from "@/assets/DocBill-Logo.svg";
 
 export default function SandboxLayout() {
   const { pathname } = useLocation();
-  const { state } = useSandbox();
+  const { state, reset } = useSandbox();
+  const [resetOpen, setResetOpen] = useState(false);
+
+  const confirmReset = () => {
+    reset();
+    setResetOpen(false);
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
@@ -28,16 +45,29 @@ export default function SandboxLayout() {
               </p>
             </div>
 
-            <p className="inline-flex flex-wrap items-center justify-center gap-x-0 row-gap-0.5 text-sm text-muted-foreground shrink-0 text-center px-3 py-1.5 rounded-xl border border-border bg-background shadow-md justify-self-center self-center">
-              <span className="font-medium text-foreground">Sandbox</span>
-              <span className="mx-1.5 opacity-70">|</span>
+            <div className="inline-flex max-w-full shrink-0 flex-wrap items-center justify-center gap-x-1.5 gap-y-1 whitespace-normal px-3 py-1.5 text-center text-sm text-muted-foreground rounded-xl border border-border bg-background shadow-md justify-self-center self-center">
+              <span className="font-medium text-foreground whitespace-nowrap">Sandbox</span>
+              <span className="opacity-70 select-none" aria-hidden>
+                |
+              </span>
+              <button
+                type="button"
+                onClick={() => setResetOpen(true)}
+                title="Lädt den Demo-Startzustand neu (lokal)"
+                className="whitespace-nowrap text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md ring-offset-background bg-transparent border-0 p-0 cursor-pointer text-sm font-inherit"
+              >
+                Daten zurücksetzen
+              </button>
+              <span className="opacity-70 select-none" aria-hidden>
+                |
+              </span>
               <Link
                 to="/"
-                className="text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md ring-offset-background"
+                className="whitespace-nowrap text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md ring-offset-background"
               >
                 Zurück zur Website
               </Link>
-            </p>
+            </div>
 
             <div className="justify-self-end flex items-center gap-2 flex-wrap self-center">
               <NavLink
@@ -61,6 +91,22 @@ export default function SandboxLayout() {
           </div>
         </div>
       </header>
+
+      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Demo-Daten zurücksetzen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Alle Demo-Patienten, Dokumentationen und Rechnungen werden verworfen und der Seed-Zustand neu geladen.
+              Es erfolgt keine echte Datenübermittlung.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmReset}>Daten zurücksetzen</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <main id="sandbox-main" className="flex-1 w-full max-w-[1600px] mx-auto px-4 md:px-6 py-6 overflow-auto">
         <Outlet />

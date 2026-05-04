@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,7 @@ import {
   type SandboxProvider,
 } from "@/lib/sandbox/types";
 import { BILLING_CASES } from "@/lib/sandbox/billingCases";
+import { randomReserveScenarioIndex, SANDBOX_SCENARIO_ROWS } from "@/lib/sandbox/sandboxScenarioCatalog";
 import { cn } from "@/lib/utils";
 import { FileText, Upload, Wand2 } from "lucide-react";
 import {
@@ -323,6 +324,9 @@ export default function SandboxNewDocPage() {
   const navigate = useNavigate();
   const { state, upsertPatient, upsertProvider, addDocumentation } = useSandbox();
 
+  /** Nach „Testdaten generieren“: nächste gespeicherte Doku erhält diese `case_id` (Abrechnung = Kurator-Fall). */
+  const billingCaseIdFromGeneratorRef = useRef<string | null>(null);
+
   const [patientNameInput, setPatientNameInput] = useState("");
   const [patientSuggestOpen, setPatientSuggestOpen] = useState(false);
   const [dob, setDob] = useState("");
@@ -529,8 +533,11 @@ export default function SandboxNewDocPage() {
   }, [matchedPatientByExactName, state.patients, hydratePatientFormFromSandboxPatient]);
 
   const fillTestData = useCallback(() => {
-    const c = BILLING_CASES[Math.floor(Math.random() * BILLING_CASES.length)]!;
-    const p = state.patients[Math.floor(Math.random() * state.patients.length)]!;
+    const si = randomReserveScenarioIndex();
+    const row = SANDBOX_SCENARIO_ROWS[si]!;
+    const c = BILLING_CASES[row.billing_case_index % BILLING_CASES.length]!;
+    const p = state.patients[row.patient_index % state.patients.length]!;
+    billingCaseIdFromGeneratorRef.current = c.id;
     setPatientNameInput(p.name);
     hydratePatientFormFromSandboxPatient(p);
     setDate(new Date().toISOString().slice(0, 10));
@@ -620,6 +627,9 @@ export default function SandboxNewDocPage() {
       Math.abs((patientId + date + diagnosisText).split("").reduce((a, ch) => ((a << 5) - a + ch.charCodeAt(0)) | 0, 0)) %
       BILLING_CASES.length;
     const caseFromHash = BILLING_CASES[idx]!.id;
+    const curatedCaseId = billingCaseIdFromGeneratorRef.current;
+    billingCaseIdFromGeneratorRef.current = null;
+    const case_id = curatedCaseId ?? caseFromHash;
     return {
       id: `sb-doc-${Date.now()}`,
       patient_id: patientId,
@@ -630,7 +640,7 @@ export default function SandboxNewDocPage() {
       findings: findings.trim(),
       diagnosis_text: diagnosisText.trim(),
       therapy: therapy.trim(),
-      case_id: caseFromHash,
+      case_id,
       created_at: new Date().toISOString(),
     };
   };
