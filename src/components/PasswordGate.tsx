@@ -1,26 +1,22 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const STORAGE_KEY = "docbill-sandbox-unlocked";
-
 function readExpectedPassword(): string {
-  const v = import.meta.env.VITE_APP_ACCESS_PASSWORD;
-  return typeof v === "string" ? v.trim() : "";
+  type GlobalWithPw = typeof globalThis & { __DOCBILL_ACCESS_PW?: unknown };
+  const fromHtml =
+    typeof globalThis !== "undefined" ? (globalThis as GlobalWithPw).__DOCBILL_ACCESS_PW : undefined;
+  const fromEnv = import.meta.env.VITE_APP_ACCESS_PASSWORD as unknown;
+  const raw = fromHtml !== undefined && fromHtml !== null ? fromHtml : fromEnv;
+  if (raw == null || raw === "") return "";
+  return String(raw).trim();
 }
 
-export function PasswordGate({ children }: { children: React.ReactNode }) {
+export function PasswordGate({ children }: { children: ReactNode }) {
   const expected = readExpectedPassword();
 
-  const [unlocked, setUnlocked] = useState(() => {
-    if (!expected) return true;
-    try {
-      return sessionStorage.getItem(STORAGE_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [unlocked, setUnlocked] = useState(() => !expected);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -32,11 +28,6 @@ export function PasswordGate({ children }: { children: React.ReactNode }) {
     e.preventDefault();
     setError(null);
     if (password === expected) {
-      try {
-        sessionStorage.setItem(STORAGE_KEY, "1");
-      } catch {
-        /* private mode etc. */
-      }
       setUnlocked(true);
       return;
     }

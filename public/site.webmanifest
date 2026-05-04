@@ -1,7 +1,7 @@
 {
   "name": "DocBill",
   "short_name": "DocBill",
-  "description": "DocBill – KI-Abrechnungsassistent für Augenheilkunde nach GOÄ",
+  "description": "DocBill – KI-Abrechnungsassistent",
   "icons": [
     {
       "src": "/favicon.svg",

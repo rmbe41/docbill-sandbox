@@ -13,6 +13,7 @@
     "ci:local": "npm run lint && npm run typecheck:ci && npm run format:check && npm run review-agent && npm run e2e",
     "verify:health": "node scripts/verify-health.mjs",
     "dev": "vite",
+    "dev:sandbox": "vite --port 8082",
     "supabase:login": "npx supabase login",
     "supabase:link": "npx supabase link",
     "supabase:deploy": "cp benchmarks/goae-engine-eval/cases/catalog-v2-exclusions.generated.json supabase/functions/benchmark-run/catalog-v2-exclusions.generated.json && npx supabase functions deploy goae-chat && npx supabase functions deploy process-background-job && npx supabase functions deploy purge-job-queue-pii && npx supabase functions deploy goae-credits && npx supabase functions deploy feedback && npx supabase functions deploy admin-context-upload && npx supabase functions deploy organisation-kommentar-upload && npx supabase functions deploy benchmark-run && npx supabase functions deploy delete-account && npx supabase functions deploy health && npx supabase functions deploy crawl-knowledge-base && npx supabase functions deploy beschluss-relevanz-run && npx supabase functions deploy kb-weekly-report",
