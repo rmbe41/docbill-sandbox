@@ -92,43 +92,27 @@ export function SandboxInvoiceSheet({
           </SheetHeader>
 
           {patient && (
-            <div className="px-6 pb-4 text-xs text-muted-foreground border-b border-border/60 space-y-1.5 leading-snug">
-              {(patient.street || patient.postal_code || patient.city) && (
-                <p>
-                  Adresse:{" "}
-                  {[patient.street, [patient.postal_code, patient.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
-                </p>
-              )}
-              {patient.phone && <p>Tel.: {patient.phone}</p>}
-              {patient.phone_alt && <p>Tel. alt.: {patient.phone_alt}</p>}
-              {patient.email && <p>E-Mail: {patient.email}</p>}
-              {patient.consent_status != null && (
-                <p>Einwilligung: {SANDBOX_CONSENT_LABEL[patient.consent_status]}</p>
-              )}
+            <div className="px-6 pb-4 border-b border-border/60 space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Persönliche Daten</p>
+              <div className="text-xs text-muted-foreground leading-snug space-y-1.5">
+                {(patient.street || patient.postal_code || patient.city) && (
+                  <p>
+                    Adresse:{" "}
+                    {[patient.street, [patient.postal_code, patient.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
+                  </p>
+                )}
+                {patient.phone && <p>Tel.: {patient.phone}</p>}
+                {patient.phone_alt && <p>Tel. alt.: {patient.phone_alt}</p>}
+                {patient.email && <p>E-Mail: {patient.email}</p>}
+                {patient.consent_status != null && (
+                  <p>Einwilligung: {SANDBOX_CONSENT_LABEL[patient.consent_status]}</p>
+                )}
+              </div>
             </div>
           )}
 
           <ScrollArea className="flex-1 px-6 py-4">
             <div className="space-y-4 text-sm">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1">Status</p>
-                <p>{SANDBOX_INVOICE_STATUS_LABEL[invoice.status]}</p>
-                {invoice.status === "sent" && invoice.sent_via && (
-                  <p className="text-xs text-muted-foreground mt-1">Versandweg: {invoice.sent_via}</p>
-                )}
-                {invoiceBoardTerminal(invoice) && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {terminalSubLabel(invoice) === "paid"
-                      ? "Bezahlt"
-                      : terminalSubLabel(invoice) === "denied"
-                        ? "Abgelehnt"
-                        : "Anfechtung"}
-                  </p>
-                )}
-              </div>
-
-              <Separator />
-
               {invoice.billing_basis === "statutory" ? (
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-2">EBM (GKV)</p>
@@ -163,6 +147,25 @@ export function SandboxInvoiceSheet({
               <Separator />
 
               <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Status</p>
+                <p>{SANDBOX_INVOICE_STATUS_LABEL[invoice.status]}</p>
+                {invoice.status === "sent" && invoice.sent_via && (
+                  <p className="text-xs text-muted-foreground mt-1">Versandweg: {invoice.sent_via}</p>
+                )}
+                {invoiceBoardTerminal(invoice) && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {terminalSubLabel(invoice) === "paid"
+                      ? "Bezahlt"
+                      : terminalSubLabel(invoice) === "denied"
+                        ? "Abgelehnt"
+                        : "Anfechtung"}
+                  </p>
+                )}
+              </div>
+
+              <Separator />
+
+              <div>
                 <p className="text-xs font-medium text-muted-foreground mb-2">Verlauf</p>
                 <ul className="space-y-2 text-xs">
                   {[...invoice.timeline].reverse().map((e, i) => (
@@ -190,7 +193,7 @@ export function SandboxInvoiceSheet({
             )}
             {invoice.status === "sent" && (
               <Button variant="outline" size="sm" onClick={() => setRevertOpen(true)}>
-                Zurück zur Freigabe…
+                Zurücksetzen zu Prüfung
               </Button>
             )}
             {invoiceBoardTerminal(invoice) && (

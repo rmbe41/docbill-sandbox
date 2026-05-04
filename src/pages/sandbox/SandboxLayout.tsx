@@ -29,9 +29,9 @@ export default function SandboxLayout() {
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-3">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
-            <div className="justify-self-start min-w-0 flex flex-col gap-1 self-start">
+        <div className="w-full px-4 md:px-6 lg:px-8 py-3">
+          <div className="grid grid-cols-1 gap-y-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-x-3">
+            <div className="justify-self-start min-w-0 flex flex-col gap-1">
               <Link
                 to="/sandbox/rechnungen"
                 className="shrink-0 inline-flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
@@ -45,31 +45,33 @@ export default function SandboxLayout() {
               </p>
             </div>
 
-            <div className="inline-flex max-w-full shrink-0 flex-wrap items-center justify-center gap-x-1.5 gap-y-1 whitespace-normal px-3 py-1.5 text-center text-sm text-muted-foreground rounded-xl border border-border bg-background shadow-md justify-self-center self-center">
-              <span className="font-medium text-foreground whitespace-nowrap">Sandbox</span>
-              <span className="opacity-70 select-none" aria-hidden>
-                |
-              </span>
-              <button
-                type="button"
-                onClick={() => setResetOpen(true)}
-                title="Lädt den Demo-Startzustand neu (lokal)"
-                className="whitespace-nowrap text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md ring-offset-background bg-transparent border-0 p-0 cursor-pointer text-sm font-inherit"
-              >
-                Daten zurücksetzen
-              </button>
-              <span className="opacity-70 select-none" aria-hidden>
-                |
-              </span>
-              <Link
-                to="/"
-                className="whitespace-nowrap text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md ring-offset-background"
-              >
-                Zurück zur Website
-              </Link>
+            <div className="justify-self-center row-start-2 sm:row-start-auto w-full sm:w-auto flex justify-center">
+              <div className="inline-flex max-w-full shrink-0 flex-wrap items-center justify-center gap-x-1.5 gap-y-1 whitespace-normal px-3 py-1.5 text-center text-sm text-muted-foreground rounded-xl border border-border bg-background shadow-sm">
+                <span className="font-medium text-foreground whitespace-nowrap">Sandbox</span>
+                <span className="opacity-70 select-none" aria-hidden>
+                  |
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setResetOpen(true)}
+                  title="Lädt den Demo-Startzustand neu (lokal)"
+                  className="whitespace-nowrap text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md ring-offset-background bg-transparent border-0 p-0 cursor-pointer text-sm font-inherit"
+                >
+                  Daten zurücksetzen
+                </button>
+                <span className="opacity-70 select-none" aria-hidden>
+                  |
+                </span>
+                <Link
+                  to="/"
+                  className="whitespace-nowrap text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md ring-offset-background"
+                >
+                  Zurück zur Website
+                </Link>
+              </div>
             </div>
 
-            <div className="justify-self-end flex items-center gap-2 flex-wrap self-center">
+            <div className="justify-self-end flex items-center gap-2 flex-wrap row-start-3 sm:row-start-auto sm:justify-self-end">
               <NavLink
                 to="/sandbox/rechnungen"
                 className={({ isActive }) =>
@@ -108,7 +110,7 @@ export default function SandboxLayout() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <main id="sandbox-main" className="flex-1 w-full max-w-[1600px] mx-auto px-4 md:px-6 py-6 overflow-auto">
+      <main id="sandbox-main" className="flex-1 w-full px-4 md:px-6 lg:px-8 py-6 overflow-auto">
         <Outlet />
       </main>
     </div>

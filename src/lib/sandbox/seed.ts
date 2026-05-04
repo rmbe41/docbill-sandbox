@@ -19,8 +19,8 @@ import { PKV_NAMES } from "@/data/sandbox/krankenkassenCatalog";
 const PROVIDER_ID = "prov-1";
 
 /**
- * Feste Rechnungs-Zielbrutto für GOÄ-Pfad/Finalize analog `./billingCases` (linear über Fallindex).
- * EBM-Zeilen sind Katalog-/Engine-nah ohne „Zielsummen-Filler“ (siehe `finalizeEbmSandboxLines`).
+ * Feste Rechnungs-Zielbrutto je Fallindex in `./billingCases` (linear MIN…MAX €).
+ * GKV/EBM und PKV/GOÄ werden beide Richtung Ziel ausgerichtet (`finalizeEbmToTarget` / `finalizeGoaeToTarget`).
  *
  * Seed: 50 Szenarien (`sandboxScenarioCatalog`) — 40 mit Rechnung (Board/Doku-Flow), 10 Reserve-Entwürfe
  * für „Testdaten generieren“. Patient und Billing-Vorlage je Zeile koppelbar für Feintuning.

@@ -203,12 +203,12 @@ export default function SandboxRechnungenPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 lg:relative lg:h-10 lg:w-full">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4 lg:w-full">
         <div className="flex items-center justify-between gap-3 lg:contents">
-          <h1 className="text-lg font-semibold tracking-tight lg:absolute lg:left-0 lg:top-1/2 lg:z-20 lg:-translate-y-1/2 lg:whitespace-nowrap">
+          <h1 className="text-lg font-semibold tracking-tight shrink-0 lg:whitespace-nowrap">
             Übersicht
           </h1>
-          <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5 lg:absolute lg:right-0 lg:top-1/2 lg:z-20 lg:-translate-y-1/2">
+          <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5 lg:ml-auto">
             <Select value={sortKey} onValueChange={(v) => setSortKey(v as BoardSortKey)}>
               <SelectTrigger className={subtleSelectTriggerSort} aria-label="Sortierung">
                 <SelectValue placeholder="Sortierung" />
@@ -278,7 +278,7 @@ export default function SandboxRechnungenPage() {
           </div>
         </div>
         <Input
-          className="h-10 w-full text-sm lg:absolute lg:left-1/2 lg:top-1/2 lg:z-10 lg:w-[min(32rem,calc(100%-16rem))] lg:-translate-x-1/2 lg:-translate-y-1/2"
+          className="h-10 w-full text-sm lg:flex-1 lg:min-w-[12rem] lg:max-w-none"
           placeholder="Suche: Name, Code, ID…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -287,7 +287,7 @@ export default function SandboxRechnungenPage() {
       </div>
 
       <ScrollArea className="w-full pb-3">
-        <div className="flex min-w-[920px] pb-2 rounded-lg border border-border/80 bg-background shadow-sm overflow-hidden divide-x divide-border/80">
+        <div className="flex min-w-0 w-full min-h-[280px] pb-2 rounded-lg border border-border/80 bg-background shadow-sm overflow-hidden divide-x divide-border/80">
           {COLS.map((col) => {
             const list = byCol[col.id] ?? [];
             const sum = colSum(list);

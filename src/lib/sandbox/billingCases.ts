@@ -13,6 +13,7 @@ import { billingBasisFromInsurance } from "./types";
 import { invoicePresentationPatch } from "./invoicePresentation";
 import { goaeV2CodeById } from "@/data/goae-catalog-v2";
 import {
+  finalizeEbmToTarget,
   finalizeEbmSandboxLines,
   finalizeGoaeToTarget,
   r2,
@@ -28,14 +29,14 @@ import {
 export const SANDBOX_BILLING_CASE_COUNT = 50;
 
 /** Untergrenze der festen Zieltabelle [€] für jeden Sandbox-Fall — EBM- und GOÄ-Spur werden hieran ausgerichtet */
-export const SANDBOX_BILLING_INVOICE_MIN_EUR = 75;
+export const SANDBOX_BILLING_INVOICE_MIN_EUR = 100;
 
-/** Obergrenze der festen Zieltabelle [€] */
-export const SANDBOX_BILLING_INVOICE_MAX_EUR = 5900;
+/** Obergrenze der festen Zieltabelle [€] — praxisnahe Spanne statt 75…5900 (sonst PKV/GOÄ fast alles >2k€) */
+export const SANDBOX_BILLING_INVOICE_MAX_EUR = 2400;
 
 /**
- * Feste Zieltabelle: Index 0 → 75 €, Index CASE_COUNT−1 → 5900 € (linear, gerundet).
- * Rechnungszeilen sind reine Katalogbeträge (`ebm-catalog-2026-q2`, `goae-catalog-v2` + Punktwert wie Regelengine).
+ * Feste Zieltabelle: Index 0 → MIN €, Index CASE_COUNT−1 → MAX € (linear, gerundet).
+ * EBM (GKV) und GOÄ (PKV/Selbst) werden beide Richtung Ziel aufgefüllt; Katalogbeträge (`ebm-catalog-2026-q2`, `goae-catalog-v2`).
  */
 export function sandboxBillingTargetEuroForCaseIndex(i: number): number {
   const n = SANDBOX_BILLING_CASE_COUNT;
@@ -607,9 +608,10 @@ export function buildBillingCases(): SandboxBillingCase[] {
           : serviceItemEbm(spec.gop, { quantity: spec.qty }),
       )
       .filter((x): x is ServiceItemEbm => Boolean(x));
-    const service_items_ebm = engineArt?.ebmVorschlaege?.length
+    const rawEbm = engineArt?.ebmVorschlaege?.length
       ? engineEbmVorschlaegeToSandboxItems(engineArt.ebmVorschlaege)
       : finalizeEbmSandboxLines(seedEbm);
+    const service_items_ebm = finalizeEbmToTarget(rawEbm, target);
 
     const goaeTpl = t.goaeLines.map((row) => ({ ...row }));
     if (i % 11 === 5 && goaeTpl.length > 0) {

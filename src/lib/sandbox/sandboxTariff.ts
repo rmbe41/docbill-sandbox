@@ -108,6 +108,78 @@ export function finalizeEbmSandboxLines(seedItems: readonly ServiceItemEbm[]): S
   );
 }
 
+function bundleAlreadyHasEbmCode(bundle: readonly string[], code: string): boolean {
+  return bundle.includes(code);
+}
+
+/** Zusatz-GOPs aus dem EBM-Katalog bis zur Ziel-Summe (wie GOÄ-Sandbox-Auffüller). */
+function appendEbmLinesTowardTarget(lines: readonly ServiceItemEbm[], targetEuro: number): ServiceItemEbm[] {
+  type MutableEbm = ServiceItemEbm;
+  const out: MutableEbm[] = [...lines];
+  let guard = 0;
+  while (sumEbm(out) + EPS < targetEuro && guard++ < 9000) {
+    const rem = targetEuro - sumEbm(out);
+    const bundle = out.map((w) => w.code);
+    let bestFit: ServiceItemEbm | null = null;
+    for (const row of SANDBOX_EBM_FILLERS_DESC) {
+      if (bundleAlreadyHasEbmCode(bundle, row.gop)) continue;
+      const item = serviceItemEbm(row.gop);
+      if (!item || (item.amount_eur ?? 0) > rem + EPS) continue;
+      if (!bestFit || (item.amount_eur ?? 0) > (bestFit.amount_eur ?? 0)) bestFit = item;
+    }
+    if (bestFit) {
+      out.push(bestFit);
+      continue;
+    }
+    let smallest: ServiceItemEbm | null = null;
+    for (const row of SANDBOX_EBM_FILLERS_ASC) {
+      if (bundleAlreadyHasEbmCode(bundle, row.gop)) continue;
+      const item = serviceItemEbm(row.gop);
+      if (!item) continue;
+      if (!smallest || (item.amount_eur ?? 0) < (smallest.amount_eur ?? 0)) smallest = item;
+    }
+    if (!smallest) break;
+    out.push(smallest);
+  }
+  return out;
+}
+
+/** Erhöht Mengen auf bereits geführten Zeilen, um Lücken bis ~Ziel zu schließen (nur wo Einheit passt). */
+function bumpEbmQuantitiesTowardTarget(lines: ServiceItemEbm[], targetEuro: number): void {
+  let guard = 0;
+  while (sumEbm(lines) + EPS < targetEuro && guard++ < 2000) {
+    const rem = targetEuro - sumEbm(lines);
+    let bestIdx = -1;
+    let bestUnit = Infinity;
+    for (let j = 0; j < lines.length; j++) {
+      const L = lines[j]!;
+      const q0 = L.quantity ?? 1;
+      const unit = q0 > 0 ? r2((L.amount_eur ?? 0) / q0) : 0;
+      if (unit <= 0 || unit > rem + EPS) continue;
+      if (unit < bestUnit) {
+        bestUnit = unit;
+        bestIdx = j;
+      }
+    }
+    if (bestIdx < 0) break;
+    const L = lines[bestIdx]!;
+    const q = (L.quantity ?? 1) + 1;
+    const unit = r2((L.amount_eur ?? 0) / (L.quantity ?? 1));
+    lines[bestIdx] = { ...L, quantity: q, amount_eur: r2(unit * q) };
+  }
+}
+
+/**
+ * EBM: Seed-/Engine-Zeilen sortiert lassen und mit Katalog-Fillern zur Sandbox-Zielsumme auffüllen
+ * (GKV sieht damit ähnliche Breite wie GOÄ/PKV).
+ */
+export function finalizeEbmToTarget(seedItems: readonly ServiceItemEbm[], targetEuro: number): ServiceItemEbm[] {
+  const sorted = finalizeEbmSandboxLines([...seedItems]);
+  const merged = appendEbmLinesTowardTarget(sorted, targetEuro);
+  bumpEbmQuantitiesTowardTarget(merged, targetEuro);
+  return finalizeEbmSandboxLines(merged);
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
